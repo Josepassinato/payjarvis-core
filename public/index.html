@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PayJarvis — Spending Firewall for AI Agents</title>
+<meta name="description" content="Control what your AI agents can spend. Set limits, approve purchases in real-time, and get Telegram alerts. Your bots never overspend again.">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%232563eb'/%3E%3Ctext x='16' y='22' text-anchor='middle' fill='white' font-size='18' font-family='system-ui' font-weight='700'%3EP%3C/text%3E%3C/svg%3E">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--brand:#2563eb;--brand-light:#2563eb;--brand-dark:#1d4ed8;--surface:#ffffff;--card:#f8fafc;--card-hover:#f1f5f9;--border:#e2e8f0;--text:#0f172a;--text-muted:#64748b;--green:#16a34a;--red:#dc2626;--yellow:#ca8a04}
+html{scroll-behavior:smooth}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--surface);color:var(--text);line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:inherit;text-decoration:none}
+
+/* NAV */
+.nav{position:fixed;top:0;left:0;right:0;z-index:50;backdrop-filter:blur(12px);background:rgba(255,255,255,.85);border-bottom:1px solid var(--border)}
+.nav-inner{max-width:1120px;margin:0 auto;padding:0 24px;height:64px;display:flex;align-items:center;justify-content:space-between}
+.logo{font-size:20px;font-weight:700;letter-spacing:-.02em;display:flex;align-items:center;gap:10px}
+.logo-mark{width:28px;height:28px;background:var(--brand);border-radius:6px;display:grid;place-items:center;font-size:15px;font-weight:800;color:#fff}
+.nav-links{display:flex;gap:32px;align-items:center}
+.nav-links a{font-size:14px;color:var(--text-muted);transition:color .2s}
+.nav-links a:hover{color:var(--text)}
+.btn{display:inline-flex;align-items:center;justify-content:center;padding:10px 20px;border-radius:8px;font-size:14px;font-weight:600;transition:all .15s;cursor:pointer;border:none}
+.btn-primary{background:var(--brand);color:#fff}
+.btn-primary:hover{background:var(--brand-light);transform:translateY(-1px)}
+.btn-ghost{background:transparent;color:var(--text);border:1px solid var(--border)}
+.btn-ghost:hover{border-color:#94a3b8;background:var(--card)}
+.btn-sm{padding:7px 16px;font-size:13px}
+
+/* HERO */
+.hero{padding:140px 24px 80px;text-align:center;position:relative;overflow:hidden}
+.hero::before{content:'';position:absolute;top:-200px;left:50%;transform:translateX(-50%);width:800px;height:600px;background:radial-gradient(ellipse,rgba(37,99,235,.06) 0%,transparent 70%);pointer-events:none}
+.hero-badge{display:inline-flex;align-items:center;gap:8px;padding:6px 16px;border-radius:100px;border:1px solid var(--border);font-size:13px;color:var(--text-muted);margin-bottom:24px;background:#fff}
+.hero-badge .dot{width:6px;height:6px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.hero h1{font-size:clamp(36px,5.5vw,64px);font-weight:800;letter-spacing:-.03em;line-height:1.1;max-width:780px;margin:0 auto 20px}
+.hero h1 .gradient{background:linear-gradient(135deg,var(--brand),#7c3aed);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.hero p{font-size:18px;color:var(--text-muted);max-width:540px;margin:0 auto 36px;line-height:1.7}
+.hero-buttons{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+
+/* STATS */
+.stats{display:flex;justify-content:center;gap:48px;padding:48px 24px;flex-wrap:wrap}
+.stat{text-align:center}
+.stat-value{font-size:32px;font-weight:800;letter-spacing:-.02em}
+.stat-value.blue{color:var(--brand)}
+.stat-value.red{color:var(--red)}
+.stat-value.green{color:var(--green)}
+.stat-label{font-size:13px;color:var(--text-muted);margin-top:4px}
+
+/* SECTION */
+.section{padding:80px 24px}
+.section-inner{max-width:1120px;margin:0 auto}
+.section-label{font-size:13px;font-weight:600;color:var(--brand);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px}
+.section-title{font-size:clamp(28px,3.5vw,40px);font-weight:800;letter-spacing:-.02em;margin-bottom:16px}
+.section-desc{font-size:16px;color:var(--text-muted);max-width:560px;line-height:1.7}
+
+/* PROBLEM */
+.problem-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px;margin-top:48px}
+.problem-card{background:#fff;border:1px solid var(--border);border-radius:12px;padding:28px;transition:border-color .2s}
+.problem-card:hover{border-color:var(--brand)}
+.problem-icon{width:40px;height:40px;border-radius:10px;display:grid;place-items:center;font-size:18px;margin-bottom:16px}
+.problem-card h3{font-size:16px;font-weight:700;margin-bottom:8px}
+.problem-card p{font-size:14px;color:var(--text-muted);line-height:1.6}
+
+/* HOW IT WORKS */
+.steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:1px;margin-top:48px;background:var(--border);border-radius:12px;overflow:hidden}
+.step{background:#fff;padding:32px 28px;position:relative}
+.step-num{font-size:48px;font-weight:900;color:var(--brand);opacity:.15;line-height:1;margin-bottom:12px}
+.step h3{font-size:16px;font-weight:700;margin-bottom:8px}
+.step p{font-size:14px;color:var(--text-muted);line-height:1.6}
+
+/* CODE BLOCK */
+.code-section{display:grid;grid-template-columns:1fr 1fr;gap:48px;align-items:center;margin-top:48px}
+.code-block{background:#1e293b;border:1px solid #334155;border-radius:12px;overflow:hidden;font-family:'SF Mono',Consolas,monospace;font-size:13px;line-height:1.7}
+.code-header{padding:12px 16px;border-bottom:1px solid #334155;display:flex;align-items:center;gap:8px}
+.code-dot{width:10px;height:10px;border-radius:50%;background:#475569}
+.code-body{padding:20px;overflow-x:auto;color:#cbd5e1}
+.code-body .kw{color:#c084fc}
+.code-body .fn{color:#60a5fa}
+.code-body .str{color:#4ade80}
+.code-body .cm{color:#64748b}
+.code-body .num{color:#fbbf24}
+
+/* FEATURES */
+.features-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:20px;margin-top:48px}
+.feature{background:#fff;border:1px solid var(--border);border-radius:12px;padding:28px}
+.feature-header{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+.feature-icon{width:36px;height:36px;border-radius:8px;background:rgba(37,99,235,.12);display:grid;place-items:center;font-size:16px;flex-shrink:0}
+.feature h3{font-size:15px;font-weight:700}
+.feature p{font-size:14px;color:var(--text-muted);line-height:1.6}
+
+/* CTA */
+.cta{text-align:center;padding:100px 24px;position:relative}
+.cta::before{content:'';position:absolute;bottom:0;left:50%;transform:translateX(-50%);width:600px;height:400px;background:radial-gradient(ellipse,rgba(37,99,235,.04) 0%,transparent 70%);pointer-events:none}
+.cta h2{font-size:clamp(28px,4vw,44px);font-weight:800;letter-spacing:-.02em;margin-bottom:16px}
+.cta p{font-size:16px;color:var(--text-muted);max-width:480px;margin:0 auto 32px}
+
+/* FOOTER */
+.footer{border-top:1px solid var(--border);padding:40px 24px}
+.footer-inner{max-width:1120px;margin:0 auto;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px}
+.footer-copy{font-size:13px;color:var(--text-muted)}
+.footer-links{display:flex;gap:24px}
+.footer-links a{font-size:13px;color:var(--text-muted);transition:color .2s}
+.footer-links a:hover{color:var(--text)}
+
+/* RESPONSIVE */
+@media(max-width:768px){
+  .nav-links .desk{display:none}
+  .code-section{grid-template-columns:1fr}
+  .stats{gap:32px}
+  .hero{padding:120px 20px 60px}
+}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="/" class="logo">
+      <div class="logo-mark">P</div>
+      PayJarvis
+    </a>
+    <div class="nav-links">
+      <a href="#how-it-works" class="desk">How it works</a>
+      <a href="#features" class="desk">Features</a>
+      <a href="#developers" class="desk">Developers</a>
+      <a href="/dashboard" class="btn btn-ghost btn-sm">Dashboard</a>
+      <a href="/dashboard" class="btn btn-primary btn-sm">Get started</a>
+    </div>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-badge"><span class="dot"></span> Protecting AI agent owners in production</div>
+  <h1>Control what your <span class="gradient">AI agents</span> can spend</h1>
+  <p>Set limits, approve purchases in real-time, get Telegram alerts. Your bots never overspend again.</p>
+  <div class="hero-buttons">
+    <a href="/dashboard" class="btn btn-primary">Set up your firewall</a>
+    <a href="#developers" class="btn btn-ghost">View docs</a>
+  </div>
+</section>
+
+<!-- STATS -->
+<div class="stats">
+  <div class="stat">
+    <div class="stat-value red">68%</div>
+    <div class="stat-label">AI agents run unsupervised</div>
+  </div>
+  <div class="stat">
+    <div class="stat-value blue">&lt;2s</div>
+    <div class="stat-label">Telegram alert response time</div>
+  </div>
+  <div class="stat">
+    <div class="stat-value green">$0</div>
+    <div class="stat-label">Unauthorized spending with PayJarvis</div>
+  </div>
+  <div class="stat">
+    <div class="stat-value blue">100%</div>
+    <div class="stat-label">Purchases tracked & controlled</div>
+  </div>
+</div>
+
+<!-- PROBLEM -->
+<section class="section" style="border-top:1px solid var(--border)">
+  <div class="section-inner">
+    <div class="section-label">The problem</div>
+    <div class="section-title">Your AI agents are spending money. Are you in control?</div>
+    <div class="section-desc">AI agents book flights, order supplies, and pay for services. Without guardrails, one runaway bot can drain your budget overnight.</div>
+    <div class="problem-grid">
+      <div class="problem-card">
+        <div class="problem-icon" style="background:rgba(239,68,68,.12)">&#x1f4b8;</div>
+        <h3>Overspending</h3>
+        <p>Without per-purchase limits, a single misconfigured agent can blow through your entire monthly budget in hours.</p>
+      </div>
+      <div class="problem-card">
+        <div class="problem-icon" style="background:rgba(234,179,8,.12)">&#x1f515;</div>
+        <h3>No alerts</h3>
+        <p>You find out about unexpected purchases days later when checking your bank statement. By then, it's too late.</p>
+      </div>
+      <div class="problem-card">
+        <div class="problem-icon" style="background:rgba(37,99,235,.12)">&#x1f39b;&#xfe0f;</div>
+        <h3>No per-purchase control</h3>
+        <p>All-or-nothing access: your bot can either spend freely or not at all. There's no middle ground for approval workflows.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section class="section" id="how-it-works" style="border-top:1px solid var(--border)">
+  <div class="section-inner">
+    <div class="section-label">How it works</div>
+    <div class="section-title">Three steps to controlled AI spending</div>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">01</div>
+        <h3>Register your bot</h3>
+        <p>Create a bot in the dashboard. Set per-purchase limits, daily budgets, and auto-approval thresholds in under 2 minutes.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">02</div>
+        <h3>Set spending limits</h3>
+        <p>Define exactly how much your agent can spend per transaction, per day, and per month. Small purchases auto-approve; big ones wait for you.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">03</div>
+        <h3>Get alerts, approve in real-time</h3>
+        <p>When your bot wants to make a purchase above your threshold, you get a Telegram alert. Approve or reject with one tap.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- DEVELOPERS -->
+<section class="section" id="developers" style="border-top:1px solid var(--border)">
+  <div class="section-inner">
+    <div class="section-label">For developers</div>
+    <div class="section-title">Add spending control in 5 lines</div>
+    <div class="code-section">
+      <div>
+        <p style="font-size:15px;color:var(--text-muted);line-height:1.7;margin-bottom:20px">Install the agent SDK in your bot. Every purchase request goes through PayJarvis — approved instantly if within limits, or held for your approval.</p>
+        <p style="font-size:15px;color:var(--text-muted);line-height:1.7;margin-bottom:20px">Your bot gets a clear yes/no before spending. You get full visibility and control from your phone via Telegram.</p>
+        <a href="/dashboard" class="btn btn-primary" style="margin-top:8px">Get your API key</a>
+      </div>
+      <div class="code-block">
+        <div class="code-header">
+          <div class="code-dot"></div>
+          <div class="code-dot"></div>
+          <div class="code-dot"></div>
+          <span style="margin-left:8px;font-size:12px;color:var(--text-muted)">agent.js</span>
+        </div>
+        <div class="code-body"><pre><span class="kw">import</span> { <span class="fn">PayJarvis</span> } <span class="kw">from</span> <span class="str">'@payjarvis/agent-sdk'</span>;
+
+<span class="kw">const</span> pj = <span class="kw">new</span> <span class="fn">PayJarvis</span>({
+  apiKey: <span class="str">'pj_bot_...'</span>,
+  botId:  <span class="str">'your-bot-id'</span>,
+});
+
+<span class="cm">// Before any purchase:</span>
+<span class="kw">const</span> decision = <span class="kw">await</span> pj.<span class="fn">requestApproval</span>({
+  merchant: <span class="str">'Amazon'</span>,
+  amount:   <span class="num">49.99</span>,
+  category: <span class="str">'shopping'</span>,
+});
+
+<span class="kw">if</span> (decision.approved) {
+  <span class="fn">completePurchase</span>(decision.bditToken);
+} <span class="kw">else if</span> (decision.pending) {
+  <span class="cm">// Owner will be notified on Telegram</span>
+  <span class="kw">const</span> final = <span class="kw">await</span> pj.<span class="fn">waitForApproval</span>(decision.approvalId);
+}</pre></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section class="section" id="features" style="border-top:1px solid var(--border)">
+  <div class="section-inner">
+    <div class="section-label">Features</div>
+    <div class="section-title">Everything you need to control AI spending</div>
+    <div class="features-grid">
+      <div class="feature">
+        <div class="feature-header">
+          <div class="feature-icon">&#x2705;</div>
+          <h3>Per-purchase approval</h3>
+        </div>
+        <p>Every purchase request goes through your rules. Auto-approve small amounts, require manual approval for large ones. You decide the threshold.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-header">
+          <div class="feature-icon">&#x1f4b0;</div>
+          <h3>Spending limits</h3>
+        </div>
+        <p>Per-transaction, daily, weekly, and monthly limits. Your bot physically cannot exceed the budget you set — the payment gets blocked.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-header">
+          <div class="feature-icon">&#x1f4e8;</div>
+          <h3>Telegram alerts</h3>
+        </div>
+        <p>Get instant notifications when your bot wants to buy something expensive. Approve or reject from your phone in seconds.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-header">
+          <div class="feature-icon">&#x1f4ca;</div>
+          <h3>Full audit trail</h3>
+        </div>
+        <p>Every transaction, approval, and rejection is logged. See exactly what your agents spent, where, and when. Export anytime.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-header">
+          <div class="feature-icon">&#x1f9e9;</div>
+          <h3>Agent SDK</h3>
+        </div>
+        <p>Drop-in SDK for your AI agent. 5 lines of code to add spending controls. Works with any LLM framework or custom bot.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-header">
+          <div class="feature-icon">&#x26a1;</div>
+          <h3>Auto-approve rules</h3>
+        </div>
+        <p>Small purchases go through instantly. Only purchases above your threshold trigger an approval request. No friction for everyday spending.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="cta">
+  <h2>Stop your bots from overspending</h2>
+  <p>Join the AI agent owners already controlling their bot spending with PayJarvis. Free tier available.</p>
+  <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+    <a href="/dashboard" class="btn btn-primary">Create free account</a>
+    <a href="#developers" class="btn btn-ghost">Read the docs</a>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer class="footer">
+  <div class="footer-inner">
+    <div class="footer-copy">&copy; 2026 PayJarvis. Spending firewall for AI agents.</div>
+    <div class="footer-links">
+      <a href="/dashboard">Dashboard</a>
+      <a href="#developers">Docs</a>
+      <a href="mailto:contact@payjarvis.com">Contact</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

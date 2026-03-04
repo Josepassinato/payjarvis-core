@@ -1,0 +1,29 @@
+# PayJarvis Shopify App Configuration
+# Verifica BDIT tokens de bots AI no checkout
+
+name = "PayJarvis"
+client_id = "${SHOPIFY_CLIENT_ID}"
+
+[access_scopes]
+scopes = "read_orders,write_orders,read_checkouts,write_checkouts"
+
+[auth]
+redirect_urls = [
+  "https://api.payjarvis.com/shopify/callback",
+  "http://localhost:4000/shopify/callback"
+]
+
+[webhooks]
+api_version = "2024-10"
+
+  [[webhooks.subscriptions]]
+  topics = ["orders/create"]
+  uri = "https://api.payjarvis.com/shopify/webhooks/orders-create"
+
+[pos]
+embedded = false
+
+[[extensions]]
+name = "payjarvis-checkout"
+type = "checkout_ui_extension"
+handle = "payjarvis-checkout"

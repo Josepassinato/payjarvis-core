@@ -1,0 +1,14 @@
+api_version = "2024-10"
+
+[[extensions]]
+name = "PayJarvis Checkout Verification"
+handle = "payjarvis-checkout"
+type = "checkout_ui_extension"
+
+  [extensions.capabilities]
+  network_access = true
+  block_progress = true
+
+  [[extensions.targeting]]
+  module = "./src/Checkout.tsx"
+  target = "purchase.checkout.block.render"

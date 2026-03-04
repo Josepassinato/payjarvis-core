@@ -1,0 +1,22 @@
+{
+  "name": "@payjarvis/bdit",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "generate-keys": "ts-node src/generate-keys.ts",
+    "lint": "echo 'no lint configured'"
+  },
+  "dependencies": {
+    "jose": "^5.9.0",
+    "@payjarvis/types": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0",
+    "ts-node": "^10.9.0",
+    "@types/node": "^20.0.0"
+  }
+}

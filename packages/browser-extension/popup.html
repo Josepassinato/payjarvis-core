@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      width: 360px;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #fafafa;
+      color: #1a1a1a;
+    }
+    .header {
+      background: linear-gradient(135deg, #1e40af, #3b82f6);
+      color: white;
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .header h1 { font-size: 16px; font-weight: 600; }
+    .header .version { font-size: 11px; opacity: 0.7; }
+    .section {
+      padding: 16px 20px;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    .section h2 {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #6b7280;
+      margin-bottom: 10px;
+    }
+    .field { margin-bottom: 10px; }
+    .field label {
+      display: block;
+      font-size: 12px;
+      font-weight: 500;
+      margin-bottom: 4px;
+      color: #374151;
+    }
+    .field input {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      font-size: 13px;
+      outline: none;
+    }
+    .field input:focus {
+      border-color: #3b82f6;
+      box-shadow: 0 0 0 2px rgba(59,130,246,0.2);
+    }
+    .toggle {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 0;
+    }
+    .toggle label { font-size: 13px; font-weight: 500; }
+    .switch {
+      position: relative;
+      width: 40px;
+      height: 22px;
+    }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute;
+      inset: 0;
+      background: #d1d5db;
+      border-radius: 11px;
+      cursor: pointer;
+      transition: 0.2s;
+    }
+    .slider::before {
+      content: "";
+      position: absolute;
+      width: 18px;
+      height: 18px;
+      left: 2px;
+      bottom: 2px;
+      background: white;
+      border-radius: 50%;
+      transition: 0.2s;
+    }
+    .switch input:checked + .slider { background: #3b82f6; }
+    .switch input:checked + .slider::before { transform: translateX(18px); }
+    .btn {
+      width: 100%;
+      padding: 10px;
+      background: #1e40af;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    .btn:hover { background: #1d4ed8; }
+    .status {
+      text-align: center;
+      padding: 8px;
+      border-radius: 6px;
+      font-size: 12px;
+      margin-top: 8px;
+    }
+    .status.ok { background: #dcfce7; color: #15803d; }
+    .status.error { background: #fef2f2; color: #dc2626; }
+    .notifications { max-height: 200px; overflow-y: auto; }
+    .notif-item {
+      padding: 8px 0;
+      border-bottom: 1px solid #f3f4f6;
+      font-size: 12px;
+    }
+    .notif-item .title { font-weight: 600; }
+    .notif-item .time { color: #9ca3af; font-size: 11px; }
+    .empty { color: #9ca3af; font-size: 12px; text-align: center; padding: 12px; }
+    .platforms {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .platform-tag {
+      padding: 3px 8px;
+      background: #eff6ff;
+      color: #1e40af;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 500;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <h1>PayJarvis</h1>
+      <span class="version">v1.0.0 — AI Payment Guard</span>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="toggle">
+      <label>Proteção ativa</label>
+      <label class="switch">
+        <input type="checkbox" id="enabled" checked>
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div class="platforms">
+      <span class="platform-tag">Amazon</span>
+      <span class="platform-tag">Hotels.com</span>
+      <span class="platform-tag">Expedia</span>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Configuração</h2>
+    <div class="field">
+      <label>Bot ID</label>
+      <input type="text" id="botId" placeholder="bot_abc123">
+    </div>
+    <div class="field">
+      <label>Bot API Key</label>
+      <input type="password" id="botApiKey" placeholder="sk_bot_...">
+    </div>
+    <div class="field">
+      <label>API URL</label>
+      <input type="url" id="apiUrl" placeholder="https://api.payjarvis.com">
+    </div>
+    <button class="btn" id="saveBtn">Salvar</button>
+    <div id="status" class="status" style="display:none;"></div>
+  </div>
+
+  <div class="section">
+    <h2>Notificações recentes</h2>
+    <div id="notifications" class="notifications">
+      <div class="empty">Nenhuma notificação</div>
+    </div>
+  </div>
+
+  <script src="dist/popup/popup.js"></script>
+</body>
+</html>

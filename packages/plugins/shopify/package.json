@@ -1,0 +1,13 @@
+{
+  "name": "@payjarvis/shopify-extension",
+  "version": "1.0.0",
+  "private": true,
+  "description": "PayJarvis Shopify Checkout Extension — verifica BDIT tokens de bots AI",
+  "scripts": {
+    "build": "echo 'Shopify extensions are built via shopify CLI'",
+    "lint": "echo 'no lint configured'"
+  },
+  "dependencies": {
+    "@shopify/ui-extensions-react": "2024.10.x"
+  }
+}

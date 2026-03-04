@@ -1,0 +1,298 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ─── Enums ───
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  PENDING_KYC
+}
+
+enum KycLevel {
+  NONE
+  BASIC
+  VERIFIED
+  ENHANCED
+}
+
+enum BotStatus {
+  ACTIVE
+  PAUSED
+  REVOKED
+}
+
+enum BotPlatform {
+  TELEGRAM
+  DISCORD
+  WHATSAPP
+  SLACK
+  CUSTOM_API
+}
+
+enum BditTokenStatus {
+  ISSUED
+  USED
+  EXPIRED
+  REVOKED
+}
+
+enum TransactionDecision {
+  APPROVED
+  BLOCKED
+  PENDING_HUMAN
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+}
+
+enum HandoffObstacle {
+  CAPTCHA
+  AUTH
+  NAVIGATION
+  OTHER
+}
+
+enum HandoffStatus {
+  PENDING
+  IN_PROGRESS
+  RESOLVED
+  EXPIRED
+  CANCELLED
+}
+
+enum MerchantPlan {
+  FREE
+  STARTER
+  PRO
+  ENTERPRISE
+}
+
+enum MerchantStatus {
+  ACTIVE
+  SUSPENDED
+  PENDING_REVIEW
+}
+
+// ─── Models ───
+
+model User {
+  id                  String     @id @default(cuid())
+  clerkId             String     @unique
+  email               String     @unique
+  fullName            String
+  kycLevel            KycLevel   @default(NONE)
+  status              UserStatus @default(PENDING_KYC)
+  telegramChatId      String?
+  notificationChannel String     @default("none") // "none" | "telegram" | "email"
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+
+  bots              Bot[]
+  transactions      Transaction[]
+  approvalRequests  ApprovalRequest[]
+  handoffRequests   HandoffRequest[]
+  telegramLinkCode  TelegramLinkCode?
+
+  @@map("users")
+}
+
+model TelegramLinkCode {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  code      String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("telegram_link_codes")
+}
+
+model Bot {
+  id             String      @id @default(cuid())
+  ownerId        String
+  name           String
+  platform       BotPlatform
+  apiKeyHash     String
+  status         BotStatus   @default(ACTIVE)
+  trustScore     Float       @default(50)
+  totalApproved  Int         @default(0)
+  totalBlocked   Int         @default(0)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  owner            User              @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  policy           Policy?
+  bditTokens       BditToken[]
+  transactions     Transaction[]
+  approvalRequests ApprovalRequest[]
+  handoffRequests  HandoffRequest[]
+
+  @@index([ownerId])
+  @@map("bots")
+}
+
+model Policy {
+  id                 String   @id @default(cuid())
+  botId              String   @unique
+  maxPerTransaction  Float    @default(100)
+  maxPerDay          Float    @default(500)
+  maxPerWeek         Float    @default(2000)
+  maxPerMonth        Float    @default(5000)
+  autoApproveLimit   Float    @default(50)
+  requireApprovalUp  Float    @default(200)
+  allowedDays        Int[]    @default([1, 2, 3, 4, 5]) // 0=Sun, 6=Sat
+  allowedHoursStart  Int      @default(8)
+  allowedHoursEnd    Int      @default(22)
+  allowedCategories  String[] @default([])
+  blockedCategories  String[] @default([])
+  merchantWhitelist  String[] @default([])
+  merchantBlacklist  String[] @default([])
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  bot Bot @relation(fields: [botId], references: [id], onDelete: Cascade)
+
+  @@map("policies")
+}
+
+model BditToken {
+  id         String          @id @default(cuid())
+  jti        String          @unique
+  tokenValue String?
+  botId      String
+  merchantId String?
+  amount     Float
+  category   String
+  status     BditTokenStatus @default(ISSUED)
+  issuedAt   DateTime        @default(now())
+  expiresAt  DateTime
+  usedAt     DateTime?
+
+  bot      Bot       @relation(fields: [botId], references: [id], onDelete: Cascade)
+  merchant Merchant? @relation(fields: [merchantId], references: [id])
+
+  @@index([botId])
+  @@index([jti])
+  @@map("bdit_tokens")
+}
+
+model Transaction {
+  id               String              @id @default(cuid())
+  botId            String
+  ownerId          String
+  merchantId       String?
+  merchantName     String
+  bdtJti           String?
+  amount           Float
+  currency         String              @default("BRL")
+  category         String
+  decision         TransactionDecision
+  decisionReason   String
+  approvalId       String?
+  approvedByHuman  Boolean             @default(false)
+  stripePaymentId  String?
+  createdAt        DateTime            @default(now())
+
+  bot   Bot  @relation(fields: [botId], references: [id], onDelete: Cascade)
+  owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  approvalRequest ApprovalRequest?
+
+  @@index([botId])
+  @@index([ownerId])
+  @@index([createdAt])
+  @@map("transactions")
+}
+
+model ApprovalRequest {
+  id            String         @id @default(cuid())
+  transactionId String         @unique
+  botId         String
+  ownerId       String
+  amount        Float
+  merchantName  String
+  category      String
+  status        ApprovalStatus @default(PENDING)
+  expiresAt     DateTime
+  respondedAt   DateTime?
+  pushSent      Boolean        @default(false)
+  createdAt     DateTime       @default(now())
+
+  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  bot         Bot         @relation(fields: [botId], references: [id], onDelete: Cascade)
+  owner       User        @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([ownerId, status])
+  @@map("approval_requests")
+}
+
+model HandoffRequest {
+  id           String          @id @default(cuid())
+  botId        String
+  ownerId      String
+  sessionUrl   String
+  obstacleType HandoffObstacle
+  description  String
+  metadata     Json?
+  status       HandoffStatus   @default(PENDING)
+  expiresAt    DateTime
+  resolvedAt   DateTime?
+  resolvedNote String?
+  pushSent     Boolean         @default(false)
+  createdAt    DateTime        @default(now())
+
+  bot   Bot  @relation(fields: [botId], references: [id], onDelete: Cascade)
+  owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([botId, status])
+  @@index([ownerId, status])
+  @@map("handoff_requests")
+}
+
+model Merchant {
+  id            String         @id @default(cuid())
+  merchantKey   String         @unique
+  apiKeyHash    String
+  name          String
+  website       String?
+  plan          MerchantPlan   @default(FREE)
+  webhookUrl    String?
+  minTrustScore Float          @default(50)
+  status        MerchantStatus @default(PENDING_REVIEW)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  bditTokens BditToken[]
+
+  @@map("merchants")
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  entityType String
+  entityId   String
+  action     String
+  actorType  String   // "user" | "bot" | "system"
+  actorId    String
+  payload    Json?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  // Append-only: no UPDATE or DELETE operations allowed at application level
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}

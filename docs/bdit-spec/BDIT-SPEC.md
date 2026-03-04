@@ -1,0 +1,308 @@
+# BDIT — Bot Digital Identity Token
+
+## Specification v1.0
+
+---
+
+## 1. Overview
+
+BDIT (Bot Digital Identity Token) is an open standard for verifying the identity and authorization of AI agents performing financial transactions. It answers a critical question for merchants:
+
+> "Was this purchase authorized by the human who owns this bot?"
+
+### Why BDIT exists
+
+As AI agents increasingly make purchases on behalf of humans, merchants face new risks:
+
+- **Unauthorized purchases** — A bot buying without the owner's consent
+- **Fraudulent bots** — Agents impersonating legitimate users
+- **Lack of accountability** — No audit trail for bot-initiated transactions
+- **Chargeback risk** — Disputes from purchases the human never authorized
+
+BDIT solves this by providing a cryptographically signed token that proves:
+
+1. The bot is registered and verified
+2. The human owner authorized this specific transaction
+3. The transaction is within configured limits
+4. The token is valid, unexpired, and single-use
+
+---
+
+## 2. How it works
+
+```
+  Bot (AI Agent)              PayJarvis              Merchant
+  ═══════════════           ═══════════════        ═══════════════
+       │                          │                       │
+       │  1. Request payment      │                       │
+       │  (amount, merchant,      │                       │
+       │   category)              │                       │
+       │ ─────────────────────►   │                       │
+       │                          │                       │
+       │                    2. Evaluate rules             │
+       │                       - Spending limits          │
+       │                       - Category policy          │
+       │                       - Time windows             │
+       │                       - Trust score              │
+       │                          │                       │
+       │  3. Decision + BDIT      │                       │
+       │     (if APPROVED)        │                       │
+       │ ◄─────────────────────   │                       │
+       │                          │                       │
+       │  4. Proceed with         │                       │
+       │     purchase + BDIT      │                       │
+       │ ──────────────────────────────────────────────►  │
+       │                          │                       │
+       │                          │  5. Verify BDIT       │
+       │                          │ ◄─────────────────────│
+       │                          │                       │
+       │                          │  6. Verification      │
+       │                          │     result            │
+       │                          │ ─────────────────────►│
+       │                          │                       │
+       │                          │            7. Complete │
+       │  8. Confirmation         │               order   │
+       │ ◄──────────────────────────────────────────────  │
+```
+
+---
+
+## 3. Token structure
+
+BDIT is a standard JWT (RFC 7519) signed with RS256.
+
+### Header
+
+```json
+{
+  "alg": "RS256",
+  "typ": "JWT",
+  "kid": "payjarvis-key-001"
+}
+```
+
+### Payload
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `iss` | string | Yes | Issuer. Always `"payjarvis"` |
+| `sub` | string | Yes | Subject. The `bot_id` |
+| `iat` | number | Yes | Issued at (Unix timestamp) |
+| `exp` | number | Yes | Expiration (Unix timestamp). Max 5 minutes from `iat` |
+| `jti` | string | Yes | Unique token ID (UUID v4). Single-use enforcement |
+| `bot_id` | string | Yes | Unique identifier of the bot |
+| `owner_id` | string | Yes | Identifier of the human owner |
+| `trust_score` | number | Yes | Bot trust score (0-100) |
+| `kyc_level` | number | Yes | Owner's KYC verification level (0-3) |
+| `merchant_id` | string | Yes | Target merchant identifier |
+| `amount` | number | Yes | Authorized transaction amount |
+| `category` | string | Yes | Transaction category |
+| `categories` | string[] | Yes | Categories the bot is allowed to transact in |
+| `max_amount` | number | Yes | Maximum per-transaction limit |
+| `session_id` | string | Yes | Unique session identifier |
+
+### Example payload
+
+```json
+{
+  "iss": "payjarvis",
+  "sub": "bot_abc123",
+  "iat": 1709571600,
+  "exp": 1709571900,
+  "jti": "550e8400-e29b-41d4-a716-446655440000",
+  "bot_id": "bot_abc123",
+  "owner_id": "user_xyz789",
+  "trust_score": 94,
+  "kyc_level": 2,
+  "merchant_id": "amazon",
+  "amount": 45.00,
+  "category": "shopping",
+  "categories": ["shopping", "electronics", "food"],
+  "max_amount": 200.00,
+  "session_id": "sess_1709571600_a1b2c3"
+}
+```
+
+### Signature
+
+The token is signed with RS256 (RSASSA-PKCS1-v1_5 using SHA-256). The signing key is published at:
+
+```
+https://api.payjarvis.com/.well-known/jwks.json
+```
+
+---
+
+## 4. Verification
+
+### Step 1 — Obtain the public key
+
+Fetch the JWKS endpoint and cache for 24 hours:
+
+```
+GET https://api.payjarvis.com/.well-known/jwks.json
+```
+
+Response:
+```json
+{
+  "keys": [{
+    "kty": "RSA",
+    "use": "sig",
+    "kid": "payjarvis-key-001",
+    "alg": "RS256",
+    "n": "...",
+    "e": "AQAB"
+  }]
+}
+```
+
+### Step 2 — Verify the token
+
+1. Decode the JWT header and match `kid` to a key in the JWKS
+2. Verify the RS256 signature
+3. Check `iss` equals `"payjarvis"`
+4. Check `exp` is in the future
+5. Check `merchant_id` matches your merchant ID
+6. Optionally check `trust_score` meets your minimum threshold
+7. Optionally verify `jti` hasn't been used (one-time use)
+
+### Step 3 — Accept or reject
+
+If all checks pass, the bot is verified. Proceed with the transaction.
+
+---
+
+## 5. Verification examples
+
+### Node.js / TypeScript
+
+```typescript
+import { verifyBdit } from '@payjarvis/verify-sdk'
+
+const result = await verifyBdit({
+  token: req.headers['x-bdit-token'],
+  merchantId: 'your-merchant-id',
+  jwksUrl: 'https://api.payjarvis.com/.well-known/jwks.json'
+})
+
+if (result.verified) {
+  // Bot authorized — proceed with checkout
+  console.log(`Bot ${result.bot.id} authorized for $${result.authorization.amount}`)
+}
+```
+
+### Python
+
+```python
+from payjarvis_verify import verify_bdit
+
+result = verify_bdit(
+    token=request.headers.get('X-BDIT-Token'),
+    merchant_id='your-merchant-id',
+    jwks_url='https://api.payjarvis.com/.well-known/jwks.json'
+)
+
+if result['verified']:
+    print(f"Bot {result['bot']['id']} authorized")
+```
+
+### PHP
+
+```php
+use PayJarvis\Verify;
+
+$result = Verify::bdit(
+    token: $_SERVER['HTTP_X_BDIT_TOKEN'],
+    merchantId: 'your-merchant-id',
+    jwksUrl: 'https://api.payjarvis.com/.well-known/jwks.json'
+);
+
+if ($result->verified) {
+    echo "Bot {$result->bot->id} authorized";
+}
+```
+
+### Java
+
+```java
+import com.payjarvis.BditVerifier;
+
+BditVerifier.Result result = BditVerifier.verify(
+    request.getHeader("X-BDIT-Token"),
+    "your-merchant-id",
+    "https://api.payjarvis.com/.well-known/jwks.json"
+);
+
+if (result.isVerified()) {
+    System.out.println("Bot " + result.getBot().getId() + " authorized");
+}
+```
+
+### Go
+
+```go
+import "github.com/payjarvis/verify-sdk-go"
+
+result, err := payjarvis.VerifyBdit(payjarvis.VerifyOptions{
+    Token:      r.Header.Get("X-BDIT-Token"),
+    MerchantID: "your-merchant-id",
+    JwksURL:    "https://api.payjarvis.com/.well-known/jwks.json",
+})
+
+if result.Verified {
+    fmt.Printf("Bot %s authorized\n", result.Bot.ID)
+}
+```
+
+---
+
+## 6. Token delivery
+
+The BDIT token can be delivered to the merchant via:
+
+| Method | Header/Field | Priority |
+|--------|-------------|----------|
+| HTTP Header | `X-BDIT-Token: <token>` | Recommended |
+| HTTP Header | `Authorization: Bearer <token>` | Alternative |
+| Cookie | `bdit_token=<token>` | Browser flows |
+| POST body | `{ "bditToken": "<token>" }` | API calls |
+| URL param | `?payjarvis_token=<token>` | Redirects |
+
+---
+
+## 7. Security considerations
+
+- **Short-lived**: Tokens expire after 5 minutes
+- **Single-use**: Each `jti` can only be used once
+- **Merchant-scoped**: Token is bound to a specific `merchant_id`
+- **Amount-bound**: Token authorizes a specific `amount`
+- **Key rotation**: JWKS supports multiple keys via `kid`
+- **Fail-open optional**: Merchants can choose to allow transactions if verification service is unavailable
+
+---
+
+## 8. Becoming a certified issuer
+
+Currently, PayJarvis is the sole issuer of BDIT tokens. In the future, we plan to support third-party issuers through a certification program:
+
+1. **Apply** — Submit your platform for review
+2. **Audit** — Pass security audit of your signing infrastructure
+3. **Register** — Register your JWKS endpoint with the BDIT registry
+4. **Issue** — Begin issuing BDIT tokens with your own keys
+
+Interested? Contact: partners@payjarvis.com
+
+---
+
+## 9. Changelog
+
+| Version | Date | Changes |
+|---------|------|---------|
+| 1.0 | 2026-03-04 | Initial specification |
+
+---
+
+**PayJarvis** — Trust and identity layer for AI payment agents.
+
+https://payjarvis.com | https://api.payjarvis.com/.well-known/jwks.json

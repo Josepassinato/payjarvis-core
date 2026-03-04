@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+.next/
+*.tsbuildinfo
+
+# Turborepo
+.turbo/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+.env.production
+!.env.example
+
+# Keys
+*.pem
+*.key
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+
+# Testing
+coverage/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Python (legacy)
+__pycache__/
+venv/
+.venv/
+
+# Deployment
+.vercel/
+
+# System
+dump.rdb

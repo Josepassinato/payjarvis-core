@@ -1,0 +1,24 @@
+{
+  "name": "@payjarvis/browser-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "lint": "echo 'no lint configured'"
+  },
+  "dependencies": {
+    "@payjarvis/types": "*",
+    "@payjarvis/bdit": "*",
+    "fastify": "^5.0.0",
+    "@fastify/cors": "^10.0.0",
+    "ws": "^8.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0",
+    "tsx": "^4.7.0",
+    "@types/ws": "^8.0.0"
+  }
+}

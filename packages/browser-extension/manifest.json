@@ -1,0 +1,59 @@
+{
+  "manifest_version": 3,
+  "name": "PayJarvis — AI Bot Payment Guard",
+  "version": "1.0.0",
+  "description": "Protege transações de bots AI em sites como Amazon, Hotels.com e Expedia. Verifica tokens BDIT antes de permitir checkout.",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "alarms"
+  ],
+  "host_permissions": [
+    "https://api.payjarvis.com/*",
+    "https://*.amazon.com/*",
+    "https://*.amazon.com.br/*",
+    "https://*.hotels.com/*",
+    "https://*.expedia.com/*"
+  ],
+  "background": {
+    "service_worker": "dist/background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.amazon.com/*",
+        "https://*.amazon.com.br/*"
+      ],
+      "js": ["dist/content-scripts/amazon.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://*.hotels.com/*"
+      ],
+      "js": ["dist/content-scripts/hotels.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://*.expedia.com/*"
+      ],
+      "js": ["dist/content-scripts/expedia.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  }
+}

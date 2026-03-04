@@ -1,0 +1,13 @@
+{
+  "name": "payjarvis-browser-extension",
+  "version": "1.0.0",
+  "private": true,
+  "description": "PayJarvis browser extension — protege transações de bots AI em sites de terceiros (Amazon, Hotels.com, Expedia)",
+  "scripts": {
+    "build": "tsc && node build.mjs",
+    "lint": "echo 'no lint configured'"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0"
+  }
+}

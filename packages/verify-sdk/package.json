@@ -1,0 +1,20 @@
+{
+  "name": "@payjarvis/verify-sdk",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "BDIT token verification SDK — verify bot identity tokens in any language",
+  "main": "./dist/node/index.js",
+  "types": "./dist/node/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "lint": "echo 'no lint configured'"
+  },
+  "dependencies": {
+    "jose": "^5.9.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0"
+  },
+  "keywords": ["payjarvis", "bdit", "bot", "identity", "verification", "jwt"],
+  "license": "MIT"
+}
