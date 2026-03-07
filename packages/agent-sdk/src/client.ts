@@ -1,5 +1,6 @@
-import { randomUUID } from "node:crypto";
 import type { PayJarvisConfig, ApprovalRequest, ApprovalDecision, SpendingLimits, HandoffRequest, HandoffResult } from "./types.js";
+
+const KNOWN_HARDCODED = ["pj_bot_aios12brain2026", "bot-aios-001"];
 
 export class PayJarvis {
   private apiKey: string;
@@ -7,11 +8,40 @@ export class PayJarvis {
   private baseUrl: string;
   private timeout: number;
 
-  constructor(config: PayJarvisConfig) {
-    this.apiKey = config.apiKey;
-    this.botId = config.botId;
-    this.baseUrl = (config.baseUrl ?? "https://api.payjarvis.com").replace(/\/$/, "");
-    this.timeout = config.timeout ?? 30_000;
+  constructor(config?: Partial<PayJarvisConfig>) {
+    const apiKey = config?.apiKey ?? process.env.PAYJARVIS_API_KEY;
+    const botId = config?.botId ?? process.env.PAYJARVIS_BOT_ID;
+    const baseUrl = config?.baseUrl ?? process.env.PAYJARVIS_URL ?? "https://api.payjarvis.com";
+
+    if (!apiKey) {
+      throw new Error(
+        "PAYJARVIS_API_KEY not found. Add it to your .env file.\n" +
+        "Example: PAYJARVIS_API_KEY=pj_bot_your_key_here"
+      );
+    }
+
+    if (!botId) {
+      throw new Error(
+        "PAYJARVIS_BOT_ID not found. Add it to your .env file.\n" +
+        "Example: PAYJARVIS_BOT_ID=your-bot-id"
+      );
+    }
+
+    if (KNOWN_HARDCODED.includes(apiKey) || KNOWN_HARDCODED.includes(botId)) {
+      throw new Error(
+        "Hardcoded credentials detected. Use environment variables instead.\n" +
+        "Set PAYJARVIS_API_KEY and PAYJARVIS_BOT_ID in your .env file."
+      );
+    }
+
+    this.apiKey = apiKey;
+    this.botId = botId;
+    this.baseUrl = baseUrl.replace(/\/$/, "");
+    this.timeout = config?.timeout ?? 30_000;
+  }
+
+  static fromEnv(): PayJarvis {
+    return new PayJarvis();
   }
 
   async requestApproval(req: ApprovalRequest): Promise<ApprovalDecision> {

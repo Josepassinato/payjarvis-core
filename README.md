@@ -207,16 +207,49 @@ Install the SDK in your AI agent to gate purchases through PayJarvis:
 npm install @payjarvis/agent-sdk
 ```
 
-```typescript
-import { PayJarvis } from '@payjarvis/agent-sdk';
+### Environment Setup
 
-const pj = new PayJarvis({
-  apiKey: 'pj_bot_...',
-  botId: 'your-bot-id',
+Add these variables to your `.env` file:
+
+```env
+PAYJARVIS_API_KEY=your_api_key_here
+PAYJARVIS_BOT_ID=your_bot_id_here
+PAYJARVIS_URL=http://localhost:3001
+```
+
+### Initialization
+
+```typescript
+import { PayJarvis, checkHealth } from '@payjarvis/agent-sdk';
+
+// Recommended — uses environment variables
+const pj = PayJarvis.fromEnv();
+
+// Also valid — explicit config (reads from env if not provided)
+const pj2 = new PayJarvis({
   baseUrl: 'https://your-api.com',
 });
 
-// Request approval before any purchase
+// NEVER hardcode credentials:
+// const pj = new PayJarvis({ apiKey: "pj_bot_xxx" })  // throws error
+```
+
+### Verifying the Connection
+
+```typescript
+import { checkHealth } from '@payjarvis/agent-sdk';
+
+const health = await checkHealth();
+if (health.ok) {
+  console.log(`PayJarvis online (${health.latencyMs}ms)`);
+} else {
+  console.error(`PayJarvis unreachable: ${health.status}`);
+}
+```
+
+### Requesting Approval
+
+```typescript
 const decision = await pj.requestApproval({
   merchant: 'Amazon',
   amount: 49.99,
@@ -235,6 +268,13 @@ if (decision.approved) {
   console.log('Blocked:', decision.reason);
 }
 ```
+
+### Security
+
+- **Never hardcode** API keys or bot IDs in source code. The SDK will reject known test credentials.
+- **Restrict payment commands** to authorized users. For Telegram bots, check `ADMIN_TELEGRAM_ID` before executing `/pagar` or similar commands.
+- **Use `.env` files** and add them to `.gitignore`. See `packages/agent-sdk/.env.example` for the template.
+- **Rotate API keys** periodically via the PayJarvis dashboard.
 
 ### SDK Methods
 
