@@ -14,6 +14,7 @@ import { integrationRoutes } from "./routes/integrations.js";
 import { notificationRoutes } from "./routes/notifications.js";
 import { analyticsRoutes } from "./routes/analytics.js";
 import { handoffRoutes } from "./routes/handoffs.js";
+import { onboardingRoutes } from "./routes/onboarding.routes.js";
 
 const app = Fastify({ logger: true });
 
@@ -36,6 +37,9 @@ await app.register(publicVerifyRoutes);
 await app.register(platformRoutes);
 await app.register(merchantRoutes);
 await app.register(integrationRoutes);
+
+// Onboarding — platform detection and integration guides
+await app.register(onboardingRoutes);
 
 // Serve adapter.js for merchant integration
 app.get("/adapter.js", async (request, reply) => {
