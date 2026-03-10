@@ -739,7 +739,10 @@ Partner benefits:
 
 ## Roadmap
 
-- [ ] Stripe payment processing integration
+- [x] Stripe payment processing integration
+- [x] Multi-language dashboard (EN, PT, ES)
+- [x] Payment methods management (Stripe, PayPal, Apple Pay, Google Pay)
+- [x] Clerk OAuth authentication (GitHub)
 - [ ] Email notifications via Resend
 - [ ] WHOOP/wearable integration for owner verification
 - [ ] Multi-currency support
