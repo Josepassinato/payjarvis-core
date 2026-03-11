@@ -6,7 +6,7 @@ Thank you for your interest in contributing to PayJarvis! This guide will help y
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 20+
 - PostgreSQL 15+ (or Supabase free tier)
 - Redis 7+ (or Upstash free tier, or skip — falls back to in-memory)
 - Clerk account (free tier)
@@ -87,9 +87,10 @@ fix(web): correct timezone in approval countdown
 1. Fork the repo and create your branch from `main`
 2. Make your changes
 3. Ensure the build passes: `npm run build`
-4. Update documentation if needed
-5. Submit a PR against `main`
-6. Fill out the PR template
+4. Run E2E tests: `cd sandbox/e2e-tests && npm test` (requires services running)
+5. Update documentation if needed
+6. Submit a PR against `main`
+7. Fill out the PR template
 
 ### Code Style
 
@@ -98,6 +99,8 @@ fix(web): correct timezone in approval countdown
 - Run `npm run build` to verify type checking across all packages
 - No `any` types — use proper TypeScript types
 - Async/await for all I/O operations
+- **Tests required** for new features and bug fixes
+- E2E tests use Playwright with HTTP-only API testing (no browser)
 
 ## Areas Welcoming Contributions
 

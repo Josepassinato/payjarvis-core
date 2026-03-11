@@ -1,6 +1,6 @@
 import type { PayJarvisConfig, ApprovalRequest, ApprovalDecision, SpendingLimits, HandoffRequest, HandoffResult } from "./types.js";
 
-const KNOWN_HARDCODED = ["pj_bot_aios12brain2026", "bot-aios-001"];
+const KNOWN_HARDCODED = ["pj_bot_example_do_not_use", "bot-example-000"];
 
 export class PayJarvis {
   private apiKey: string;

@@ -7,7 +7,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License"></a>
-  <a href="#"><img src="https://img.shields.io/badge/node-%3E%3D18-green.svg" alt="Node"></a>
+  <a href="#"><img src="https://img.shields.io/badge/node-%3E%3D20-green.svg" alt="Node"></a>
   <a href="#"><img src="https://img.shields.io/badge/TypeScript-5.3-blue.svg" alt="TypeScript"></a>
   <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome"></a>
   <a href="https://payjarvis.com/partners"><img src="https://img.shields.io/badge/partners-join%20program-blueviolet.svg" alt="Partner Program"></a>
@@ -584,7 +584,7 @@ payjarvis/
 
 | Layer | Technology |
 |-------|------------|
-| Backend | Fastify 5, TypeScript, Node.js 18+ |
+| Backend | Fastify 5, TypeScript, Node.js 20+ |
 | Frontend | Next.js 14, React 18, Tailwind CSS, shadcn/ui |
 | Database | PostgreSQL 16 via Prisma ORM |
 | Cache | Redis 7 (with in-memory fallback) |
@@ -601,7 +601,7 @@ payjarvis/
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 20+
 - PostgreSQL 15+ (or [Supabase](https://supabase.com) free tier)
 - Redis 7+ (or [Upstash](https://upstash.com) free tier)
 - [Clerk](https://clerk.com) account (free tier works)
@@ -626,13 +626,18 @@ Services:
 ```bash
 git clone https://github.com/Josepassinato/Payjarvis.git
 cd Payjarvis
+
+# Start PostgreSQL + Redis via Docker (or use your own)
+docker compose -f docker-compose.dev.yml up -d
+
+# Install and configure
 npm install
 cp .env.example .env
+# .env defaults already point to localhost:5432 — works with docker-compose.dev.yml
 
 # Generate BDIT RS256 keys
-openssl genrsa 2048 > /tmp/private.pem
-openssl rsa -in /tmp/private.pem -pubout > /tmp/public.pem
-# Copy key contents into .env (use \n for newlines)
+npx ts-node packages/bdit/src/generate-keys.ts
+# Copy the output keys into .env
 
 # Database setup
 npm run db:generate
@@ -751,7 +756,7 @@ Partner benefits:
 - [ ] Mobile app for approvals (iOS + Android)
 - [ ] OpenTelemetry observability
 - [ ] GraphQL API
-- [ ] End-to-end test suite
+- [x] End-to-end test suite (Playwright)
 
 See [open issues](https://github.com/Josepassinato/Payjarvis/issues) for community-requested features.
 

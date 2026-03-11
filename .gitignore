@@ -40,6 +40,12 @@ __pycache__/
 venv/
 .venv/
 
+# Sandbox (dev workflow)
+sandbox/
+
+# Local overrides
+*.local
+
 # Deployment
 .vercel/
 
