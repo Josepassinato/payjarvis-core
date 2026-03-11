@@ -314,3 +314,21 @@ export function getDecisions(token?: string | null): Promise<DecisionBreakdown[]
 export function getByBot(token?: string | null): Promise<BotBreakdown[]> {
   return request<BotBreakdown[]>("/analytics/by-bot", { token });
 }
+
+// ── Agent Reputation ──
+
+export interface AgentReputation {
+  transactionsSuccess: number;
+  transactionsBlocked: number;
+  totalSpent: number;
+  merchantCount: number;
+  anomalyEvents: number;
+  avgTransactionSize: number;
+  successRate: number;
+  lastActivityAt: string | null;
+  trustScore: number;
+}
+
+export function getReputation(botId: string, token?: string | null): Promise<AgentReputation> {
+  return request<AgentReputation>(`/bots/${botId}/reputation`, { token });
+}

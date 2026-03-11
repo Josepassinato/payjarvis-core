@@ -23,6 +23,63 @@ export type Decision = "APPROVED" | "BLOCKED" | "PENDING_HUMAN";
 
 export type BotPlatform = "openclaw" | "chatgpt" | "claude" | "custom";
 
+export type RiskLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+
+// ─── Trust Score Constants (0-1000 scale) ───
+
+export const TRUST_THRESHOLD_BLOCK = 400;
+export const TRUST_THRESHOLD_HUMAN = 700;
+export const TRUST_SCORE_MAX = 1000;
+export const TRUST_SCORE_MIN = 0;
+export const TRUST_SCORE_DEFAULT = 500;
+
+// ─── Trust Score Scale Conversion ───
+
+/** Convert bot-scale trust score (0-100) to agent-scale (0-1000) */
+export function trustScoreBotToAgent(botScore: number): number {
+  return Math.round(Math.max(0, Math.min(1000, botScore * 10)));
+}
+
+/** Convert agent-scale trust score (0-1000) to bot-scale (0-100) */
+export function trustScoreAgentToBot(agentScore: number): number {
+  return Math.round(Math.max(0, Math.min(100, agentScore / 10)) * 10) / 10;
+}
+
+/** Derive risk level from agent trust score (0-1000) */
+export function getRiskLevel(trustScore: number): RiskLevel {
+  if (trustScore >= 700) return "LOW";
+  if (trustScore >= 400) return "MEDIUM";
+  if (trustScore >= 200) return "HIGH";
+  return "CRITICAL";
+}
+
+// ─── Agent Identity ───
+
+export interface AgentIdentity {
+  agent_id: string;
+  owner_id: string;
+  name: string;
+  status: string;
+  trust_score: number;        // 0-1000 scale
+  kyc_level: number;
+  total_spent: number;
+  transactions_count: number;
+  created_at: string;
+  last_activity_at: string | null;
+}
+
+export interface AgentVerifyResult {
+  agent_id: string;
+  owner_verified: boolean;
+  trust_score: number;         // 0-1000
+  transactions: number;
+  total_spent: number;
+  risk_level: RiskLevel;
+  kyc_level: number;
+  status: string;
+  created_at: string;
+}
+
 // ─── BDIT Token Payload ───
 
 export interface BditPayload {
@@ -39,6 +96,12 @@ export interface BditPayload {
   jti: string;
   iat: number;
   exp: number;
+  // Agent identity fields (new)
+  agent_id?: string;
+  agent_trust_score?: number;    // 0-1000 scale
+  owner_verified?: boolean;
+  transactions_count?: number;
+  total_spent?: number;
 }
 
 export interface BditVerifyResult {
@@ -122,6 +185,7 @@ export interface ApiResponse<T = unknown> {
 
 export interface TransactionFilters {
   botId?: string;
+  agentId?: string;
   dateFrom?: string;
   dateTo?: string;
   decision?: Decision;
@@ -161,6 +225,9 @@ export interface RulesEngineRequest {
   category: string;
   policy: PolicyConfig;
   botTrustScore: number;
+  // Agent identity fields (new)
+  agentId?: string;
+  agentTrustScore?: number;    // 0-1000 scale
 }
 
 export interface RulesEngineResponse {

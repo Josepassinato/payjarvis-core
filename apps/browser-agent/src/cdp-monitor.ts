@@ -53,6 +53,16 @@ export class CdpMonitor {
   private connected = false;
   private monitoredTargets = new Set<string>();
 
+  // ─── Reconnection state ─────────────────────────────
+  private reconnecting = false;
+  private intentionalDisconnect = false;
+  private reconnectAttempts = 0;
+  private readonly RECONNECT_BASE_MS = 1000;
+  private readonly RECONNECT_MAX_MS = 60000;
+  private readonly HEALTH_CHECK_INTERVAL_MS = 30000;
+  private healthCheckTimer: ReturnType<typeof setInterval> | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
   constructor(config: CdpMonitorConfig) {
     this.config = config;
     this.port = config.port ?? 0;
@@ -62,6 +72,10 @@ export class CdpMonitor {
 
   get isConnected(): boolean {
     return this.connected;
+  }
+
+  get isReconnecting(): boolean {
+    return this.reconnecting;
   }
 
   get cdpPort(): number {
@@ -137,6 +151,8 @@ export class CdpMonitor {
     });
 
     this.connected = true;
+    this.reconnectAttempts = 0;
+    this.reconnecting = false;
 
     this.ws.on("message", (data) => {
       this.handleMessage(JSON.parse(data.toString()) as CdpMessage);
@@ -144,6 +160,15 @@ export class CdpMonitor {
 
     this.ws.on("close", () => {
       this.connected = false;
+      this.stopHealthCheck();
+      if (!this.intentionalDisconnect) {
+        console.error("[CDP] Connection lost unexpectedly — scheduling reconnect");
+        this.scheduleReconnect();
+      }
+    });
+
+    this.ws.on("error", (err) => {
+      console.error("[CDP] WebSocket error:", (err as Error).message);
     });
 
     // Habilitar monitoramento de targets
@@ -153,17 +178,131 @@ export class CdpMonitor {
     for (const target of pageTargets) {
       await this.attachToTarget(target);
     }
+
+    this.startHealthCheck();
+    console.log(`[CDP] Connected to Chrome on port ${this.port}`);
   }
 
-  /** Desconectar do Chrome */
+  /** Desconectar do Chrome (intencional — não reconecta) */
   async disconnect(): Promise<void> {
+    this.intentionalDisconnect = true;
     this.connected = false;
+    this.reconnecting = false;
+    this.reconnectAttempts = 0;
     this.monitoredTargets.clear();
     this.pendingCallbacks.clear();
+    this.stopHealthCheck();
+
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
 
     if (this.ws) {
       this.ws.close();
       this.ws = null;
+    }
+
+    console.log("[CDP] Disconnected (intentional)");
+  }
+
+  // ─── Reconnection logic ─────────────────────────────
+
+  /** Schedule a reconnect with exponential backoff */
+  private scheduleReconnect(): void {
+    if (this.reconnecting || this.intentionalDisconnect) return;
+    this.reconnecting = true;
+
+    const delay = Math.min(
+      this.RECONNECT_BASE_MS * Math.pow(2, this.reconnectAttempts),
+      this.RECONNECT_MAX_MS
+    );
+    this.reconnectAttempts++;
+
+    console.log(
+      `[CDP] Reconnect attempt ${this.reconnectAttempts} in ${delay}ms`
+    );
+
+    this.reconnectTimer = setTimeout(async () => {
+      this.reconnectTimer = null;
+      await this.attemptReconnect();
+    }, delay);
+  }
+
+  /** Try to reconnect to Chrome */
+  private async attemptReconnect(): Promise<void> {
+    try {
+      // Clean up old state
+      this.ws = null;
+      this.monitoredTargets.clear();
+      this.pendingCallbacks.clear();
+      this.messageId = 0;
+      this.intentionalDisconnect = false;
+
+      await this.connect();
+      console.log(
+        `[CDP] Reconnected successfully after ${this.reconnectAttempts} attempt(s)`
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[CDP] Reconnect failed: ${msg}`);
+      this.connected = false;
+      this.reconnecting = false;
+      // Schedule next attempt (connect's close handler won't fire since ws was never opened)
+      this.scheduleReconnect();
+    }
+  }
+
+  // ─── Health check ────────────────────────────────────
+
+  /** Start periodic health check ping */
+  private startHealthCheck(): void {
+    this.stopHealthCheck();
+    this.healthCheckTimer = setInterval(() => {
+      this.healthPing();
+    }, this.HEALTH_CHECK_INTERVAL_MS);
+  }
+
+  /** Stop health check */
+  private stopHealthCheck(): void {
+    if (this.healthCheckTimer) {
+      clearInterval(this.healthCheckTimer);
+      this.healthCheckTimer = null;
+    }
+  }
+
+  /** Ping Chrome via HTTP to verify it's still alive */
+  private async healthPing(): Promise<void> {
+    if (!this.connected || this.intentionalDisconnect) return;
+
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      const res = await fetch(
+        `http://localhost:${this.port}/json/version`,
+        { signal: controller.signal }
+      );
+      clearTimeout(timeout);
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      // Also check WebSocket is truly open
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        throw new Error("WebSocket not in OPEN state");
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[CDP] Health check failed: ${msg}`);
+      this.connected = false;
+      this.stopHealthCheck();
+
+      // Force-close stale WS if still hanging
+      if (this.ws) {
+        try { this.ws.close(); } catch { /* ignore */ }
+        this.ws = null;
+      }
+
+      this.scheduleReconnect();
     }
   }
 

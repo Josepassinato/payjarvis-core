@@ -3,8 +3,8 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "@clerk/nextjs";
-import { getBot, upsertPolicy, linkTelegram } from "@/lib/api";
-import type { Bot, Policy } from "@/lib/api";
+import { getBot, upsertPolicy, linkTelegram, getReputation } from "@/lib/api";
+import type { Bot, Policy, AgentReputation } from "@/lib/api";
 import { useApi } from "@/lib/use-api";
 import { TrustBar } from "@/components/trust-bar";
 import { LoadingSpinner, ErrorBox } from "@/components/loading";
@@ -31,6 +31,7 @@ export default function BotDetailPage({ params }: { params: { id: string } }) {
   const { t } = useTranslation();
   const { getToken } = useAuth();
   const { data: bot, loading, error, refetch } = useApi<Bot>((token) => getBot(params.id, token), [params.id]);
+  const { data: reputation } = useApi<AgentReputation>((token) => getReputation(params.id, token), [params.id]);
   const [policy, setPolicy] = useState<PolicyForm>(defaultPolicy);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -146,13 +147,41 @@ export default function BotDetailPage({ params }: { params: { id: string } }) {
         </div>
       </div>
 
-      {/* Trust Score */}
+      {/* Trust Score + Reputation */}
       <div className="bg-surface-card border border-surface-border rounded-xl p-5 mb-6">
-        <h3 className="text-sm font-semibold text-gray-300 mb-3">{t("bots.trustScore")}</h3>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-gray-300">{t("bots.trustScore")}</h3>
+          <span className="text-2xl font-bold font-mono text-white">{Math.round(bot.trustScore)}</span>
+        </div>
         <TrustBar score={bot.trustScore} />
-        <p className="text-xs text-gray-500 mt-2">
-          {bot.totalApproved} {t("botDetail.approvedCount")} &middot; {bot.totalBlocked} {t("botDetail.blockedCount")}
-        </p>
+        {reputation ? (
+          <div className="grid grid-cols-5 gap-3 mt-4 pt-4 border-t border-surface-border">
+            <div className="text-center">
+              <div className="text-lg font-bold text-approved">{reputation.transactionsSuccess}</div>
+              <div className="text-[10px] text-gray-500">{t("reputation.success")}</div>
+            </div>
+            <div className="text-center">
+              <div className="text-lg font-bold text-blocked">{reputation.transactionsBlocked}</div>
+              <div className="text-[10px] text-gray-500">{t("reputation.blocked")}</div>
+            </div>
+            <div className="text-center">
+              <div className="text-lg font-bold text-white">${reputation.totalSpent.toLocaleString()}</div>
+              <div className="text-[10px] text-gray-500">{t("reputation.totalSpent")}</div>
+            </div>
+            <div className="text-center">
+              <div className="text-lg font-bold text-brand-400">{reputation.merchantCount}</div>
+              <div className="text-[10px] text-gray-500">{t("reputation.merchants")}</div>
+            </div>
+            <div className="text-center">
+              <div className={`text-lg font-bold ${reputation.anomalyEvents > 0 ? "text-pending" : "text-gray-500"}`}>{reputation.anomalyEvents}</div>
+              <div className="text-[10px] text-gray-500">{t("reputation.anomalies")}</div>
+            </div>
+          </div>
+        ) : (
+          <p className="text-xs text-gray-500 mt-2">
+            {bot.totalApproved} {t("botDetail.approvedCount")} &middot; {bot.totalBlocked} {t("botDetail.blockedCount")}
+          </p>
+        )}
       </div>
 
       {/* Simplified: 3 main limit cards */}

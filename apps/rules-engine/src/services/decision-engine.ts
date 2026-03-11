@@ -5,6 +5,10 @@ import type {
   Decision,
 } from "@payjarvis/types";
 import {
+  TRUST_THRESHOLD_BLOCK,
+  TRUST_THRESHOLD_HUMAN,
+} from "@payjarvis/types";
+import {
   checkTransactionLimit,
   checkDailyLimit,
   checkWeeklyLimit,
@@ -27,7 +31,28 @@ export class DecisionEngine {
   ): RulesEngineResponse {
     const evaluatedRules: RuleEvaluation[] = [];
 
-    // Run all rules independently
+    // ─── Agent trust score threshold check ───
+    if (request.agentTrustScore !== undefined) {
+      const agentTrustCheck: RuleEvaluation = {
+        rule: "checkAgentTrustScore",
+        passed: request.agentTrustScore >= TRUST_THRESHOLD_BLOCK,
+        reason: request.agentTrustScore < TRUST_THRESHOLD_BLOCK
+          ? `Agent trust score ${request.agentTrustScore} below block threshold ${TRUST_THRESHOLD_BLOCK}`
+          : `Agent trust score ${request.agentTrustScore} above block threshold`,
+      };
+      evaluatedRules.push(agentTrustCheck);
+
+      if (!agentTrustCheck.passed) {
+        return {
+          decision: "BLOCKED",
+          reason: agentTrustCheck.reason,
+          ruleTriggered: "checkAgentTrustScore",
+          evaluatedRules,
+        };
+      }
+    }
+
+    // Run all policy rules
     evaluatedRules.push(checkTransactionLimit(request.amount, request.policy));
     evaluatedRules.push(checkDailyLimit(request.amount, totals.daily, request.policy));
     evaluatedRules.push(checkWeeklyLimit(request.amount, totals.weekly, request.policy));
@@ -44,6 +69,19 @@ export class DecisionEngine {
         decision: "BLOCKED",
         reason: failedRule.reason,
         ruleTriggered: failedRule.rule,
+        evaluatedRules,
+      };
+    }
+
+    // ─── Agent trust score → human approval zone ───
+    if (
+      request.agentTrustScore !== undefined &&
+      request.agentTrustScore < TRUST_THRESHOLD_HUMAN
+    ) {
+      return {
+        decision: "PENDING_HUMAN",
+        reason: `Agent trust score ${request.agentTrustScore} below auto-approve threshold ${TRUST_THRESHOLD_HUMAN}`,
+        ruleTriggered: "agentTrustHumanReview",
         evaluatedRules,
       };
     }

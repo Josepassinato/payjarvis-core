@@ -9,6 +9,7 @@
  */
 
 import type { FastifyInstance } from "fastify";
+import crypto from "node:crypto";
 import { BditVerifier } from "@payjarvis/bdit";
 import { prisma } from "@payjarvis/database";
 
@@ -67,21 +68,60 @@ export async function platformRoutes(app: FastifyInstance) {
       });
     }
 
-    // Store registration (in production: database)
-    // For now, return confirmation
+    // Generate HMAC secret for webhook signing
+    const secret = `whsec_${crypto.randomBytes(24).toString("hex")}`;
+
+    const registration = await prisma.platformRegistration.create({
+      data: {
+        platformType: body.platform,
+        webhookUrl: body.webhookUrl,
+        events: body.events,
+        secret,
+        contactEmail: body.contactEmail ?? null,
+        isActive: false,
+      },
+    });
+
+    // Fire verification ping in background (non-blocking)
+    verifyWebhookUrl(registration.id, body.webhookUrl, secret).catch(
+      (err) => app.log.error({ err, id: registration.id }, "Webhook verification ping failed")
+    );
+
     return {
       success: true,
       data: {
-        platformId: `plat_${body.platform}_${Date.now()}`,
-        platform: body.platform,
-        webhookUrl: body.webhookUrl,
-        events: body.events,
+        platformId: registration.id,
+        platform: registration.platformType,
+        webhookUrl: registration.webhookUrl,
+        events: registration.events,
+        secret,
         status: "pending_verification",
         message:
-          "Registrado. Enviaremos um webhook de teste para " +
+          "Registrado. Enviamos um webhook de teste para " +
           "verificar a URL. Responda com HTTP 200 para ativar.",
       },
     };
+  });
+
+  // ─── GET /v1/platform/registrations ─────────────────
+  app.get("/v1/platform/registrations", async (_request, reply) => {
+    const registrations = await prisma.platformRegistration.findMany({
+      orderBy: { createdAt: "desc" },
+    });
+
+    return reply.send({
+      success: true,
+      data: registrations.map((r) => ({
+        id: r.id,
+        platformType: r.platformType,
+        webhookUrl: r.webhookUrl,
+        events: r.events,
+        contactEmail: r.contactEmail,
+        isActive: r.isActive,
+        createdAt: r.createdAt.toISOString(),
+        updatedAt: r.updatedAt.toISOString(),
+      })),
+    });
   });
 
   // ─── POST /v1/platform/verify-batch ────────────────
@@ -216,4 +256,60 @@ export async function platformRoutes(app: FastifyInstance) {
         });
     }
   );
+
+  // ─── Load active registrations on startup ───────────
+  const active = await prisma.platformRegistration.findMany({
+    where: { isActive: true },
+  });
+  app.log.info(
+    { count: active.length },
+    "Loaded active platform registrations"
+  );
+}
+
+// ─── Helpers ────────────────────────────────────────────
+
+/** Send a verification ping to the webhook URL; activate on 2xx */
+async function verifyWebhookUrl(
+  registrationId: string,
+  webhookUrl: string,
+  secret: string
+): Promise<void> {
+  const payload = JSON.stringify({
+    event: "verification",
+    registrationId,
+    timestamp: new Date().toISOString(),
+  });
+
+  const signature = crypto
+    .createHmac("sha256", secret)
+    .update(payload)
+    .digest("hex");
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+
+  try {
+    const res = await fetch(webhookUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-PayJarvis-Signature": signature,
+      },
+      body: payload,
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeout);
+
+    if (res.ok) {
+      await prisma.platformRegistration.update({
+        where: { id: registrationId },
+        data: { isActive: true },
+      });
+    }
+  } catch {
+    clearTimeout(timeout);
+    // Verification failed — stays inactive, can retry later
+  }
 }

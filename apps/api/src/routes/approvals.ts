@@ -8,6 +8,7 @@ import { updateTrustScore } from "../services/trust-score.js";
 import { redisGet, redisSet } from "../services/redis.js";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
+import { updateAgentCounters } from "../services/agent-identity.js";
 
 const approvalEvents = new EventEmitter();
 approvalEvents.setMaxListeners(100);
@@ -182,7 +183,7 @@ export async function approvalRoutes(app: FastifyInstance) {
 
     const approval = await prisma.approvalRequest.findFirst({
       where: { id, ownerId: user.id },
-      include: { transaction: true, bot: { include: { policy: true, owner: true } } },
+      include: { transaction: true, bot: { include: { policy: true, owner: true, agent: true } } },
     });
 
     if (!approval) return reply.status(404).send({ success: false, error: "Approval request not found" });
@@ -239,6 +240,9 @@ export async function approvalRoutes(app: FastifyInstance) {
       const policy = approval.bot.policy!;
       const kycLevelNum = getKycLevel(approval.bot.owner.kycLevel);
 
+      const agent = approval.bot.agent;
+      const agentId = agent?.id ?? approval.agentId;
+
       const { token, jti, expiresAt } = await issuer.issue({
         botId: approval.botId,
         ownerId: user.id,
@@ -250,10 +254,15 @@ export async function approvalRoutes(app: FastifyInstance) {
         amount: approval.amount,
         category: approval.category,
         sessionId: randomUUID(),
+        agentId: agentId ?? undefined,
+        agentTrustScore: agent?.trustScore,
+        ownerVerified: approval.bot.owner.status === "ACTIVE" && kycLevelNum >= 1,
+        transactionsCount: agent?.transactionsCount,
+        totalSpent: agent?.totalSpent,
       });
 
       await prisma.bditToken.create({
-        data: { jti, tokenValue: token, botId: approval.botId, amount: approval.amount, category: approval.category, expiresAt },
+        data: { jti, tokenValue: token, botId: approval.botId, agentId: agentId, amount: approval.amount, category: approval.category, expiresAt },
       });
 
       await prisma.transaction.update({
@@ -271,7 +280,11 @@ export async function approvalRoutes(app: FastifyInstance) {
         data: { totalApproved: { increment: 1 } },
       });
 
-      await updateTrustScore(approval.botId, "APPROVED", null, true, user.id);
+      if (agentId) {
+        await updateAgentCounters(agentId, "APPROVED", approval.amount);
+      }
+
+      await updateTrustScore(approval.botId, "APPROVED", null, true, user.id, approval.amount);
 
       await createAuditLog({
         entityType: "approval",
@@ -336,7 +349,7 @@ export async function approvalRoutes(app: FastifyInstance) {
       data: { totalBlocked: { increment: 1 } },
     });
 
-    await updateTrustScore(approval.botId, "BLOCKED", null, false, user.id);
+    await updateTrustScore(approval.botId, "BLOCKED", null, false, user.id, approval.amount);
 
     await createAuditLog({
       entityType: "approval",

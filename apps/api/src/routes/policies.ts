@@ -2,6 +2,13 @@ import type { FastifyInstance } from "fastify";
 import { prisma } from "@payjarvis/database";
 import { requireAuth } from "../middleware/auth.js";
 import { createAuditLog } from "../services/audit.js";
+import { redisPublish } from "../services/redis.js";
+
+const INVALIDATION_CHANNEL = "payjarvis:policy:invalidate";
+
+async function invalidatePolicyCache(botId: string): Promise<void> {
+  await redisPublish(INVALIDATION_CHANNEL, JSON.stringify({ botId }));
+}
 
 export async function policyRoutes(app: FastifyInstance) {
   // Create or update policy for a bot
@@ -31,6 +38,8 @@ export async function policyRoutes(app: FastifyInstance) {
       payload: policyData,
       ipAddress: request.ip,
     });
+
+    await invalidatePolicyCache(botId);
 
     return { success: true, data: policy };
   });
@@ -79,6 +88,8 @@ export async function policyRoutes(app: FastifyInstance) {
       ipAddress: request.ip,
     });
 
+    await invalidatePolicyCache(botId);
+
     return { success: true, data: policy };
   });
 
@@ -103,6 +114,8 @@ export async function policyRoutes(app: FastifyInstance) {
       actorId: user.id,
       ipAddress: request.ip,
     });
+
+    await invalidatePolicyCache(botId);
 
     return { success: true, message: "Policy deleted" };
   });

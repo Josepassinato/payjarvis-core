@@ -26,6 +26,8 @@ await app.register(cors, { origin: true });
 let cdpMonitor: CdpMonitor | null = null;
 let interceptor: PayjarvisInterceptor | null = null;
 let lastActivity: Date | null = null;
+let connectedBotApiKey: string | null = null;
+let connectedBotId: string | null = null;
 const detector = new CheckoutDetector();
 
 // ─── Routes ──────────────────────────────────────────
@@ -76,6 +78,9 @@ app.post("/connect", async (request, reply) => {
     }
   };
 
+  connectedBotApiKey = body.botApiKey;
+  connectedBotId = body.botId;
+
   cdpMonitor = new CdpMonitor({
     port: body.port,
     payjarvisApiUrl: apiUrl,
@@ -118,6 +123,8 @@ app.post("/disconnect", async () => {
     await cdpMonitor.disconnect();
     cdpMonitor = null;
     interceptor = null;
+    connectedBotApiKey = null;
+    connectedBotId = null;
   }
 
   return { success: true, data: { connected: false } };
@@ -126,6 +133,7 @@ app.post("/disconnect", async () => {
 /** Status do agente */
 app.get("/status", async () => ({
   connected: cdpMonitor?.isConnected ?? false,
+  reconnecting: cdpMonitor?.isReconnecting ?? false,
   port: cdpMonitor?.cdpPort ?? null,
   activeInterceptions: interceptor?.activeCount ?? 0,
   recentHistory: interceptor?.recentHistory.map((r) => ({
@@ -313,8 +321,23 @@ app.post("/navigate", async (request, reply) => {
         pageWs.send(JSON.stringify({ id, method, params }));
       });
 
-    // Enable Page events
+    // Enable Page and Network events
     await sendCmd("Page.enable");
+    await sendCmd("Network.enable");
+
+    // Override User-Agent to avoid headless detection
+    await sendCmd("Network.setUserAgentOverride", {
+      userAgent:
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+      acceptLanguage: "en-US,en;q=0.9",
+      platform: "Win32",
+    });
+
+    // Disable webdriver flag
+    await sendCmd("Page.addScriptToEvaluateOnNewDocument", {
+      source:
+        "Object.defineProperty(navigator, 'webdriver', { get: () => false });",
+    });
 
     // Navigate
     const navResult = await sendCmd("Page.navigate", { url: body.url });
@@ -326,7 +349,7 @@ app.post("/navigate", async (request, reply) => {
       });
     }
 
-    // Wait for load event (timeout 10s)
+    // Wait for load event (timeout 15s)
     await new Promise<void>((resolve) => {
       let resolved = false;
       const timeout = setTimeout(() => {
@@ -334,7 +357,7 @@ app.post("/navigate", async (request, reply) => {
           resolved = true;
           resolve();
         }
-      }, 10000);
+      }, 15000);
       const handler = (data: Buffer) => {
         const msg = JSON.parse(data.toString());
         if (msg.method === "Page.loadEventFired") {
@@ -349,10 +372,9 @@ app.post("/navigate", async (request, reply) => {
       pageWs.on("message", handler);
     });
 
-    // Small delay for JS rendering
-    await new Promise((r) => setTimeout(r, 500));
+    // Wait for JS rendering then extract page info
+    await new Promise((r) => setTimeout(r, 1000));
 
-    // Extract page info via Runtime.evaluate
     const titleResult = await sendCmd("Runtime.evaluate", {
       expression: "document.title",
       returnByValue: true,
@@ -367,6 +389,190 @@ app.post("/navigate", async (request, reply) => {
     const finalUrl =
       (urlResult as any)?.result?.value ?? body.url;
 
+    // ─── Detect obstacles (CAPTCHA, 2FA, login, errors) ───
+    const obstacleResult = await sendCmd("Runtime.evaluate", {
+      expression: `(() => {
+        const body = document.body?.innerText?.toLowerCase() || '';
+        const url = window.location.href;
+
+        // CAPTCHA
+        if (
+          document.querySelector('form[action*="captcha"]') ||
+          document.querySelector('#captchacharacters') ||
+          body.includes('enter the characters you see below') ||
+          body.includes('type the characters') ||
+          url.includes('/errors/validateCaptcha')
+        ) {
+          return JSON.stringify({ type: 'CAPTCHA', description: 'Captcha detectado na página' });
+        }
+
+        // 2FA / Login required
+        if (
+          document.querySelector('#auth-mfa-otpcode') ||
+          document.querySelector('#ap_password') ||
+          url.includes('/ap/signin') ||
+          url.includes('/ap/mfa')
+        ) {
+          return JSON.stringify({ type: 'AUTH', description: 'Login ou 2FA necessário' });
+        }
+
+        // Checkout / navigation errors
+        if (
+          (body.includes('sorry! something went wrong') && url.includes('amazon')) ||
+          body.includes('we could not process your order') ||
+          document.querySelector('#error-page')
+        ) {
+          return JSON.stringify({ type: 'NAVIGATION', description: 'Página de erro ou bloqueio detectado' });
+        }
+
+        return JSON.stringify({ type: null });
+      })()`,
+      returnByValue: true,
+    });
+
+    let obstacle: { type: string; description: string } | null = null;
+    try {
+      const parsed = JSON.parse((obstacleResult as any)?.result?.value ?? "{}");
+      if (parsed.type) obstacle = parsed;
+    } catch {
+      // ignore parse errors
+    }
+
+    // If obstacle detected, request handoff via PayJarvis API
+    let handoff: { handoffId: string; status: string; expiresAt: string } | null = null;
+    if (obstacle && connectedBotApiKey && connectedBotId) {
+      const apiUrl = process.env.PAYJARVIS_API_URL ?? "http://localhost:3001";
+      const botApiKey = connectedBotApiKey;
+      const botId = connectedBotId;
+
+      if (botApiKey && botId) {
+        try {
+          const handoffRes = await fetch(`${apiUrl}/bots/${botId}/request-handoff`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Bot-Api-Key": botApiKey,
+            },
+            body: JSON.stringify({
+              sessionUrl: finalUrl,
+              obstacleType: obstacle.type,
+              description: `${obstacle.description} — URL: ${finalUrl}`,
+            }),
+          });
+          const handoffData = await handoffRes.json() as any;
+          if (handoffData.success) {
+            handoff = handoffData.data;
+            app.log.info(
+              { obstacleType: obstacle.type, handoffId: handoff!.handoffId },
+              "Handoff requested — obstacle detected"
+            );
+          }
+        } catch (err) {
+          app.log.error({ err, obstacle }, "Failed to request handoff");
+        }
+      }
+    }
+
+    // Wait for product elements to render (poll up to 10s)
+    // Try multiple selectors Amazon uses across different layouts
+    await sendCmd("Runtime.evaluate", {
+      expression: `new Promise(resolve => {
+        let attempts = 0;
+        const selectors = [
+          '[data-component-type="s-search-result"]',
+          '[data-asin]:not([data-asin=""])',
+          '.s-result-item[data-asin]',
+          '.s-main-slot .s-result-item',
+        ];
+        const check = () => {
+          for (const sel of selectors) {
+            if (document.querySelectorAll(sel).length > 0) {
+              resolve(sel);
+              return;
+            }
+          }
+          if (attempts >= 20) {
+            resolve('timeout');
+          } else {
+            attempts++;
+            setTimeout(check, 500);
+          }
+        };
+        check();
+      })`,
+      awaitPromise: true,
+      returnByValue: true,
+    });
+
+    // Extract structured products (Amazon search results)
+    const productsResult = await sendCmd("Runtime.evaluate", {
+      expression: `(() => {
+        // Try multiple selectors
+        const selectors = [
+          '[data-component-type="s-search-result"]',
+          '.s-main-slot .s-result-item[data-asin]:not([data-asin=""])',
+          '[data-asin]:not([data-asin=""]).s-result-item',
+          'div[data-asin]:not([data-asin=""])',
+        ];
+        let items = [];
+        for (const sel of selectors) {
+          items = Array.from(document.querySelectorAll(sel));
+          if (items.length > 0) break;
+        }
+        const products = [];
+        for (let i = 0; i < Math.min(items.length, 10); i++) {
+          const item = items[i];
+          // Skip ads/non-product items
+          if (!item.getAttribute('data-asin') || item.getAttribute('data-asin') === '') continue;
+
+          // Title: try multiple selectors
+          const titleEl = item.querySelector('h2 a span')
+            || item.querySelector('h2 span')
+            || item.querySelector('[data-cy="title-recipe"] a span')
+            || item.querySelector('.a-text-normal');
+          const title = titleEl?.textContent?.trim();
+
+          // Price
+          const priceEl = item.querySelector('.a-price .a-offscreen');
+          let price = priceEl?.textContent?.trim();
+          if (!price) {
+            const whole = item.querySelector('.a-price-whole')?.textContent?.trim();
+            const frac = item.querySelector('.a-price-fraction')?.textContent?.trim();
+            if (whole) price = '$' + whole + (frac || '00');
+          }
+
+          // Link
+          const linkEl = item.querySelector('h2 a') || item.querySelector('a.a-link-normal[href*="/dp/"]');
+          const link = linkEl?.href;
+
+          // Rating & reviews
+          const rating = item.querySelector('.a-icon-alt')?.textContent?.trim();
+          const reviews = item.querySelector('.a-size-base.s-underline-text')?.textContent?.trim()
+            || item.querySelector('[aria-label*="stars"] + span')?.textContent?.trim();
+
+          // Image
+          const image = item.querySelector('img.s-image')?.src
+            || item.querySelector('img[data-image-latency]')?.src;
+
+          // ASIN
+          const asin = item.getAttribute('data-asin');
+
+          if (title) {
+            products.push({ title, price: price || null, link, rating, reviews, image, asin });
+          }
+        }
+        return JSON.stringify(products);
+      })()`,
+      returnByValue: true,
+    });
+    let products: unknown[] = [];
+    try {
+      const raw = (productsResult as any)?.result?.value;
+      if (raw) products = JSON.parse(raw);
+    } catch {
+      // Not a search page or no products found
+    }
+
     const contentResult = await sendCmd("Runtime.evaluate", {
       expression:
         "(document.body?.innerText || '').substring(0, 2000)",
@@ -379,7 +585,7 @@ app.post("/navigate", async (request, reply) => {
     pageWs.close();
 
     app.log.info(
-      { url: body.url, finalUrl, title },
+      { url: body.url, finalUrl, title, productCount: products.length },
       "Navigation completed"
     );
 
@@ -387,7 +593,10 @@ app.post("/navigate", async (request, reply) => {
       success: true,
       title,
       url: finalUrl,
-      content,
+      products,
+      content: products.length > 0 ? undefined : content,
+      obstacle: obstacle ?? undefined,
+      handoff: handoff ?? undefined,
     };
   } catch (err) {
     const message =

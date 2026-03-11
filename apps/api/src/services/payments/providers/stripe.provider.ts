@@ -37,6 +37,87 @@ export class StripeProvider extends BasePaymentProvider {
     }
   }
 
+  /** Create or retrieve a Stripe Customer for a PayJarvis user */
+  async getOrCreateCustomer(params: {
+    userId: string;
+    email: string;
+    name?: string;
+    existingCustomerId?: string | null;
+  }): Promise<string> {
+    const stripe = this.getClient();
+
+    // Return existing if valid
+    if (params.existingCustomerId) {
+      try {
+        const existing = await stripe.customers.retrieve(params.existingCustomerId);
+        if (!(existing as any).deleted) return params.existingCustomerId;
+      } catch {
+        // Customer doesn't exist anymore, create new
+      }
+    }
+
+    const customer = await stripe.customers.create({
+      email: params.email,
+      name: params.name,
+      metadata: { payjarvisUserId: params.userId },
+    });
+
+    return customer.id;
+  }
+
+  /** Create a SetupIntent for saving a payment method */
+  async createSetupIntent(params: {
+    customerId: string;
+    userId: string;
+    metadata?: Record<string, string>;
+  }): Promise<{ clientSecret: string; setupIntentId: string }> {
+    const stripe = this.getClient();
+
+    const intent = await stripe.setupIntents.create({
+      customer: params.customerId,
+      usage: "off_session",
+      metadata: {
+        payjarvisUserId: params.userId,
+        ...params.metadata,
+      },
+    });
+
+    if (!intent.client_secret) {
+      throw new Error("Stripe did not return a client_secret");
+    }
+
+    return {
+      clientSecret: intent.client_secret,
+      setupIntentId: intent.id,
+    };
+  }
+
+  /** Retrieve the payment method from a completed SetupIntent */
+  async getSetupIntentPaymentMethod(setupIntentId: string): Promise<{
+    paymentMethodId: string;
+    card: { brand: string; last4: string; expMonth: number; expYear: number } | null;
+  }> {
+    const stripe = this.getClient();
+    const intent = await stripe.setupIntents.retrieve(setupIntentId);
+
+    if (intent.status !== "succeeded") {
+      throw new Error(`SetupIntent status is ${intent.status}, not succeeded`);
+    }
+
+    const pmId = typeof intent.payment_method === "string"
+      ? intent.payment_method
+      : intent.payment_method?.id;
+
+    if (!pmId) throw new Error("No payment method on SetupIntent");
+
+    const pm = await stripe.paymentMethods.retrieve(pmId);
+    const card = pm.card
+      ? { brand: pm.card.brand, last4: pm.card.last4, expMonth: pm.card.exp_month, expYear: pm.card.exp_year }
+      : null;
+
+    return { paymentMethodId: pmId, card };
+  }
+
   async createPaymentIntent(params: {
     amount: number;
     currency: string;

@@ -16,6 +16,7 @@ import { analyticsRoutes } from "./routes/analytics.js";
 import { handoffRoutes } from "./routes/handoffs.js";
 import { onboardingRoutes } from "./routes/onboarding.routes.js";
 import { paymentMethodRoutes } from "./routes/payment-methods.js";
+import { agentRoutes } from "./routes/agents.js";
 
 const app = Fastify({ logger: true });
 
@@ -32,6 +33,9 @@ await app.register(transactionRoutes);
 await app.register(notificationRoutes);
 await app.register(analyticsRoutes);
 await app.register(handoffRoutes);
+
+// Agent identity layer
+await app.register(agentRoutes);
 
 // Public identity layer (v1)
 await app.register(publicVerifyRoutes);

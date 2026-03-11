@@ -13,6 +13,12 @@ export interface IssueTokenParams {
   amount: number;
   category: string;
   sessionId: string;
+  // Agent identity fields
+  agentId?: string;
+  agentTrustScore?: number;       // 0-1000 scale
+  ownerVerified?: boolean;
+  transactionsCount?: number;
+  totalSpent?: number;
 }
 
 export class BditIssuer {
@@ -42,6 +48,14 @@ export class BditIssuer {
       category: params.category,
       session_id: params.sessionId,
       jti,
+      // Agent identity fields (included when agent exists)
+      ...(params.agentId && {
+        agent_id: params.agentId,
+        agent_trust_score: params.agentTrustScore,
+        owner_verified: params.ownerVerified,
+        transactions_count: params.transactionsCount,
+        total_spent: params.totalSpent,
+      }),
     };
 
     const token = await new SignJWT(payload as unknown as Record<string, unknown>)
@@ -49,7 +63,7 @@ export class BditIssuer {
       .setIssuedAt(now)
       .setExpirationTime(exp)
       .setIssuer("payjarvis")
-      .setSubject(params.botId)
+      .setSubject(params.agentId ?? params.botId)
       .sign(privateKey);
 
     return {

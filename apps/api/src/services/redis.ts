@@ -59,6 +59,12 @@ export async function redisDel(key: string): Promise<void> {
   }
 }
 
+export async function redisPublish(channel: string, message: string): Promise<void> {
+  if (isConnected()) {
+    await redis.publish(channel, message);
+  }
+}
+
 export async function redisExists(key: string): Promise<boolean> {
   if (isConnected()) {
     return (await redis.exists(key)) === 1;

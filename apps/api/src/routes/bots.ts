@@ -3,8 +3,11 @@ import { prisma } from "@payjarvis/database";
 import { requireAuth, getKycLevel, getInitialTrustScore } from "../middleware/auth.js";
 import { requireBotAuth } from "../middleware/bot-auth.js";
 import { createAuditLog } from "../services/audit.js";
+import { getReputation } from "../services/reputation.js";
 import { redisSet, redisDel } from "../services/redis.js";
 import { createHash, randomBytes } from "node:crypto";
+import { createAgent, resolveAgentId, syncAgentStatus } from "../services/agent-identity.js";
+import { trustScoreBotToAgent } from "@payjarvis/types";
 
 // Default policy created with every new bot
 const DEFAULT_POLICY = {
@@ -57,13 +60,16 @@ export async function botRoutes(app: FastifyInstance) {
       },
     });
 
+    // Auto-create agent identity
+    const agent = await createAgent(bot.id, user.id, name, user.kycLevel);
+
     await createAuditLog({
       entityType: "bot",
       entityId: bot.id,
       action: "bot.created",
       actorType: "user",
       actorId: user.id,
-      payload: { name, platform, initialTrustScore, kycLevel: kycLevelNum },
+      payload: { name, platform, initialTrustScore, kycLevel: kycLevelNum, agentId: agent.id },
       ipAddress: request.ip,
     });
 
@@ -78,7 +84,7 @@ export async function botRoutes(app: FastifyInstance) {
 
     return reply.status(201).send({
       success: true,
-      data: { ...bot, apiKey, policy },
+      data: { ...bot, apiKey, policy, agentId: agent.id },
     });
   });
 
@@ -90,7 +96,7 @@ export async function botRoutes(app: FastifyInstance) {
 
     const bots = await prisma.bot.findMany({
       where: { ownerId: user.id },
-      include: { policy: true },
+      include: { policy: true, agent: { select: { id: true, trustScore: true, status: true, transactionsCount: true, totalSpent: true } } },
     });
 
     return { success: true, data: bots };
@@ -105,7 +111,7 @@ export async function botRoutes(app: FastifyInstance) {
 
     const bot = await prisma.bot.findFirst({
       where: { id: botId, ownerId: user.id },
-      include: { policy: true },
+      include: { policy: true, agent: { include: { reputation: true } } },
     });
 
     if (!bot) return reply.status(404).send({ success: false, error: "Bot not found" });
@@ -176,6 +182,9 @@ export async function botRoutes(app: FastifyInstance) {
       where: { id: botId },
       data: { status: normalizedStatus as any },
     });
+
+    // Sync agent status
+    await syncAgentStatus(botId, normalizedStatus);
 
     // Redis revocation tracking
     if (normalizedStatus === "PAUSED" || normalizedStatus === "REVOKED") {
@@ -354,6 +363,43 @@ export async function botRoutes(app: FastifyInstance) {
         remainingMonth: Math.max(0, policy.maxPerMonth - spentMonth),
       },
     };
+  });
+
+  // GET /bots/:botId/reputation — full agent reputation data
+  app.get("/bots/:botId/reputation", { preHandler: [requireAuth] }, async (request, reply) => {
+    const userId = (request as any).userId as string;
+    const { botId } = request.params as { botId: string };
+    const user = await prisma.user.findUnique({ where: { clerkId: userId } });
+    if (!user) return reply.status(404).send({ success: false, error: "User not found" });
+
+    const bot = await prisma.bot.findFirst({ where: { id: botId, ownerId: user.id } });
+    if (!bot) return reply.status(404).send({ success: false, error: "Bot not found" });
+
+    const agentId = await resolveAgentId(botId);
+    if (!agentId) return reply.status(404).send({ success: false, error: "Agent not found for this bot" });
+
+    const reputation = await getReputation(agentId);
+    if (!reputation) return reply.status(404).send({ success: false, error: "Reputation data not found" });
+
+    return { success: true, data: reputation };
+  });
+
+  // GET /bots/:botId/reputation/sdk — bot-auth variant for agent-sdk
+  app.get("/bots/:botId/reputation/sdk", { preHandler: [requireBotAuth] }, async (request, reply) => {
+    const botId = (request as any).botId as string;
+    const { botId: paramBotId } = request.params as { botId: string };
+
+    if (botId !== paramBotId) {
+      return reply.status(403).send({ success: false, error: "API key does not match the requested bot" });
+    }
+
+    const agentId = await resolveAgentId(botId);
+    if (!agentId) return reply.status(404).send({ success: false, error: "Agent not found" });
+
+    const reputation = await getReputation(agentId);
+    if (!reputation) return reply.status(404).send({ success: false, error: "Reputation data not found" });
+
+    return { success: true, data: reputation };
   });
 
   // KYC: Update user KYC level

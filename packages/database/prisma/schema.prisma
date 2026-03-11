@@ -29,6 +29,12 @@ enum BotStatus {
   REVOKED
 }
 
+enum AgentStatus {
+  ACTIVE
+  SUSPENDED
+  REVOKED
+}
+
 enum BotPlatform {
   TELEGRAM
   DISCORD
@@ -111,10 +117,12 @@ model User {
   telegramChatId      String?
   notificationChannel String     @default("none") // "none" | "telegram" | "email"
   stripeAccountId     String?
+  stripeCustomerId    String?
   createdAt           DateTime   @default(now())
   updatedAt           DateTime   @updatedAt
 
   bots              Bot[]
+  agents            Agent[]
   transactions      Transaction[]
   approvalRequests  ApprovalRequest[]
   handoffRequests   HandoffRequest[]
@@ -155,6 +163,34 @@ model PaymentMethod {
   @@map("payment_methods")
 }
 
+// ─── Agent Identity (first-class) ───
+
+model Agent {
+  id                String      @id        // ag_xxxxx — set at application level
+  botId             String      @unique
+  ownerId           String
+  name              String
+  description       String      @default("")
+  status            AgentStatus @default(ACTIVE)
+  kycLevel          KycLevel    @default(NONE)
+  trustScore        Int         @default(500) // 0-1000 scale
+  totalSpent        Float       @default(0)
+  transactionsCount Int         @default(0)
+  lastActivityAt    DateTime?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  bot        Bot              @relation(fields: [botId], references: [id], onDelete: Cascade)
+  owner      User             @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  reputation AgentReputation?
+
+  @@index([ownerId])
+  @@index([botId])
+  @@map("agents")
+}
+
+// ─── Bot (legacy wrapper, backward compatible) ───
+
 model Bot {
   id             String      @id @default(cuid())
   ownerId        String
@@ -162,13 +198,14 @@ model Bot {
   platform       BotPlatform
   apiKeyHash     String
   status         BotStatus   @default(ACTIVE)
-  trustScore     Float       @default(50)
+  trustScore     Float       @default(50)  // 0-100 legacy scale
   totalApproved  Int         @default(0)
   totalBlocked   Int         @default(0)
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
 
   owner            User              @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  agent            Agent?
   policy           Policy?
   bditTokens       BditToken[]
   transactions     Transaction[]
@@ -208,6 +245,7 @@ model BditToken {
   jti        String          @unique
   tokenValue String?
   botId      String
+  agentId    String?         // agent identity reference
   merchantId String?
   amount     Float
   category   String
@@ -220,6 +258,7 @@ model BditToken {
   merchant Merchant? @relation(fields: [merchantId], references: [id])
 
   @@index([botId])
+  @@index([agentId])
   @@index([jti])
   @@map("bdit_tokens")
 }
@@ -227,6 +266,7 @@ model BditToken {
 model Transaction {
   id               String              @id @default(cuid())
   botId            String
+  agentId          String?             // agent identity reference
   ownerId          String
   merchantId       String?
   merchantName     String
@@ -247,6 +287,7 @@ model Transaction {
   approvalRequest ApprovalRequest?
 
   @@index([botId])
+  @@index([agentId])
   @@index([ownerId])
   @@index([createdAt])
   @@map("transactions")
@@ -256,6 +297,7 @@ model ApprovalRequest {
   id            String         @id @default(cuid())
   transactionId String         @unique
   botId         String
+  agentId       String?        // agent identity reference
   ownerId       String
   amount        Float
   merchantName  String
@@ -315,12 +357,56 @@ model Merchant {
   @@map("merchants")
 }
 
+// ─── Agent Reputation ───
+
+model AgentReputation {
+  id                    String   @id @default(cuid())
+  agentId               String   @unique
+  successfulTransactions Int     @default(0)
+  blockedTransactions   Int      @default(0)
+  failedTransactions    Int      @default(0)
+  chargebacks           Int      @default(0)
+  anomalyEvents         Int      @default(0)
+  merchantCount         Int      @default(0)
+  merchants             String[] @default([])
+  totalSpent            Float    @default(0)
+  averageTransaction    Float    @default(0)
+  lastTransactionAt     DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId])
+  @@map("agent_reputations")
+}
+
+// ─── Platform Registration ───
+
+model PlatformRegistration {
+  id           String   @id @default(cuid())
+  platformType String                         // e.g. "shopify", "woocommerce", "custom"
+  webhookUrl   String
+  events       String[] @default([])          // subscribed event types
+  secret       String                         // HMAC secret for webhook signing
+  contactEmail String?
+  isActive     Boolean  @default(false)       // activated after verification ping
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([platformType])
+  @@index([isActive])
+  @@map("platform_registrations")
+}
+
+// ─── Audit Log ───
+
 model AuditLog {
   id         String   @id @default(cuid())
   entityType String
   entityId   String
   action     String
-  actorType  String   // "user" | "bot" | "system"
+  actorType  String   // "user" | "bot" | "agent" | "system"
   actorId    String
   payload    Json?
   ipAddress  String?

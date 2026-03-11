@@ -9,7 +9,9 @@ import { updateTrustScore } from "../services/trust-score.js";
 import { redisSet, redisExists } from "../services/redis.js";
 import { randomUUID } from "node:crypto";
 import { emitApprovalEvent, emitBotApprovalEvent } from "./approvals.js";
-import { notifyApprovalCreated } from "../services/notifications.js";
+import { notifyApprovalCreated, notifyTransactionApproved, notifyTransactionBlocked } from "../services/notifications.js";
+import { resolveAgentId, getAgentByBotId, updateAgentCounters } from "../services/agent-identity.js";
+import { TRUST_THRESHOLD_BLOCK } from "@payjarvis/types";
 
 export async function paymentRoutes(app: FastifyInstance) {
   const issuer = new BditIssuer(
@@ -44,7 +46,7 @@ export async function paymentRoutes(app: FastifyInstance) {
 
     const bot = await prisma.bot.findFirst({
       where: { id: botId },
-      include: { policy: true, owner: true },
+      include: { policy: true, owner: true, agent: true },
     });
     if (!bot) return reply.status(404).send({ success: false, error: "Bot not found" });
     if (bot.status !== "ACTIVE") {
@@ -54,6 +56,18 @@ export async function paymentRoutes(app: FastifyInstance) {
     const policy = bot.policy;
     if (!policy) {
       return reply.status(400).send({ success: false, error: "Bot has no policy configured" });
+    }
+
+    const agent = bot.agent;
+    const agentId = agent?.id ?? null;
+
+    // Agent trust threshold pre-check
+    if (agent && agent.trustScore < TRUST_THRESHOLD_BLOCK) {
+      return reply.status(403).send({
+        success: false,
+        error: "Agent trust score too low",
+        data: { trustScore: agent.trustScore, threshold: TRUST_THRESHOLD_BLOCK },
+      });
     }
 
     // Call rules engine
@@ -84,6 +98,8 @@ export async function paymentRoutes(app: FastifyInstance) {
           merchantBlacklist: policy.merchantBlacklist,
         },
         botTrustScore: bot.trustScore,
+        agentId: agentId,
+        agentTrustScore: agent?.trustScore,
       }),
     });
 
@@ -97,6 +113,7 @@ export async function paymentRoutes(app: FastifyInstance) {
     const transaction = await prisma.transaction.create({
       data: {
         botId: bot.id,
+        agentId: agentId,
         ownerId: bot.ownerId,
         merchantId,
         merchantName,
@@ -123,10 +140,15 @@ export async function paymentRoutes(app: FastifyInstance) {
         amount,
         category,
         sessionId: randomUUID(),
+        agentId: agentId ?? undefined,
+        agentTrustScore: agent?.trustScore,
+        ownerVerified: bot.owner.status === "ACTIVE" && kycLevelNum >= 1,
+        transactionsCount: agent?.transactionsCount,
+        totalSpent: agent?.totalSpent,
       });
 
       await prisma.bditToken.create({
-        data: { jti, tokenValue: token, botId: bot.id, amount, category, expiresAt },
+        data: { jti, tokenValue: token, botId: bot.id, agentId: agentId, amount, category, expiresAt },
       });
 
       await prisma.transaction.update({
@@ -139,7 +161,12 @@ export async function paymentRoutes(app: FastifyInstance) {
         data: { totalApproved: { increment: 1 } },
       });
 
-      await updateTrustScore(bot.id, "APPROVED", null, false, bot.ownerId);
+      // Update agent counters
+      if (agentId) {
+        await updateAgentCounters(agentId, "APPROVED", amount);
+      }
+
+      await updateTrustScore(bot.id, "APPROVED", null, false, bot.ownerId, amount, merchantId);
 
       await createAuditLog({
         entityType: "transaction",
@@ -160,6 +187,15 @@ export async function paymentRoutes(app: FastifyInstance) {
         payload: { botId: bot.id, amount, merchantId, expiresAt: expiresAt.toISOString() },
       });
 
+      // Fire-and-forget Telegram notification
+      notifyTransactionApproved(bot.ownerId, {
+        botName: bot.name,
+        merchantName,
+        amount,
+        currency: currency ?? "BRL",
+        transactionId: transaction.id,
+      }).catch(err => console.error("[Notification]", err));
+
       return {
         success: true,
         data: {
@@ -179,6 +215,7 @@ export async function paymentRoutes(app: FastifyInstance) {
         data: {
           transactionId: transaction.id,
           botId: bot.id,
+          agentId: agentId,
           ownerId: bot.ownerId,
           amount,
           merchantName,
@@ -261,7 +298,11 @@ export async function paymentRoutes(app: FastifyInstance) {
       data: { totalBlocked: { increment: 1 } },
     });
 
-    await updateTrustScore(bot.id, "BLOCKED", rulesResult.ruleTriggered, false, bot.ownerId);
+    if (agentId) {
+      await updateAgentCounters(agentId, "BLOCKED", amount);
+    }
+
+    await updateTrustScore(bot.id, "BLOCKED", rulesResult.ruleTriggered, false, bot.ownerId, amount, merchantId);
 
     await createAuditLog({
       entityType: "transaction",
@@ -272,6 +313,16 @@ export async function paymentRoutes(app: FastifyInstance) {
       payload: { amount, merchantName, reason: rulesResult.reason, ruleTriggered: rulesResult.ruleTriggered },
       ipAddress: request.ip,
     });
+
+    // Fire-and-forget Telegram notification
+    notifyTransactionBlocked(bot.ownerId, {
+      botName: bot.name,
+      merchantName,
+      amount,
+      currency: currency ?? "BRL",
+      reason: rulesResult.reason,
+      ruleTriggered: rulesResult.ruleTriggered,
+    }).catch(err => console.error("[Notification]", err));
 
     return {
       success: true,

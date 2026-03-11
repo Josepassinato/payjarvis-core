@@ -132,6 +132,49 @@ export async function notifyHandoffCreated(
   }
 }
 
+export async function notifyTransactionApproved(
+  ownerId: string,
+  data: { botName: string; merchantName: string; amount: number; currency: string; transactionId: string }
+): Promise<void> {
+  const user = await prisma.user.findUnique({ where: { id: ownerId } });
+  if (!user) return;
+  if (user.notificationChannel !== "telegram" || !user.telegramChatId) return;
+
+  const now = new Date().toLocaleString("pt-BR", { timeZone: "America/New_York" });
+  const message =
+    `✅ <b>Pagamento Aprovado pelo PayJarvis</b>\n\n` +
+    `🛒 Merchant: ${data.merchantName}\n` +
+    `💰 Valor: <b>$${data.amount.toFixed(2)} ${data.currency}</b>\n` +
+    `✅ Decisão: APROVADO\n` +
+    `🆔 Transação: <code>${data.transactionId}</code>\n` +
+    `🤖 Bot: ${data.botName}\n` +
+    `🕐 Horário: ${now}`;
+
+  await sendTelegramNotification(user.telegramChatId, message);
+}
+
+export async function notifyTransactionBlocked(
+  ownerId: string,
+  data: { botName: string; merchantName: string; amount: number; currency: string; reason: string; ruleTriggered: string | null }
+): Promise<void> {
+  const user = await prisma.user.findUnique({ where: { id: ownerId } });
+  if (!user) return;
+  if (user.notificationChannel !== "telegram" || !user.telegramChatId) return;
+
+  const now = new Date().toLocaleString("pt-BR", { timeZone: "America/New_York" });
+  const message =
+    `🚫 <b>Pagamento Bloqueado pelo PayJarvis</b>\n\n` +
+    `🛒 Merchant: ${data.merchantName}\n` +
+    `💰 Valor: <b>$${data.amount.toFixed(2)} ${data.currency}</b>\n` +
+    `❌ Decisão: BLOQUEADO\n` +
+    `📋 Motivo: ${data.reason}\n` +
+    `🤖 Bot: ${data.botName}\n` +
+    `🕐 Horário: ${now}\n\n` +
+    `Para alterar as regras: https://www.payjarvis.com/rules`;
+
+  await sendTelegramNotification(user.telegramChatId, message);
+}
+
 export async function notifyApprovalCreated(
   ownerId: string,
   data: { botName: string; amount: number; merchantName: string; approvalId: string }

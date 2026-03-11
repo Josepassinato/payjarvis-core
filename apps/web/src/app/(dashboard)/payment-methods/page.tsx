@@ -1,12 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "@clerk/nextjs";
+import { loadStripe } from "@stripe/stripe-js";
+import { Elements, CardElement, useStripe, useElements } from "@stripe/react-stripe-js";
 import { useApi } from "@/lib/use-api";
 import { LoadingSpinner, ErrorBox } from "@/components/loading";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
+const STRIPE_PK = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? "";
+
+const stripePromise = STRIPE_PK ? loadStripe(STRIPE_PK) : null;
 
 interface PaymentMethodRecord {
   id: string;
@@ -15,7 +20,7 @@ interface PaymentMethodRecord {
   status: "CONNECTED" | "PENDING" | "DISABLED";
   accountId: string | null;
   isDefault: boolean;
-  metadata: { keyHint?: string } | null;
+  metadata: { keyHint?: string; brand?: string; last4?: string; expMonth?: number; expYear?: number } | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -40,6 +45,94 @@ async function fetchPaymentMethods(token: string | null): Promise<PaymentMethods
   return json.data ?? json;
 }
 
+/** Inline card form — rendered inside <Elements> */
+function CardForm({ onSuccess, onError }: { onSuccess: (card: { brand: string; last4: string; expMonth: number; expYear: number }) => void; onError: (msg: string) => void }) {
+  const { t } = useTranslation();
+  const stripe = useStripe();
+  const elements = useElements();
+  const { getToken } = useAuth();
+  const [saving, setSaving] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!stripe || !elements) return;
+    setSaving(true);
+
+    try {
+      const token = await getToken();
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      const intentRes = await fetch(`${API_URL}/payment-methods/setup-intent`, {
+        method: "POST",
+        headers,
+      });
+      const intentJson = await intentRes.json();
+      if (!intentRes.ok || !intentJson.success) {
+        onError(intentJson.error ?? t("paymentMethods.cardSaveFailed"));
+        return;
+      }
+
+      const { clientSecret, setupIntentId } = intentJson.data;
+
+      const cardEl = elements.getElement(CardElement);
+      if (!cardEl) { onError("Card element not found"); return; }
+
+      const { error: stripeError } = await stripe.confirmCardSetup(clientSecret, {
+        payment_method: { card: cardEl },
+      });
+
+      if (stripeError) {
+        onError(stripeError.message ?? t("paymentMethods.cardSaveFailed"));
+        return;
+      }
+
+      const confirmRes = await fetch(`${API_URL}/payment-methods/setup-intent/confirm`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ setupIntentId }),
+      });
+      const confirmJson = await confirmRes.json();
+      if (!confirmRes.ok || !confirmJson.success) {
+        onError(confirmJson.error ?? t("paymentMethods.cardSaveFailed"));
+        return;
+      }
+
+      onSuccess(confirmJson.data.card ?? { brand: "card", last4: "****", expMonth: 0, expYear: 0 });
+    } catch {
+      onError(t("paymentMethods.cardSaveFailed"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-3">
+      <div className="bg-surface-hover border border-surface-border rounded-lg p-3">
+        <CardElement
+          options={{
+            style: {
+              base: {
+                fontSize: "14px",
+                color: "#e5e7eb",
+                "::placeholder": { color: "#6b7280" },
+              },
+              invalid: { color: "#ef4444" },
+            },
+          }}
+        />
+      </div>
+      <button
+        type="submit"
+        disabled={saving || !stripe}
+        className="w-full px-4 py-2 text-sm rounded-lg bg-brand-600 text-white hover:bg-brand-500 transition-colors disabled:opacity-50"
+      >
+        {saving ? t("paymentMethods.savingCard") : t("paymentMethods.addCard")}
+      </button>
+    </form>
+  );
+}
+
 export default function PaymentMethodsPage() {
   const { t } = useTranslation();
   const { getToken } = useAuth();
@@ -47,8 +140,7 @@ export default function PaymentMethodsPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [showKeyForm, setShowKeyForm] = useState(false);
-  const [stripeKey, setStripeKey] = useState("");
+  const [showCardForm, setShowCardForm] = useState(false);
 
   const PROVIDER_CARDS = [
     {
@@ -92,36 +184,6 @@ export default function PaymentMethodsPage() {
     return info?.available ?? false;
   };
 
-  const handleSaveKey = async () => {
-    if (!stripeKey.trim()) return;
-    setActionLoading("stripe");
-    setErrorMessage(null);
-    try {
-      const token = await getToken();
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (token) headers["Authorization"] = `Bearer ${token}`;
-      const res = await fetch(`${API_URL}/payment-methods/stripe/connect`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ stripeSecretKey: stripeKey.trim() }),
-      });
-      const json = await res.json();
-      if (!res.ok || json.success === false) {
-        setErrorMessage(json.error ?? t("paymentMethods.saveKeyFailed"));
-        return;
-      }
-      setSuccessMessage(t("paymentMethods.stripeSuccess"));
-      setShowKeyForm(false);
-      setStripeKey("");
-      setTimeout(() => setSuccessMessage(null), 3000);
-      refetch();
-    } catch {
-      setErrorMessage(t("paymentMethods.connectionError"));
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
   const handleDisconnect = async (providerId: string) => {
     setActionLoading(providerId);
     try {
@@ -142,8 +204,23 @@ export default function PaymentMethodsPage() {
     }
   };
 
+  const handleCardSuccess = useCallback(() => {
+    setShowCardForm(false);
+    setSuccessMessage(t("paymentMethods.cardSaved"));
+    setTimeout(() => setSuccessMessage(null), 3000);
+    refetch();
+  }, [refetch, t]);
+
+  const handleCardError = useCallback((msg: string) => {
+    setErrorMessage(msg);
+  }, []);
+
   if (loading) return <LoadingSpinner />;
   if (error) return <ErrorBox message={error} onRetry={refetch} />;
+
+  const stripeMethod = getMethodForProvider("stripe");
+  const isStripeConnected = stripeMethod?.status === "CONNECTED";
+  const hasCard = isStripeConnected && stripeMethod?.metadata?.last4;
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -156,12 +233,31 @@ export default function PaymentMethodsPage() {
       {errorMessage && (
         <div className="mb-6 bg-blocked/10 border border-blocked/20 rounded-xl px-5 py-3 text-sm text-blocked">
           {errorMessage}
+          <button onClick={() => setErrorMessage(null)} className="ml-2 underline text-xs">dismiss</button>
         </div>
       )}
 
       <div className="mb-8">
         <h2 className="text-2xl font-bold text-white">{t("paymentMethods.title")}</h2>
         <p className="text-sm text-gray-500 mt-1">{t("paymentMethods.subtitle")}</p>
+      </div>
+
+      {/* Security notice */}
+      <div className="mb-6 bg-emerald-950/30 border border-emerald-800/30 rounded-xl px-5 py-3 flex items-start gap-3">
+        <svg className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+        </svg>
+        <p className="text-xs text-emerald-400/80">
+          {t("paymentMethods.securityNotice")}{" "}
+          <a
+            href="https://stripe.com/docs/security"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline text-emerald-400 hover:text-emerald-300"
+          >
+            {t("paymentMethods.learnMore")}
+          </a>
+        </p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4">
@@ -201,14 +297,21 @@ export default function PaymentMethodsPage() {
                   </div>
                 </div>
 
+                {/* Show connected account info */}
                 {!card.comingSoon && isConnected && method?.accountId && (
                   <p className="text-xs text-gray-500 mb-1">
                     {t("paymentMethods.account")}: <span className="text-gray-400 font-mono">{method.accountId}</span>
                   </p>
                 )}
-                {!card.comingSoon && isConnected && (method?.metadata as any)?.keyHint && (
-                  <p className="text-xs text-gray-500 mb-3">
-                    {t("paymentMethods.key")}: <span className="text-gray-400 font-mono">{(method?.metadata as any).keyHint}</span>
+                {/* Show saved card info */}
+                {!card.comingSoon && isConnected && method?.metadata?.last4 && (
+                  <p className="text-xs text-gray-500 mb-1">
+                    {t("paymentMethods.cardLast4")} <span className="text-gray-400 font-mono">****{method.metadata.last4}</span>
+                    {method.metadata.expMonth && method.metadata.expYear && (
+                      <span className="ml-2 text-gray-600">
+                        {t("paymentMethods.cardExpiry")} {String(method.metadata.expMonth).padStart(2, "0")}/{method.metadata.expYear}
+                      </span>
+                    )}
                   </p>
                 )}
               </div>
@@ -222,54 +325,73 @@ export default function PaymentMethodsPage() {
                     {t("common.comingSoon")}
                   </button>
                 ) : isConnected ? (
-                  <button
-                    onClick={() => handleDisconnect(card.id)}
-                    disabled={isLoading}
-                    className="w-full px-4 py-2 text-sm rounded-lg bg-blocked/20 text-blocked hover:bg-blocked/30 transition-colors disabled:opacity-50"
-                  >
-                    {isLoading ? t("common.disconnecting") : t("common.disconnect")}
-                  </button>
-                ) : card.id === "stripe" && showKeyForm ? (
                   <div className="space-y-2">
-                    <input
-                      type="password"
-                      value={stripeKey}
-                      onChange={(e) => setStripeKey(e.target.value)}
-                      placeholder={t("paymentMethods.keyPlaceholder")}
-                      className="w-full px-3 py-2 text-sm rounded-lg bg-surface-hover border border-surface-border text-white placeholder-gray-500 font-mono focus:outline-none focus:border-brand-600"
-                      autoFocus
-                    />
-                    <div className="flex gap-2">
+                    {/* Show Add Card button if no card yet */}
+                    {card.id === "stripe" && !hasCard && stripePromise && !showCardForm && (
                       <button
-                        onClick={handleSaveKey}
-                        disabled={isLoading || !stripeKey.trim()}
-                        className="flex-1 px-4 py-2 text-sm rounded-lg bg-brand-600 text-white hover:bg-brand-500 transition-colors disabled:opacity-50"
+                        onClick={() => { setShowCardForm(true); setErrorMessage(null); }}
+                        className="w-full px-4 py-2 text-sm rounded-lg bg-brand-600/20 text-brand-400 hover:bg-brand-600/30 transition-colors border border-brand-600/30"
                       >
-                        {isLoading ? t("paymentMethods.validating") : t("common.save")}
+                        {t("paymentMethods.addCard")}
                       </button>
-                      <button
-                        onClick={() => { setShowKeyForm(false); setStripeKey(""); setErrorMessage(null); }}
-                        className="px-4 py-2 text-sm rounded-lg bg-surface-hover text-gray-400 hover:text-white transition-colors"
-                      >
-                        {t("common.cancel")}
-                      </button>
-                    </div>
+                    )}
+                    {/* Inline card form */}
+                    {card.id === "stripe" && showCardForm && stripePromise && (
+                      <div className="space-y-2">
+                        <Elements stripe={stripePromise}>
+                          <CardForm onSuccess={handleCardSuccess} onError={handleCardError} />
+                        </Elements>
+                        <button
+                          onClick={() => { setShowCardForm(false); setErrorMessage(null); }}
+                          className="w-full px-4 py-2 text-sm rounded-lg bg-surface-hover text-gray-400 hover:text-white transition-colors"
+                        >
+                          {t("common.cancel")}
+                        </button>
+                      </div>
+                    )}
+                    <button
+                      onClick={() => handleDisconnect(card.id)}
+                      disabled={isLoading}
+                      className="w-full px-4 py-2 text-sm rounded-lg bg-blocked/20 text-blocked hover:bg-blocked/30 transition-colors disabled:opacity-50"
+                    >
+                      {isLoading ? t("common.disconnecting") : t("common.disconnect")}
+                    </button>
                   </div>
+                ) : card.id === "stripe" && showCardForm && stripePromise ? (
+                  <div className="space-y-2">
+                    <Elements stripe={stripePromise}>
+                      <CardForm onSuccess={handleCardSuccess} onError={handleCardError} />
+                    </Elements>
+                    <button
+                      onClick={() => { setShowCardForm(false); setErrorMessage(null); }}
+                      className="w-full px-4 py-2 text-sm rounded-lg bg-surface-hover text-gray-400 hover:text-white transition-colors"
+                    >
+                      {t("common.cancel")}
+                    </button>
+                  </div>
+                ) : card.id === "stripe" && stripePromise ? (
+                  <button
+                    onClick={() => { setShowCardForm(true); setErrorMessage(null); }}
+                    disabled={isLoading}
+                    className="w-full px-4 py-2 text-sm rounded-lg bg-brand-600 text-white hover:bg-brand-500 transition-colors disabled:opacity-50"
+                  >
+                    {t("paymentMethods.addCard")}
+                  </button>
                 ) : !available ? (
                   <button
                     disabled
-                    title="Configure STRIPE_SECRET_KEY"
+                    title="Stripe not configured"
                     className="w-full px-4 py-2 text-sm rounded-lg bg-surface-hover text-gray-600 cursor-not-allowed"
                   >
                     {t("common.configure")}
                   </button>
                 ) : (
                   <button
-                    onClick={() => { setShowKeyForm(true); setErrorMessage(null); }}
+                    onClick={() => { setShowCardForm(true); setErrorMessage(null); }}
                     disabled={isLoading}
                     className="w-full px-4 py-2 text-sm rounded-lg bg-brand-600 text-white hover:bg-brand-500 transition-colors disabled:opacity-50"
                   >
-                    {t("common.connect")}
+                    {t("paymentMethods.addCard")}
                   </button>
                 )}
               </div>

@@ -3,6 +3,7 @@ import { prisma, Prisma } from "@payjarvis/database";
 import { requireAuth } from "../middleware/auth.js";
 import { getPaymentProvider, getAvailableProviders } from "../services/payments/payment-factory.js";
 import { StripeProvider } from "../services/payments/providers/stripe.provider.js";
+import { PayPalProvider } from "../services/payments/providers/paypal.provider.js";
 import { encrypt } from "../services/payments/vault.js";
 import { createAuditLog } from "../services/audit.js";
 
@@ -83,6 +84,168 @@ export async function paymentMethodRoutes(app: FastifyInstance) {
     });
 
     return { success: true, data: { connected: true, accountName: validation.accountName, keyHint } };
+  });
+
+  // POST /payment-methods/setup-intent — create Stripe SetupIntent for card onboarding
+  app.post("/payment-methods/setup-intent", { preHandler: [requireAuth] }, async (request, reply) => {
+    const userId = (request as any).userId as string;
+
+    const user = await prisma.user.findUnique({ where: { clerkId: userId } });
+    if (!user) return reply.status(404).send({ success: false, error: "User not found" });
+
+    const provider = getPaymentProvider("stripe") as StripeProvider;
+    if (!provider.isAvailable) {
+      return reply.status(503).send({ success: false, error: "Stripe is not configured on this server" });
+    }
+
+    // Get or create Stripe Customer
+    const customerId = await provider.getOrCreateCustomer({
+      userId: user.id,
+      email: user.email,
+      name: user.fullName ?? undefined,
+      existingCustomerId: user.stripeCustomerId,
+    });
+
+    // Save stripeCustomerId if new
+    if (customerId !== user.stripeCustomerId) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { stripeCustomerId: customerId },
+      });
+    }
+
+    const result = await provider.createSetupIntent({
+      customerId,
+      userId: user.id,
+    });
+
+    await createAuditLog({
+      entityType: "payment_method",
+      entityId: user.id,
+      action: "setup_intent.created",
+      actorType: "user",
+      actorId: user.id,
+      payload: { setupIntentId: result.setupIntentId },
+      ipAddress: request.ip,
+    });
+
+    return { success: true, data: result };
+  });
+
+  // POST /payment-methods/setup-intent/confirm — save the card after SetupIntent succeeds
+  app.post("/payment-methods/setup-intent/confirm", { preHandler: [requireAuth] }, async (request, reply) => {
+    const userId = (request as any).userId as string;
+    const { setupIntentId } = (request.body as { setupIntentId?: string }) ?? {};
+
+    if (!setupIntentId) {
+      return reply.status(400).send({ success: false, error: "setupIntentId is required" });
+    }
+
+    const user = await prisma.user.findUnique({ where: { clerkId: userId } });
+    if (!user) return reply.status(404).send({ success: false, error: "User not found" });
+
+    const provider = getPaymentProvider("stripe") as StripeProvider;
+    const { paymentMethodId, card } = await provider.getSetupIntentPaymentMethod(setupIntentId);
+
+    // Save as payment method
+    await prisma.paymentMethod.upsert({
+      where: {
+        userId_provider: { userId: user.id, provider: "STRIPE" },
+      },
+      create: {
+        userId: user.id,
+        provider: "STRIPE",
+        status: "CONNECTED",
+        accountId: card ? `${card.brand} ****${card.last4}` : "Card",
+        credentials: { paymentMethodId },
+        metadata: card ? { brand: card.brand, last4: card.last4, expMonth: card.expMonth, expYear: card.expYear } : {},
+      },
+      update: {
+        status: "CONNECTED",
+        accountId: card ? `${card.brand} ****${card.last4}` : "Card",
+        credentials: { paymentMethodId },
+        metadata: card ? { brand: card.brand, last4: card.last4, expMonth: card.expMonth, expYear: card.expYear } : {},
+      },
+    });
+
+    await createAuditLog({
+      entityType: "payment_method",
+      entityId: user.id,
+      action: "payment_method.card_saved",
+      actorType: "user",
+      actorId: user.id,
+      payload: { setupIntentId, brand: card?.brand, last4: card?.last4 },
+      ipAddress: request.ip,
+    });
+
+    return {
+      success: true,
+      data: {
+        paymentMethodId,
+        card,
+      },
+    };
+  });
+
+  // POST /payment-methods/paypal/connect — save user's PayPal credentials
+  app.post("/payment-methods/paypal/connect", { preHandler: [requireAuth] }, async (request, reply) => {
+    const userId = (request as any).userId as string;
+    const { clientId, clientSecret } = (request.body as { clientId?: string; clientSecret?: string }) ?? {};
+
+    if (!clientId || typeof clientId !== "string") {
+      return reply.status(400).send({ success: false, error: "clientId is required" });
+    }
+    if (!clientSecret || typeof clientSecret !== "string") {
+      return reply.status(400).send({ success: false, error: "clientSecret is required" });
+    }
+
+    const user = await prisma.user.findUnique({ where: { clerkId: userId } });
+    if (!user) return reply.status(404).send({ success: false, error: "User not found" });
+
+    const provider = getPaymentProvider("paypal") as PayPalProvider;
+
+    // Validate credentials against PayPal API
+    const validation = await provider.validateCredentials(clientId, clientSecret);
+    if (!validation.valid) {
+      return reply.status(400).send({ success: false, error: "Invalid PayPal credentials — could not authenticate with PayPal API" });
+    }
+
+    // Encrypt and store both credentials
+    const encryptedClientId = encrypt(clientId);
+    const encryptedSecret = encrypt(clientSecret);
+    const idHint = clientId.slice(0, 6) + "..." + clientId.slice(-4);
+
+    await prisma.paymentMethod.upsert({
+      where: {
+        userId_provider: { userId: user.id, provider: "PAYPAL" },
+      },
+      create: {
+        userId: user.id,
+        provider: "PAYPAL",
+        status: "CONNECTED",
+        accountId: `PayPal (${validation.environment})`,
+        credentials: { encryptedClientId, encryptedSecret },
+        metadata: { idHint, environment: validation.environment },
+      },
+      update: {
+        status: "CONNECTED",
+        accountId: `PayPal (${validation.environment})`,
+        credentials: { encryptedClientId, encryptedSecret },
+        metadata: { idHint, environment: validation.environment },
+      },
+    });
+
+    await createAuditLog({
+      entityType: "payment_method",
+      entityId: user.id,
+      action: "payment_method.connected",
+      actorType: "user",
+      actorId: user.id,
+      payload: { provider: "paypal", idHint, environment: validation.environment },
+      ipAddress: request.ip,
+    });
+
+    return { success: true, data: { connected: true, environment: validation.environment, idHint } };
   });
 
   // GET /payment-methods/:provider/status — check connection status for a provider
