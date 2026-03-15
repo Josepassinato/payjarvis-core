@@ -112,6 +112,7 @@ model User {
   clerkId             String     @unique
   email               String     @unique
   fullName            String
+  phone               String?
   dateOfBirth         DateTime?
   documentNumber      String?
   country             String?
@@ -123,6 +124,9 @@ model User {
   onboardingStep      Int        @default(0)
   termsAcceptedAt     DateTime?
   telegramChatId      String?
+  approvalThreshold   Float      @default(50.0)
+  onboardingCompleted Boolean    @default(false)
+  botActivatedAt      DateTime?
   notificationChannel String     @default("none") // "none" | "telegram" | "email"
   stripeAccountId     String?
   stripeCustomerId    String?
@@ -137,6 +141,7 @@ model User {
   telegramLinkCode   TelegramLinkCode?
   paymentMethods     PaymentMethod[]
   instanceAssignment InstanceUser?
+  storeContexts      StoreContext[]
 
   @@map("users")
 }
@@ -212,6 +217,10 @@ model Bot {
   totalBlocked   Int         @default(0)
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
+  systemPrompt   String?   @map("system_prompt")
+  botDisplayName String?   @map("bot_display_name")
+  capabilities   String[]  @default([])
+  language       String    @default("pt-BR")
 
   owner            User              @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   agent            Agent?
@@ -221,6 +230,7 @@ model Bot {
   approvalRequests ApprovalRequest[]
   handoffRequests  HandoffRequest[]
   integrations     BotIntegration[]
+  storePermissions StoreBotPermission[]
 
   @@index([ownerId])
   @@map("bots")
@@ -514,4 +524,109 @@ model CommerceSearchLog {
   @@index([service])
   @@index([createdAt])
   @@map("commerce_search_logs")
+}
+
+// ─── Legacy: User Account Vault (to be migrated to StoreContext) ───
+
+model UserAccountVault {
+  id           String    @id @default(cuid())
+  userId       String
+  provider     String    // "amazon", "uber", "hotels", etc.
+  cookiesEnc   String    // JSON de cookies, criptografado AES-256
+  userAgent    String    // user agent da sessão original
+  isValid      Boolean   @default(true)
+  lastVerified DateTime  @default(now())
+  expiresAt    DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([userId, provider])
+  @@index([userId])
+  @@index([provider, isValid])
+  @@map("user_account_vaults")
+}
+
+// ─── Legacy: Amazon Order Tracking (to be migrated to universal orders) ───
+
+model AmazonOrder {
+  id            String   @id @default(cuid())
+  botId         String
+  userId        String
+  asin          String
+  title         String
+  price         Float
+  quantity      Int      @default(1)
+  status        String   @default("PENDING")
+  amazonOrderId String?
+  errorMsg      String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([userId])
+  @@index([botId])
+  @@index([status])
+  @@map("amazon_orders")
+}
+
+// ─── Connected Stores ───
+
+model StoreContext {
+  id              String    @id @default(cuid())
+  userId          String
+  store           String    // e.g. "amazon", "walmart", "target"
+  storeUrl        String    // e.g. "https://www.amazon.com"
+  storeLabel      String    // e.g. "Amazon"
+  bbContextId     String?   // Browserbase Context ID — only used for scraping, not login
+  status          String    @default("configured") // configured | authenticated | expired
+  authenticatedAt DateTime?
+  lastUsedAt      DateTime  @default(now())
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  user           User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessions       StoreSession[]
+  botPermissions StoreBotPermission[]
+
+  @@unique([userId, store])
+  @@index([userId])
+  @@index([store, status])
+  @@map("store_contexts")
+}
+
+model StoreSession {
+  id             String    @id @default(cuid())
+  storeContextId String
+  bbSessionId    String    // Browserbase session ID
+  status         String    @default("running") // running | completed | expired
+  purpose        String?   // e.g. "login", "purchase", "search"
+  openedAt       DateTime  @default(now())
+  closedAt       DateTime?
+
+  storeContext StoreContext @relation(fields: [storeContextId], references: [id], onDelete: Cascade)
+
+  @@index([storeContextId])
+  @@index([status])
+  @@map("store_sessions")
+}
+
+model StoreBotPermission {
+  id                String   @id @default(cuid())
+  botId             String
+  storeContextId    String
+  enabled           Boolean  @default(true)
+  maxPerTransaction Float    @default(50)
+  maxPerDay         Float    @default(150)
+  maxPerMonth       Float    @default(500)
+  allowedCategories String[] @default([])
+  autoApproveBelow  Float    @default(25)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  bot          Bot          @relation(fields: [botId], references: [id], onDelete: Cascade)
+  storeContext StoreContext @relation(fields: [storeContextId], references: [id], onDelete: Cascade)
+
+  @@unique([botId, storeContextId])
+  @@index([botId])
+  @@index([storeContextId])
+  @@map("store_bot_permissions")
 }

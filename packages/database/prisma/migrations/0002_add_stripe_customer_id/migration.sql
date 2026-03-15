@@ -1,2 +1,2 @@
 -- AlterTable
-ALTER TABLE "User" ADD COLUMN "stripeCustomerId" TEXT;
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "stripeCustomerId" TEXT;
