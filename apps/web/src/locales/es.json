@@ -15,7 +15,8 @@
     "logout": "Cerrar sesion",
     "more": "Mas",
     "connections": "Conexiones",
-    "assistants": "Asistentes"
+    "assistants": "Asistentes",
+    "stores": "Tiendas"
   },
   "common": {
     "save": "Guardar",
@@ -35,7 +36,8 @@
     "previous": "Anterior",
     "loading": "Cargando...",
     "until": "hasta",
-    "above": "por encima de"
+    "above": "por encima de",
+    "share": "Compartir"
   },
   "decisions": {
     "approved": "Aprobado",

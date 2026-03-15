@@ -543,11 +543,11 @@ export function createShareLink(
 }
 
 export function getSharePreview(code: string): Promise<SharePreview> {
-  return request<SharePreview>(`/api/share/${code}`);
+  return request<SharePreview>(`/share/${code}`);
 }
 
 export function cloneSharedBot(code: string, token?: string | null): Promise<CloneResult> {
-  return request<CloneResult>(`/api/share/${code}/clone`, {
+  return request<CloneResult>(`/share/${code}/clone`, {
     token,
     method: "POST",
     body: JSON.stringify({}),
@@ -555,7 +555,7 @@ export function cloneSharedBot(code: string, token?: string | null): Promise<Clo
 }
 
 export function getBotShareLinks(botId: string, token?: string | null): Promise<ShareLinkDetails[]> {
-  return request<ShareLinkDetails[]>(`/api/bots/${botId}/share`, { token });
+  return request<ShareLinkDetails[]>(`/bots/${botId}/share`, { token });
 }
 
 export function deactivateShareLink(code: string, token?: string | null): Promise<void> {

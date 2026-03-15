@@ -30,6 +30,7 @@ import { storeRoutes } from "./routes/stores.js";
 import { botShareRoutes } from "./routes/bot-share.js";
 import { onboardingBotRoutes } from "./routes/onboarding-bot.js";
 import { stripeWebhookRoutes } from "./routes/stripe-webhook.js";
+import { whatsappWebhookRoutes } from "./routes/whatsapp-webhook.js";
 import { startTimeoutChecker } from "./core/approval-manager.js";
 
 const app = Fastify({ logger: true });
@@ -99,6 +100,9 @@ await app.register(onboardingBotRoutes);
 
 // Stripe Webhook — setup_intent.succeeded, payment confirmations
 await app.register(stripeWebhookRoutes);
+
+// WhatsApp Webhook — Twilio sandbox, Jarvis AI responses
+await app.register(whatsappWebhookRoutes);
 
 // Serve adapter.js for merchant integration
 app.get("/adapter.js", async (request, reply) => {

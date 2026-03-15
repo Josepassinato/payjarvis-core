@@ -1,5 +1,33 @@
 # HISTORICO.md — PayJarvis
 
+## 2026-03-15 — Share via Bot + Fix "Link nao encontrado"
+
+### O que foi feito
+- **Endpoint interno**: `GET /api/bots/:botId/share/generate?telegramId=X` — gera share link + QR Code base64 sem Clerk auth, protegido por x-internal-secret
+- **Comando /indicar**: novo comando no OpenClaw que chama share/generate e envia link + QR Code no Telegram
+- **Deteccao de texto**: "compartilhar", "share", "indicar", "quero indicar", "link de indicacao" ativam o fluxo automaticamente
+- **Menu atualizado**: `/indicar` adicionado ao menu de comandos do /start (pt e en)
+
+### Bug corrigido — "Link nao encontrado" na pagina /join
+- **Causa raiz**: `NEXT_PUBLIC_API_URL=https://www.payjarvis.com/api` + chamadas com `/api/share/...` = URL duplicada `/api/api/share/...` → 404
+- **Fix**: removido prefixo `/api` das chamadas `getSharePreview`, `cloneSharedBot` e `getBotShareLinks` em `apps/web/src/lib/api.ts`
+- Codigos estavam salvos corretamente no banco — o problema era puramente no frontend
+
+### Testes producao
+- `GET /api/share/LKA9DB3Q` → 200, valid=true, sharedBy=Jose ✓
+- `/join/LKA9DB3Q` → HTTP 200 ✓
+- Sem duplo `/api/api/` no frontend ✓
+- `GET share/generate` → 200, code + QR base64 ✓
+- Sem auth → 401 ✓
+- Logs sem erros ✓
+
+### Integracoes ativas
+- OpenClaw: /indicar + texto "compartilhar" → gera link + QR Code
+- API: share/generate interno para bots
+- Frontend: /join/[code] carrega preview corretamente
+
+---
+
 ## 2026-03-15 — Zero Friction Onboarding via Bot
 
 ### O que foi feito

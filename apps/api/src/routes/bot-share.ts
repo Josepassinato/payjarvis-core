@@ -130,6 +130,69 @@ export async function botShareRoutes(app: FastifyInstance) {
     }
   );
 
+  // GET /api/bots/:botId/share/generate — Internal endpoint for OpenClaw bot
+  app.get(
+    "/api/bots/:botId/share/generate",
+    async (request, reply) => {
+      const secret = request.headers["x-internal-secret"] as string;
+      const INTERNAL_SECRET = process.env.INTERNAL_SECRET || "dev-internal-secret";
+      if (secret !== INTERNAL_SECRET) {
+        return reply.status(401).send({ success: false, error: "Unauthorized" });
+      }
+
+      const { botId } = request.params as { botId: string };
+      const { telegramId } = request.query as { telegramId?: string };
+
+      if (!telegramId) {
+        return reply.status(400).send({ success: false, error: "telegramId query param required" });
+      }
+
+      try {
+        // Find user by telegram ID
+        const user = await (await import("@payjarvis/database")).prisma.user.findFirst({
+          where: { telegramChatId: telegramId },
+        });
+        if (!user) {
+          return reply.status(404).send({ success: false, error: "User not found for this telegramId" });
+        }
+
+        // Check for existing active share link for this bot+user
+        const existing = await (await import("@payjarvis/database")).prisma.botShareLink.findFirst({
+          where: { botId, createdByUserId: user.id, active: true },
+          orderBy: { createdAt: "desc" },
+        });
+
+        let code: string;
+        let joinUrl: string;
+
+        if (existing && (!existing.expiresAt || existing.expiresAt > new Date())) {
+          code = existing.code;
+          joinUrl = `${BASE_URL}/join/${code}`;
+        } else {
+          // Generate new share link using user's clerkId (what generateShareLink expects)
+          const shareLink = await generateShareLink(botId, user.clerkId);
+          code = shareLink.code;
+          joinUrl = `${BASE_URL}/join/${code}`;
+        }
+
+        const qrCodeBase64 = await QRCode.toDataURL(joinUrl, {
+          width: 512,
+          margin: 2,
+          color: { dark: "#000000", light: "#FFFFFF" },
+        });
+
+        return {
+          success: true,
+          data: { code, url: joinUrl, qrCodeBase64 },
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to generate share link";
+        console.error("[Bot Share Generate]", message);
+        return reply.status(500).send({ success: false, error: message });
+      }
+    }
+  );
+
   // DELETE /api/share/:code — Deactivate share link
   app.delete(
     "/api/share/:code",

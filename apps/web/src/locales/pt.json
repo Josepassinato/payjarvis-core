@@ -15,7 +15,8 @@
     "logout": "Sair",
     "more": "Mais",
     "connections": "Conexoes",
-    "assistants": "Assistentes"
+    "assistants": "Assistentes",
+    "stores": "Lojas"
   },
   "common": {
     "save": "Salvar",
@@ -35,7 +36,8 @@
     "previous": "Anterior",
     "loading": "Carregando...",
     "until": "ate",
-    "above": "acima de"
+    "above": "acima de",
+    "share": "Compartilhar"
   },
   "decisions": {
     "approved": "Aprovado",
