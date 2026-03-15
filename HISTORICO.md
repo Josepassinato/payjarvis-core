@@ -1,5 +1,42 @@
 # HISTORICO.md — PayJarvis
 
+## 2026-03-15 — Zero Friction Onboarding via Bot
+
+### O que foi feito
+- **Schema**: modelo `OnboardingSession` no Prisma com 16 campos (telegramChatId, whatsappPhone, shareCode, step, email, emailToken, etc)
+- **Migration**: `20260315180000_add_onboarding_session` — tabela `onboarding_sessions` criada no PostgreSQL
+- **Service**: `onboarding-bot.service.ts` — state machine completa (start → email → email_confirm → limits → payment → complete)
+- **Routes**: `onboarding-bot.ts` — 3 endpoints internos (POST /start, POST /step, GET /status/:chatId) protegidos por x-internal-secret
+- **Stripe Webhook**: handler `setup_intent.succeeded` adicionado ao `stripe-webhook.ts`
+- **Email**: template `sendOnboardingConfirmation` com codigo 6 digitos adicionado ao `email.ts`
+- **Pagina /setup-payment**: Stripe Elements para adicionar cartao (page.tsx)
+- **Pagina /join atualizada**: CTAs "Ativar no Telegram", "Ativar no WhatsApp", "Prefiro configurar pelo site"
+- **Server.ts**: rotas onboarding registradas
+- **OpenClaw**: handler `/start SHARECODE` chama onboarding API + interceptor de mensagens redireciona para processStep durante onboarding ativo
+
+### Bug corrigido durante deploy
+- `requireInternal` era funcao sincrona sem `done()` — Fastify travava o request. Corrigido para `async function`
+
+### Testes producao
+- `POST /api/onboarding/start` → 200, retorna sessionId + mensagem de boas-vindas ✓
+- `GET /api/onboarding/status/test999` → 200, `{ active: true }` ✓
+- `POST /api/onboarding/step` (email) → 200, avanca para email_confirm ✓
+- `POST /api/onboarding/start` sem header → 401 (auth obrigatoria) ✓
+- `/join/TEST` → 200 ✓
+- `/setup-payment` → 307 (redirect Clerk, esperado) ✓
+- Logs sem erros ✓
+
+### Integracoes ativas
+- OpenClaw: detecta shareCode no /start e redireciona mensagens para onboarding
+- Stripe: Setup Intent + webhook para confirmacao de cartao
+- Email: envio de codigo de confirmacao 6 digitos
+- Clerk: /join e /setup-payment como rotas publicas
+
+### Backup
+- `pre-zeroonboard-20260315-1814` em `/root/backups/`
+
+---
+
 ## 2026-03-15 — Bot Share (Viral Growth Engine)
 
 ### O que foi feito

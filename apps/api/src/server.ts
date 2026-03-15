@@ -28,6 +28,8 @@ import { vaultRoutes } from "./routes/vault.js";
 import { checkoutRoutes } from "./routes/checkout.js";
 import { storeRoutes } from "./routes/stores.js";
 import { botShareRoutes } from "./routes/bot-share.js";
+import { onboardingBotRoutes } from "./routes/onboarding-bot.js";
+import { stripeWebhookRoutes } from "./routes/stripe-webhook.js";
 import { startTimeoutChecker } from "./core/approval-manager.js";
 
 const app = Fastify({ logger: true });
@@ -91,6 +93,12 @@ await app.register(onboardingRoutes);
 
 // Bot Share — viral sharing links, QR codes, cloning
 await app.register(botShareRoutes);
+
+// Onboarding Bot — conversational onboarding via Telegram/WhatsApp
+await app.register(onboardingBotRoutes);
+
+// Stripe Webhook — setup_intent.succeeded, payment confirmations
+await app.register(stripeWebhookRoutes);
 
 // Serve adapter.js for merchant integration
 app.get("/adapter.js", async (request, reply) => {

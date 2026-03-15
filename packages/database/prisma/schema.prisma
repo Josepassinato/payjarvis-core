@@ -635,6 +635,32 @@ model StoreBotPermission {
   @@map("store_bot_permissions")
 }
 
+// ─── Bot Onboarding Session (Conversational) ───
+
+model OnboardingSession {
+  id                 String    @id @default(cuid())
+  telegramChatId     String?   @unique
+  whatsappPhone      String?   @unique
+  shareCode          String?
+  step               String    @default("start") // start | email | email_confirm | limits | payment | complete
+  email              String?
+  emailToken         String?
+  userId             String?
+  botId              String?
+  limitsSet          Boolean   @default(false)
+  paymentSetup       Boolean   @default(false)
+  stripeSetupIntent  String?
+  stripePaymentLink  String?
+  expiresAt          DateTime
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@index([telegramChatId])
+  @@index([shareCode])
+  @@index([userId])
+  @@map("onboarding_sessions")
+}
+
 // ─── Bot Share (Viral Growth) ───
 
 model BotShareLink {

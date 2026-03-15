@@ -308,3 +308,40 @@ export function templateHandoffRequest(data: {
 
   return { subject, html, text };
 }
+
+/**
+ * Onboarding confirmation email — 6-digit code sent during bot onboarding.
+ */
+export function templateOnboardingConfirm(data: {
+  code: string;
+}): { subject: string; html: string; text: string } {
+  const subject = `Seu código de confirmação PayJarvis: ${data.code}`;
+
+  const html = wrap("Confirme seu email", `
+    <p style="color:#374151;font-size:15px;">Seu código de confirmação:</p>
+    <div style="text-align:center;margin:24px 0;">
+      <span style="display:inline-block;background:#f3f4f6;border:2px solid ${BRAND_COLOR};border-radius:12px;padding:16px 32px;font-size:32px;font-weight:700;letter-spacing:8px;color:#111827;">${data.code}</span>
+    </div>
+    <p style="color:#6b7280;font-size:14px;text-align:center;">
+      Volta ao Telegram e digita este código para continuar.<br/>
+      O código expira em 10 minutos.
+    </p>
+  `);
+
+  const text = `PayJarvis — Código de Confirmação\n\nSeu código: ${data.code}\n\nVolte ao Telegram e digite este código.\nExpira em 10 minutos.`;
+
+  return { subject, html, text };
+}
+
+/**
+ * Send onboarding confirmation email.
+ */
+export async function sendOnboardingConfirmation(email: string, code: string): Promise<{ success: boolean; error?: string }> {
+  const template = templateOnboardingConfirm({ code });
+  return sendEmail({
+    to: email,
+    subject: template.subject,
+    html: template.html,
+    text: template.text,
+  });
+}
