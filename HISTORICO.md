@@ -1,5 +1,549 @@
 # HISTORICO.md — PayJarvis
 
+## 2026-03-15 — PRIMEIRA COMPRA APROVADA
+
+### Marco
+- Fluxo completo funcionando end-to-end
+- Jarvis buscou produto Amazon automaticamente
+- PayJarvis aprovou transação: cmmr5rjbg000b7a56lwad3u00
+- Merchant: Amazon | Amount: $6.98 USD
+- Bot: @Jarvis12Brain_bot
+- Modelo: deep-link (Standard plan)
+
+### O que foi corrigido
+- Policies dos 3 bots Jarvis bloqueavam transações em fins de semana (allowedDays = {1,2,3,4,5})
+- Atualizado: allowedDays = {0,1,2,3,4,5,6} (todos os dias)
+- Atualizado: allowedHours = 0-24 (24h)
+- Atualizado: maxPerTransaction = 200
+- Rules engine reiniciado para limpar cache
+
+### Integracoes ativas
+- Amazon checkout via browser-agent (CDP)
+- Policy engine + Rules engine aprovando transações
+- Telegram bot @Jarvis12Brain_bot conectado
+
+---
+
+## 2026-03-14 — Fix "Bad Request" ao conectar loja na página /stores
+
+### Causa raiz (2 bugs)
+**Bug 1 — Empty JSON body:** `stores.ts` chamava `POST /browser/context/create` com `Content-Type: application/json` mas sem body. O Fastify do browser-agent rejeitava com `FST_ERR_CTP_EMPTY_JSON_BODY` (400 Bad Request). Fix: adicionado `body: JSON.stringify({})`.
+
+**Bug 2 — FK violation (clerkId vs userId):** `stores.ts` usava `(request as any).userId` diretamente no Prisma. O middleware `requireAuth` seta `userId = payload.sub` (Clerk ID, ex: `user_3Ar47...`), mas `storeContext.userId` é FK para `users.id` (CUID interno). Todas as outras rotas (bots.ts, etc.) resolvem com `prisma.user.findUnique({ where: { clerkId } })` — stores.ts não fazia isso.
+
+### Correções
+1. `apps/api/src/routes/stores.ts`: Adicionado `body: JSON.stringify({})` na chamada `browserAgentFetch("/browser/context/create")`
+2. `apps/api/src/routes/stores.ts`: Todas as 5 rotas agora resolvem clerkId → user.id antes de queries Prisma (seguindo padrão de bots.ts)
+3. Rebuild TypeScript (`npx tsc`) + restart pm2
+
+### Verificação
+- `GET /api/stores` autenticado → 200 ✓
+- `POST /api/stores/connect` autenticado → chega ao Browserbase (não mais Bad Request) ✓
+- Browserbase retorna 402 (limite do plano free) — erro externo, não bug de código
+- Frontend exibe mensagem de erro corretamente no banner
+- Compilação TypeScript: sem erros
+
+### Limitação atual
+Browserbase free plan minutes esgotados. Para testar store connect end-to-end: upgrade conta em browserbase.com/plans
+
+---
+
+## 2026-03-14 — Fix login via GitHub OAuth (sessão não persistia)
+
+### Causa raiz
+O `NEXT_PUBLIC_CLERK_PROXY_URL=https://www.payjarvis.com/__clerk` estava configurado no frontend, mas o Clerk Dashboard NÃO tinha o proxy configurado. Resultado:
+1. OAuth callback ia para `clerk.payjarvis.com` diretamente (sem proxy)
+2. Clerk setava cookie de sessão em `clerk.payjarvis.com`
+3. Clerk JS SDK fazia requests via proxy (`www.payjarvis.com/__clerk/`) e enviava cookies de `payjarvis.com`
+4. Cookie de sessão estava em domínio diferente → sessão vazia → usuário parecia não logado
+
+Afetava GitHub E Google OAuth igualmente. Confirmado via logs do Nginx: José (174.176.182.36) completava OAuth, chegava em `/onboarding/step/1`, mas `/api/onboarding/status` retornava 401 (sem sessão).
+
+### Correção
+- Removido `NEXT_PUBLIC_CLERK_PROXY_URL` do `.env.production` (setado vazio)
+- Clerk JS SDK agora fala diretamente com `clerk.payjarvis.com` (mesmo domínio do OAuth callback)
+- Rebuild Next.js + restart pm2
+
+### Verificação (Playwright)
+- Página `/sign-in` carrega com 0 erros no console
+- Clique em "Continue with GitHub" → redireciona para `github.com/login?client_id=Ov23liJCv4GsfeYat8AL` com `redirect_uri=clerk.payjarvis.com/v1/oauth_callback`
+- GitHub mostra "Sign in to GitHub to continue to **payjarvis**" — OAuth app reconhecido
+- Logs pm2: zero erros pós-deploy
+- `clerk.payjarvis.com` responde OK, `oauth_github` em strategies ativo
+
+### Para reativar proxy no futuro
+Para usar `NEXT_PUBLIC_CLERK_PROXY_URL` corretamente:
+1. Clerk Dashboard → Domains → Proxy URL = `https://www.payjarvis.com/__clerk`
+2. Só então setar `NEXT_PUBLIC_CLERK_PROXY_URL=https://www.payjarvis.com/__clerk` no `.env.production`
+3. Rebuild e restart
+
+### Estado atual
+- payjarvis-web: ONLINE (pm2, porta 3000, Next.js rebuild limpo)
+- payjarvis-api: ONLINE (pm2, porta 3001)
+- Clerk: comunicação direta via `clerk.payjarvis.com` (sem proxy)
+- GitHub OAuth: funcional (redirect para GitHub confirmado via Playwright)
+
+### Integracoes ativas
+- Clerk auth: direto via clerk.payjarvis.com (proxy Nginx mantido mas não usado pelo Clerk JS)
+- GitHub OAuth: client_id=Ov23liJCv4GsfeYat8AL, redirect_uri=clerk.payjarvis.com/v1/oauth_callback
+- API: rotas /api/ via Nginx proxy para localhost:3001
+- Redis, Prisma/PostgreSQL: operacionais
+
+### Riscos / Atenção
+- Safari/iOS com ITP pode teoricamente bloquear cookies de `clerk.payjarvis.com` se classificado como tracker, mas improvável pois é subdomain do mesmo eTLD+1 (payjarvis.com)
+- Para garantia total em Safari: configurar proxy no Clerk Dashboard conforme instruções acima
+
+---
+
+## 2026-03-14 — Fix "Not Found" na página /stores
+
+### Causa raiz
+O arquivo `/etc/nginx/sites-available/payjarvis` tinha config ANTIGA com `proxy_pass http://localhost:3001/;` (trailing slash) que **removia o prefixo `/api/`** antes de enviar ao Fastify. O Fastify registra rotas com prefixo `/api/` (ex: `/api/stores`), então recebia `GET /stores` e retornava 404 "Not Found".
+
+O config correto em `/etc/nginx/sites-enabled/payjarvis` usava `proxy_pass http://127.0.0.1:3001/api/;` (preserva prefixo). Porém era um arquivo regular, não symlink — qualquer operação que copiasse sites-available para sites-enabled reintroduzia o bug.
+
+### Correções aplicadas
+1. **Nginx**: Sincronizou `sites-available` com o config correto de `sites-enabled`, e criou symlink para evitar divergência futura
+2. **Frontend stores page**: Adicionou error handling para exibir mensagens de erro da API (antes falhava silenciosamente quando `json.success` era false)
+3. **Rebuild Next.js**: Build limpo com todas as rotas confirmadas
+
+### Verificação
+- `curl https://www.payjarvis.com/api/stores` → 401 (não 404) ✓
+- `curl https://www.payjarvis.com/stores` → 307 redirect para sign-in ✓
+- Nginx configs idênticos via symlink ✓
+- Fastify recebe URL como `/api/stores` (não `/stores`) ✓
+- Playwright: página carrega sem erros de console ✓
+
+### Estado atual
+- payjarvis-api: ONLINE (pm2, porta 3001)
+- payjarvis-web: ONLINE (pm2, porta 3000, Next.js 14.2.15)
+- Nginx: recarregado com config correto
+
+### Integracoes ativas
+- Clerk auth: proxy /__clerk/ configurado no Nginx (www e non-www)
+- API: todas rotas com prefixo /api/ preservado pelo Nginx
+- Redis, Prisma/PostgreSQL: operacionais
+
+### Riscos / Atenção
+- Clerk proxy URL (`NEXT_PUBLIC_CLERK_PROXY_URL`) está VAZIO no build — Clerk JS conecta diretamente a clerk.payjarvis.com (third-party). Safari/iOS pode bloquear cookies via ITP. Considerar setar `https://www.payjarvis.com/__clerk` no .env.production e rebuild
+- José (último acesso: Safari/iPhone em Miami) pode ter problemas de sessão Clerk por causa disso
+
+---
+
+## 2026-03-14 — Botão Delete Bot + Limpeza Telegram
+
+### O que foi feito
+- **Botão Delete**: Adicionado em cada card na página /bots (vermelho, visível para todos os status)
+- **Modal de confirmação**: "Tem certeza que deseja excluir o bot X? Irreversível..."
+- **Backend cleanup**: DELETE /api/bots/:botId agora remove webhook do Telegram antes de deletar
+- **Traduções**: en/pt/es para delete, deleteTitle, deleteConfirm, deleteAction, failedDelete
+- **Fix 2 (unicidade)**: Verificado — NÃO existe restrição de email/telefone na tabela bots. Múltiplos bots por usuário já permitidos via POST /api/bots.
+
+### Arquivos alterados
+| Arquivo | Alteração |
+|---|---|
+| apps/api/src/routes/bots.ts | Telegram webhook cleanup no DELETE |
+| apps/web/src/lib/api.ts | +deleteBot() |
+| apps/web/src/app/(dashboard)/bots/page.tsx | Botão Delete + modal |
+| apps/web/src/locales/{en,pt,es}.json | +5 chaves de tradução |
+
+---
+
+## 2026-03-14 — Store Credentials via Chat + Amazon Country Routing
+
+### O que foi feito
+
+#### Cadastro de Credenciais via Chat (Gemini Function Calling)
+- **Gemini Function Calling**: Duas tools definidas — `save_store_credentials` e `remove_store_credentials`
+- **Fluxo**: Usuário manda credenciais pelo chat → Gemini detecta e chama function → webhook salva no vault criptografado → confirma e deleta mensagem com senha
+- **Vault Service**: Novo `credentials.ts` com CRUD (save/get/delete/list) usando AES-256 existente
+- **10 lojas mapeadas**: Amazon, Macy's, Walmart, Target, Best Buy, eBay, Costco, Nordstrom, Home Depot, Lowe's
+- **Lojas desconhecidas**: Salvas como `generic_<slug>` com mensagem informativa
+- **Segurança**: Senha nunca ecoada, mensagem do usuário deletada via Telegram API, nota de segurança enviada
+- **3 idiomas**: Confirmações em pt/es/en baseado no bot.language
+
+#### Amazon Country Routing
+- **Novo `domains.ts`**: Mapa de 23 países → domínios Amazon (US→.com, BR→.com.br, etc.)
+- **System prompt**: Inclui instrução de domínio correto baseado no country do owner
+- **Checkout service**: 4 URLs hardcoded → dinâmicas via `getAmazonBaseUrl(owner.country)`
+- **Browser-agent scrape**: Aceita `amazonDomain` como parâmetro
+
+### Testes realizados
+- Salvar credenciais Macy's via chat → salvo no vault criptografado ✅
+- Decrypt funciona → email correto, senha preservada ✅
+- Remover credenciais via chat → deletado do banco ✅
+- Builds API: zero erros ✅
+
+### Arquivos criados/alterados
+| Arquivo | Alteração |
+|---|---|
+| apps/api/src/services/vault/credentials.ts | NOVO — CRUD de credenciais de lojas |
+| apps/api/src/services/amazon/domains.ts | NOVO — mapa país→domínio Amazon |
+| apps/api/src/services/gemini.ts | Function calling (save/remove credentials) |
+| apps/api/src/routes/onboarding.routes.ts | Handler de function calls no webhook |
+| apps/api/src/services/amazon/checkout.service.ts | URLs dinâmicas por país |
+| apps/browser-agent/src/routes/scrape.ts | amazonDomain como parâmetro |
+
+---
+
+## 2026-03-14 — System Prompt Dinâmico + Welcome /start + Amazon Form Fix
+
+### O que foi feito
+
+#### Correção 1: System Prompt Dinâmico por Bot/Usuário
+- **Schema**: 4 novos campos no model Bot: systemPrompt, botDisplayName, capabilities, language
+- **Backend**: chatWithGemini() aceita ChatContext (ownerName, botName, systemPrompt, capabilities, language)
+- **Backend**: PATCH /api/bots/:botId aceita os 4 novos campos
+- **Dashboard**: Seção "Bot Personality" na página do bot (nome, idioma, capabilities, prompt customizado)
+
+#### Correção 2: Mensagem de Boas-Vindas no /start
+- Webhook detecta /start e envia welcome template (sem tokens Gemini)
+- Personalizada com first_name + botDisplayName + capabilities
+- 3 idiomas (pt/es/en) baseado em bot.language
+
+#### Fix: Amazon Form Validation
+- type="email" → type="text" inputMode="email" nos formulários Amazon
+
+#### Fix: Gemini Model Update
+- gemini-2.0-flash (descontinuado) → gemini-2.5-flash
+
+### Testes (curl)
+- /start → welcome com nome "Adrianne" ✅
+- Mensagem normal → Gemini com prompt dinâmico ✅
+- Builds API + Web: zero erros ✅
+
+### Arquivos alterados
+| Arquivo | Alteração |
+|---|---|
+| packages/database/prisma/schema.prisma | +4 campos Bot |
+| apps/api/src/services/gemini.ts | ChatContext dinâmico |
+| apps/api/src/routes/onboarding.routes.ts | /start handler + dynamic prompt |
+| apps/api/src/routes/bots.ts | allowedFields expandido |
+| apps/web/src/lib/api.ts | Bot interface expandido |
+| apps/web/src/app/(dashboard)/bots/[id]/page.tsx | Seção Bot Personality |
+| apps/web/src/components/amazon-vault-card.tsx | type="email" fix |
+| apps/web/src/app/(dashboard)/connect/amazon/page.tsx | type="email" fix |
+
+---
+
+## 2026-03-14 — Telegram Bot Token Integration (Dashboard)
+
+### O que foi feito
+
+#### Backend — 4 novos endpoints em `onboarding.routes.ts`
+1. **`POST /api/bots/:botId/telegram/connect`** — Recebe token do Telegram, valida via `getMe`, configura webhook via `setWebhook`, salva em `BotIntegration` (provider: `telegram_bot`)
+2. **`GET /api/bots/:botId/telegram/status`** — Retorna status de conexão (connected, username, name, connectedAt)
+3. **`POST /api/bots/:botId/telegram/disconnect`** — Remove token, deleta webhook no Telegram, desativa integração
+4. **`POST /api/bots/:botId/telegram/webhook`** — Recebe updates do Telegram (validação de secret token)
+
+#### Frontend — Integrations page
+- Seção "Telegram Bot" aparece quando bot selecionado é plataforma TELEGRAM
+- Input para colar token do @BotFather com botão "Validate & Save"
+- Status "Connected" com @username quando já configurado
+- Botão "Disconnect" para remover conexão
+- Feedback visual: loading, sucesso, erro
+- Traduções em 3 idiomas (en, pt, es)
+
+#### API Client (`apps/web/src/lib/api.ts`)
+- `connectTelegramBot()` — POST token para validação
+- `getTelegramBotStatus()` — GET status de conexão
+- `disconnectTelegramBot()` — POST para desconectar
+
+#### Testes realizados (API direto)
+- Token inválido → rejeitado pela API do Telegram
+- Token vazio → 400 "required"
+- Token real → sucesso, retorna @PayJarvisBot
+- Status → connected: true com dados
+- Webhook sem secret → 403 "Invalid secret"
+- Disconnect → sucesso, status volta para connected: false
+
+### Estado atual
+- Endpoints em produção e testados
+- Bot da Adrianne (JARVIS) com token conectado (@PayJarvisBot)
+- Webhook configurado em `https://www.payjarvis.com/api/bots/:botId/telegram/webhook`
+- Frontend buildado e deployado
+
+### Integrações ativas
+- Clerk Auth: OK
+- Telegram Bot Token: NOVO — salvo em BotIntegration.config
+- Webhook Telegram (global): `/api/notifications/telegram/webhook` — mantido
+- Webhook Telegram (per-bot): `/api/bots/:botId/telegram/webhook` — NOVO
+
+### Arquivos alterados
+| Arquivo | Alteração |
+|---|---|
+| `apps/api/src/routes/onboarding.routes.ts` | +4 endpoints Telegram (connect, status, disconnect, webhook) |
+| `apps/web/src/lib/api.ts` | +3 funções API (connectTelegramBot, getTelegramBotStatus, disconnectTelegramBot) |
+| `apps/web/src/app/(dashboard)/integrations/page.tsx` | Seção Telegram Bot com input/status/disconnect |
+| `apps/web/src/locales/en.json` | +11 chaves de tradução |
+| `apps/web/src/locales/pt.json` | +11 chaves de tradução |
+| `apps/web/src/locales/es.json` | +11 chaves de tradução |
+
+---
+
+## 2026-03-14 — Multi-User Architecture + Onboarding Rewrite + VPS Optimization
+
+### O que foi feito
+
+#### Auditoria Completa (7 blocos)
+- Amazon Vault: OK (schema + endpoints + crypto)
+- Amazon Checkout: OK (service + browser-agent + scrape)
+- OpenClaw Tools: OK (3 Amazon tools já existiam em gemini.js + index.js)
+- Nginx: OK (proxy /api/ preservado)
+- Onboarding: Reescrito de 5 para 3 steps
+- Frontend Dashboard: OK (transactions prefix fix)
+- Infra: 7/7 services online
+
+#### Onboarding Simplificado (3 steps)
+1. **Step 1**: Nome + Telefone + País (auto-cria bot JARVIS)
+2. **Step 2**: Pagamento (SDK ou Stripe Elements inline)
+3. **Step 3**: Threshold + Deep Link Telegram (polling auto-detect)
+- Removido: KYC/OCR, upload documento, selfie, 5 steps antigos
+- i18n: pt.json, en.json, es.json completamente reescritos
+
+#### Plug-and-Play JARVIS (deep link)
+- `POST /api/onboarding/generate-link` — gera código act_xxx, retorna t.me URL
+- `GET /api/onboarding/activation-status` — polling (connected: bool)
+- `POST /api/onboarding/complete-activation` — chamado pelo OpenClaw
+- OpenClaw `/start act_xxx` — deep link handler, envia trumpet, ativa user
+- Activation server porta 4001 no OpenClaw
+- `bot-provisioning.ts` — service que orquestra a ativação
+
+#### Multi-User Security (race condition fix)
+- **REMOVIDO**: `let _currentUserId = null` (variável global)
+- **ADICIONADO**: `createToolHandler(userId)` — factory que retorna closure
+- Cada mensagem cria toolHandler isolado com userId local
+- Zero variáveis globais de estado de usuário
+- **REMOVIDO**: `isAdmin(ctx)` — single-user lock
+- **ADICIONADO**: `isAuthorizedUser(ctx)` — verifica onboardingCompleted via API
+- Cache de auth: 5 min TTL, admin bypass garantido
+
+#### API Step Handlers (frontend/backend sync)
+- Step 1 API: aceita `{fullName, phone, country}` (não mais KYC)
+- Step 2 API: aceita `{method: "sdk"|"stripe_card"}` (não mais bot creation)
+- Step 3: handled by `/api/onboarding/generate-link` + `/complete-activation`
+- `GET /api/users/telegram/:id` — retorna approvalThreshold, botId, onboardingCompleted
+- `GET /api/transactions` — prefix fix (/api/transactions)
+
+#### DB Schema
+- Adicionado: `phone`, `approvalThreshold`, `onboardingCompleted`, `botActivatedAt` na tabela users
+- Reusa `telegram_link_codes` para deep link activation codes
+
+#### VPS Optimization (FASE 1)
+- Disco: 97% → 79% (35GB de sandboxes + 776MB journal limpos)
+- Ollama: desativado (redundante com Gemini API)
+- payjarvis-kyc: parado (removido do fluxo)
+- botfriendly-mcp: parado (não usado)
+- pm2-logrotate: instalado (10MB max, 3 retained, compressed)
+
+### Arquivos criados
+- `/root/Payjarvis/apps/api/src/services/bot-provisioning.ts`
+
+### Arquivos alterados
+- `schema.prisma` — 4 campos novos (phone, approvalThreshold, onboardingCompleted, botActivatedAt)
+- `onboarding.routes.ts` — steps 1/2 reescritos + 3 endpoints deep link + /activate
+- `health.ts` — endpoint users ampliado
+- `transactions.ts` — prefix /api/ fix
+- `api.ts` (web lib) — generateActivationLink + getActivationStatus
+- `onboarding-progress.tsx` — 3 steps
+- `onboarding-guard.tsx` — threshold atualizado
+- `step/1/page.tsx` — nome+telefone+país (sem KYC)
+- `step/2/page.tsx` — pagamento Stripe inline
+- `step/3/page.tsx` — threshold + deep link + polling
+- Steps 4 e 5 removidos
+- `pt.json`, `en.json`, `es.json` — i18n reescrito
+- `/root/openclaw/index.js` — createToolHandler, isAuthorizedUser, deep link /start, activation server
+
+### Estado atual
+- 5 services online: payjarvis-api, payjarvis-web, payjarvis-rules, browser-agent, openclaw
+- 2 services parados: payjarvis-kyc, botfriendly-mcp
+- pm2-logrotate: ativo
+- Chrome CDP: online porta 18800
+- PostgreSQL: 25 tabelas
+- Disco: 42GB livres, RAM: 12GB disponível
+
+### Integracoes ativas
+- Telegram webhook: https://www.payjarvis.com/webhook/telegram
+- OpenClaw activation: porta 4001
+- Clerk auth: proxy via /__clerk/
+- Stripe: SetupIntent flow no onboarding
+- Gemini 2.5 Flash: function calling no OpenClaw
+- Chrome CDP: stealth mode, porta 18800
+
+### Riscos e pontos de atenção
+- Disco ainda em 79% — monitorar crescimento
+- `payjarvis-rules` (:3002) não é chamado por ninguém — candidato a desativar
+- Docker containers (n8n, dozzle, agent-mongodb) consomem recursos sem uso ativo
+- Deep link flow depende do OpenClaw estar online na porta 4001
+- Auth cache de 5 min pode atrasar revogação de acesso
+
+---
+
+## 2026-03-14 — Welcome Trumpet + User Lookup API + Onboarding Diagnosis
+
+### O que foi feito
+
+#### Welcome Trumpet (OpenClaw)
+1. **`isFirstMessage(userId)`** — Nova função em memory.js: COUNT de mensagens no PostgreSQL
+2. **`sendWelcomeTrumpet(ctx)`** — Detecta primeiro acesso, resolve nome (Telegram → PayJarvis API → fallback "amigo")
+3. **Mensagem bilíngue** — PT (se language_code pt/es) ou EN (outros), formatada com Markdown
+4. **Idempotência** — Trumpet salvo como mensagem 'model' no histórico, nunca dispara de novo
+5. **Salva nome como fact** — `upsertFact(userId, 'name', name, 'personal', 'auto')`
+
+#### API Endpoint
+6. **`GET /api/users/:telegramId`** — Busca User por telegramChatId, retorna name + email (public, sem auth)
+7. Adicionado em health.ts, compilado para dist/, restart PM2
+
+#### Diagnóstico Onboarding (mapeamento completo)
+- 8 steps avaliados: 3 funcionais, 2 parciais, 3 faltantes
+- Detalhes no relatório entregue ao usuário
+
+### Arquivos alterados
+- `/root/openclaw/memory.js` — +isFirstMessage(), +export
+- `/root/openclaw/index.js` — +getWelcomeTrumpet(), +getUserNameFromPayJarvis(), +sendWelcomeTrumpet(), integrado no message handler
+- `/root/Payjarvis/apps/api/src/routes/health.ts` — +GET /api/users/:telegramId
+- `/root/Payjarvis/apps/api/dist/routes/health.js` — recompilado
+
+### Estado atual
+- payjarvis-api: ONLINE (porta 3001) — com endpoint /api/users/:telegramId
+- openclaw: ONLINE (porta 4000) — com welcome trumpet ativo
+- Testado: trumpet dispara na primeira msg, não repete na segunda
+
+### Integracoes ativas
+- Telegram webhook: https://www.payjarvis.com/webhook/telegram
+- VAULT_ENCRYPTION_KEY: configurada
+- Prisma/PostgreSQL: tabelas intactas
+- Chrome CDP: porta 18800
+- Stripe: CONNECTED (visa ****5798)
+
+### Sandbox pendente (NÃO deployado)
+- `/root/sandbox/Payjarvis_onboarding_simplify_20260313/` — onboarding simplificado (3 steps)
+- Aguardando aprovação do José para deploy
+
+---
+
+## 2026-03-13 — Amazon Account Vault + Real Checkout System
+
+### O que foi feito
+
+#### Modelo de Dados
+1. **UserAccountVault** — tabela para sessões criptografadas (AES-256-CBC) por provider
+2. **AmazonOrder** — tracking de pedidos Amazon (PENDING → CHECKOUT_STARTED → PLACED → FAILED)
+3. Tabelas já existiam no banco, Prisma client regenerado
+
+#### Serviços (apps/api/src/services/)
+4. **vault/crypto.ts** — AES-256-CBC encrypt/decrypt de cookies de sessão
+5. **vault/vault.service.ts** — CRUD: saveSession, getSession, deleteSession, listSessions, verifySession
+6. **amazon/checkout.service.ts** — startCheckout (add to cart + proceed) + confirmOrder (place order)
+
+#### Rotas API
+7. **routes/vault.ts** — 7 endpoints:
+   - POST /api/vault/amazon/connect — inicia fluxo de login
+   - POST /api/vault/amazon/connect-link — gera link JWT (15min) para Telegram
+   - POST /api/vault/amazon/verify-token — valida token JWT
+   - POST /api/vault/amazon/capture — captura cookies após login
+   - GET /api/vault/amazon/status/:userId — verifica sessão
+   - POST /api/vault/amazon/verify/:userId — testa se sessão funciona
+   - DELETE /api/vault/amazon/disconnect/:userId — remove sessão
+   - GET /api/vault/sessions/:userId — lista todos os providers
+8. **routes/checkout.ts** — 3 endpoints:
+   - POST /api/amazon/checkout/start
+   - POST /api/amazon/checkout/confirm
+   - GET /api/amazon/checkout/:orderId
+
+#### Browser Agent
+9. /navigate já suporta injectCookies (cookies do vault)
+10. /extract-cookies já implementado (captura cookies via CDP)
+
+#### Frontend
+11. **connect/amazon/page.tsx** — página de conexão Amazon com suporte JWT token
+12. **amazon-vault-card.tsx** — card na página de integrações (status, verify, disconnect)
+13. Integrations page atualizada com seção "Account Vault"
+
+#### OpenClaw (Bot Telegram)
+14. 3 novos tools Gemini: amazon_check_session, amazon_start_checkout, amazon_confirm_order
+15. System prompt com fluxo de checkout completo
+16. Tool handlers chamando PayJarvis API
+
+### Estado atual
+- payjarvis-api: ONLINE (pm2, porta 3001) — vault + checkout endpoints respondendo
+- payjarvis-rules: ONLINE (pm2, porta 3002)
+- payjarvis-web: ONLINE (pm2, porta 3000)
+- browser-agent: ONLINE (pm2, porta 3003) — CDP connected porta 18800
+- openclaw: ONLINE (pm2, porta 4000) — 3 novos tools registrados
+
+### Integracoes ativas
+- Chrome CDP: porta 18800
+- Telegram bot: webhook mode
+- VAULT_ENCRYPTION_KEY: configurada (AES-256)
+- Prisma/PostgreSQL: tabelas user_account_vaults + amazon_orders
+
+### Pendente
+- Teste end-to-end real: conectar conta Amazon e fazer compra de teste
+- Web build: Next.js precisa rebuild para incluir nova página /connect/amazon
+- verify-sdk tem erro TS pré-existente (não relacionado ao vault)
+
+---
+
+## 2026-03-13 — Landing page redesign + iFood integration + client-side fix
+
+### O que foi feito
+
+#### Landing Page (apps/web)
+1. Redesign completo da landing page — 7 secoes: Hero, Products, Capabilities, Trust, Integrations, SDK Preview, Final CTA
+2. Headline: "Your AI Agent. Ready to act." com gradient text
+3. 3 cards de produto: Plug & Play Bot, Bring Your Bot, Enterprise
+4. 6 capabilities em grid: Flights, Restaurants, Shopping, Events, Transport, Calendar
+5. 4 trust cards: KYC, Spending Firewall, Human-in-the-Loop, Audit Log
+6. 10 parceiros na secao Integrations (incluindo iFood)
+7. SDK preview com code window e syntax highlighting
+8. Animacoes: floating orbs, fade-in staggered, hover lifts
+9. Traducoes atualizadas em 3 idiomas (en/pt/es)
+
+#### iFood Integration
+1. Provider registry: iFood adicionado como delivery provider (onboarding.routes.ts)
+2. Integration grid: emoji mapping para iFood (integration-grid.tsx)
+3. Site extractor: apps/browser-agent/src/sites/ifood.ts — detecta restaurante, valor R$, itens
+4. Affiliate signup script: apps/browser-agent/src/scripts/affiliate-signup.ts — /affiliate ifood
+5. Env vars: IFOOD_CLIENT_ID, IFOOD_CLIENT_SECRET, IFOOD_MERCHANT_ID (em branco, aguardando cadastro)
+6. Estrategia: API oficial = merchant/POS only; consumer orders = Layer 4 Browserbase
+
+#### Fix: Client-side exception (payjarvis.com)
+- Causa raiz: static assets (JS/CSS chunks) dessincronizados entre .next/static/ e .next/standalone/
+- O build gerava novo BUILD_ID mas start-web.sh so sincroniza no boot do PM2
+- Solucao: rebuild + pm2 restart (start-web.sh faz cp -r automaticamente)
+
+### Estado atual
+- payjarvis-api: ONLINE (porta 3001) — com iFood no provider registry
+- payjarvis-web: ONLINE (porta 3000) — landing page nova, zero erros
+- browser-agent: ONLINE (porta 3003) — com ifood.ts extractor + affiliate-signup.ts
+- payjarvis-rules: ONLINE (porta 3002)
+- payjarvis-kyc: ONLINE (porta 3004)
+- openclaw: ONLINE (porta 18800)
+
+### Integracoes ativas
+- 10 parceiros listados: Expedia, Booking.com, Amazon, Mercado Livre, OpenTable, Yelp, Ticketmaster, Fandango, Viator, iFood
+- iFood: env vars vazias — preencher apos /affiliate ifood via Browserbase
+- Telegram notifications: ativo
+- Clerk auth: ativo
+- Stripe payments: ativo
+
+#### OpenClaw — Telegram webhook fix
+1. Convertido de long polling (bot.start) para webhook mode (webhookCallback)
+2. Servidor HTTP nativo na porta 4000 com /health e /webhook/telegram
+3. Nginx: location /webhook/telegram → proxy_pass localhost:4000
+4. Webhook registrado: https://www.payjarvis.com/webhook/telegram
+5. Bot commands registrados via setMyCommands
+6. .env atualizado: PORT=4000, WEBHOOK_PATH=/webhook/telegram
+
+### Riscos / Atencao
+- iFood env vars em branco — rodar /affiliate ifood para cadastrar no developer portal
+- Sempre fazer pm2 restart apos next build para sincronizar static assets
+- favicon.ico 404 — cosmético, adicionar quando tiver branding final
+- OpenClaw agora usa webhook mode — se mudar dominio, re-registrar webhook com setWebhook
+
+---
+
 ## 2026-03-13 — Email SMTP + Multi-tenancy OpenClaw (Slot Manager + User Router + Instance Spawner)
 
 ### O que foi feito
@@ -665,3 +1209,49 @@ Merge de duas sandboxes independentes em um deploy unificado:
 - Amazon pode mudar seletores de produtos — monitorar se extracao quebrar
 - Handoff depende de PAYJARVIS_API_URL apontar para localhost:3001 (sem /api prefix internamente)
 - Notificacoes Telegram dependem de user.notificationChannel === "telegram" e user.telegramChatId preenchido
+
+---
+
+## 2026-03-13 — Mega Integração Retail + Pharmacy + Transit + Free APIs
+
+### O que foi feito
+
+#### Novos Services (apps/api/src/services/)
+1. **retail/walmart-client.ts** — Walmart Open API (RSA auth, affiliate tracking)
+2. **retail/target-client.ts** — Target Redsky API (sem chave, público)
+3. **retail/publix-service.ts** — Publix via browser-agent (Layer 4)
+4. **retail/macys-client.ts** — Macy's affiliate API
+5. **retail/retail-service.ts** — Agregador: comparePrice, findStores, bestDeal (7 plataformas)
+6. **pharmacy/cvs-client.ts** — CVS via browser-agent
+7. **pharmacy/walgreens-client.ts** — Walgreens API
+8. **transit/amtrak-client.ts** — Amtraker API gratuita + fallback browser-agent
+9. **transit/flixbus-client.ts** — FlixBus transport.rest API gratuita
+10. **transit/greyhound-client.ts** — Wrapper FlixBus para rotas Greyhound
+11. **transit/transit-service.ts** — Agregador: searchAllTransit, compareTransitVsFlight
+
+#### Novas Routes
+12. **routes/retail.routes.ts** — 12 endpoints retail/pharmacy
+13. **routes/transit.routes.ts** — 5 endpoints transit
+
+#### Browser Agent Sites (apps/browser-agent/src/sites/)
+14. 9 novos scrapers: cvs, walgreens, target, publix, macys, amtrak, angi, turo, wrench
+
+#### APIs Gratuitas (sem chave)
+15. **FlixBus**: 1.flixbus.transport.rest (stations, journeys, locations)
+16. **Amtrak**: api.amtraker.com/v1 (trains, stations, status)
+17. **Target**: redsky.target.com (search, stores, products)
+
+#### Arquivos modificados
+- server.ts (+2 route imports e registrations)
+- .env.example (+12 novas env vars)
+
+### Estado atual
+- payjarvis-api: ONLINE, TypeScript build clean (0 errors)
+- 17 endpoints novos (12 retail + 5 transit)
+- 3 APIs gratuitas funcionando sem chave (FlixBus, Amtrak, Target)
+- Todos smoke tests: success=True
+
+### Pendente
+- Visa TAP + MC AgentPay + TrustBadges (agent em execução)
+- Chaves: Walmart (walmart.io), Walgreens (manual), CVS (invite), Macy's (partners)
+- Affiliate IDs: Walmart Impact Radius, Target CJ Affiliate, Macy's CJ
