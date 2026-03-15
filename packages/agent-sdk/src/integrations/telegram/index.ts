@@ -12,13 +12,13 @@
  *   bot.on('message', createPayJarvisTelegramMiddleware(config, async (msg, auth) => { ... }))
  */
 
-import { PayJarvis } from '../client.js'
-import type { PayJarvisConfig, ApprovalRequest, ApprovalDecision } from '../types.js'
+import { PayJarvis } from '../../client.js'
+import type { PayJarvisConfig, ApprovalRequest, ApprovalDecision } from '../../types.js'
 import {
   PAYJARVIS_SYSTEM_PROMPT,
   PAYJARVIS_TOOL_SCHEMA,
   buildSystemPromptWithPayJarvis,
-} from '../prompts.js'
+} from '../../prompts.js'
 
 export {
   PAYJARVIS_SYSTEM_PROMPT,

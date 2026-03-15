@@ -1,4 +1,4 @@
-import type { PayJarvisConfig, ApprovalRequest, ApprovalDecision, SpendingLimits, HandoffRequest, HandoffResult } from "./types.js";
+import type { PayJarvisConfig, ApprovalRequest, ApprovalDecision, SpendingLimits, HandoffRequest, HandoffResult, StoreProduct, AddToCartResult } from "./types.js";
 
 const KNOWN_HARDCODED = ["pj_bot_example_do_not_use", "bot-example-000"];
 
@@ -419,6 +419,88 @@ export class PayJarvis {
       throw new Error(json.error ?? "Failed to cancel handoff");
     }
   }
+
+  // ─── Stores namespace ─────────────────────────────
+  readonly stores = {
+    /**
+     * Search products in any connected store.
+     * The bot calls this — PayJarvis uses the user's Context automatically.
+     */
+    search: async (
+      store: string,
+      query: string,
+      options?: { maxResults?: number },
+    ): Promise<StoreProduct[]> => {
+      const browserAgentUrl = process.env.BROWSER_AGENT_URL ?? "http://localhost:3003";
+
+      // Get user's store context
+      const ctxRes = await this.fetch(`/api/stores`, { method: "GET" });
+      const ctxJson = await ctxRes.json() as any;
+      const storeCtx = ctxJson.data?.stores?.find((s: any) => s.store === store);
+
+      if (!storeCtx || storeCtx.status !== "authenticated") {
+        throw new Error(`Store "${store}" is not connected or not authenticated`);
+      }
+
+      const res = await globalThis.fetch(`${browserAgentUrl}/browser/store/search`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bbContextId: storeCtx.bbContextId,
+          storeUrl: storeCtx.storeUrl,
+          store,
+          query,
+          maxResults: options?.maxResults ?? 5,
+        }),
+      });
+
+      const json = await res.json() as any;
+      if (!json.success) throw new Error(json.error ?? "Store search failed");
+      return json.data.products as StoreProduct[];
+    },
+
+    /**
+     * Add product to cart in any connected store.
+     * If SESSION_EXPIRED, returns error with reauth link.
+     */
+    addToCart: async (
+      store: string,
+      productUrl: string,
+      options?: { quantity?: number; asin?: string },
+    ): Promise<AddToCartResult> => {
+      const browserAgentUrl = process.env.BROWSER_AGENT_URL ?? "http://localhost:3003";
+
+      const ctxRes = await this.fetch(`/api/stores`, { method: "GET" });
+      const ctxJson = await ctxRes.json() as any;
+      const storeCtx = ctxJson.data?.stores?.find((s: any) => s.store === store);
+
+      if (!storeCtx || storeCtx.status !== "authenticated") {
+        throw new Error(`Store "${store}" is not connected or not authenticated`);
+      }
+
+      const res = await globalThis.fetch(`${browserAgentUrl}/browser/store/add-to-cart`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bbContextId: storeCtx.bbContextId,
+          storeUrl: storeCtx.storeUrl,
+          store,
+          productUrl,
+          asin: options?.asin,
+          quantity: options?.quantity ?? 1,
+        }),
+      });
+
+      const json = await res.json() as any;
+      if (!json.success) {
+        if (json.code === "SESSION_EXPIRED") {
+          throw new Error("SESSION_EXPIRED: Login expired. User must reauthenticate.");
+        }
+        throw new Error(json.error ?? "Add to cart failed");
+      }
+      return json.data as AddToCartResult;
+    },
+  };
 
   async checkLimits(): Promise<SpendingLimits> {
     const res = await this.fetch(`/bots/${this.botId}/limits`, { method: "GET" });

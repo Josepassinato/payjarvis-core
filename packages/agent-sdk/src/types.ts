@@ -42,6 +42,23 @@ export interface HandoffResult {
   expiresAt?: string;
 }
 
+export interface StoreProduct {
+  asin: string | null;
+  title: string | null;
+  price: string | null;
+  link: string | null;
+  rating: string | null;
+  image: string | null;
+  isPrime: boolean;
+}
+
+export interface AddToCartResult {
+  added: boolean;
+  product: { title: string | null; price: string | null };
+  quantity: number;
+  cartUrl: string;
+}
+
 export interface SpendingLimits {
   perTransaction: number;
   perDay: number;

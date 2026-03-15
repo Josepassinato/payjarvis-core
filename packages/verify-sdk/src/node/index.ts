@@ -21,7 +21,7 @@
  */
 
 import { createRemoteJWKSet, jwtVerify, importSPKI } from "jose";
-import type { JWTPayload, KeyLike } from "jose";
+import type { JWTPayload, KeyLike, FlattenedJWSInput, JWSHeaderParameters, GetKeyFunction } from "jose";
 
 // ─── Types ───────────────────────────────────────────
 
@@ -122,7 +122,8 @@ export async function verifyBdit(
 
   try {
     // Determine key source
-    let key: KeyLike | ReturnType<typeof createRemoteJWKSet>;
+    type JwksKeyFunc = GetKeyFunction<JWSHeaderParameters, FlattenedJWSInput>;
+    let key: KeyLike | JwksKeyFunc;
     const jwksUrl = options.jwksUrl ?? DEFAULT_JWKS_URL;
     const expectedIssuer = options.issuer ?? "payjarvis";
 
@@ -135,7 +136,7 @@ export async function verifyBdit(
     // Verify JWT — retry with refreshed JWKS on failure (handles key rotation)
     let payload: JWTPayload;
     try {
-      const result = await jwtVerify(token, key as KeyLike, {
+      const result = await jwtVerify(token, key as unknown as KeyLike, {
         issuer: expectedIssuer,
         algorithms: ["RS256"],
       });
@@ -144,7 +145,7 @@ export async function verifyBdit(
       // If using JWKS (not static key), retry with forced refresh
       if (!options.publicKey) {
         key = getJwks(jwksUrl, true);
-        const result = await jwtVerify(token, key as KeyLike, {
+        const result = await jwtVerify(token, key as unknown as KeyLike, {
           issuer: expectedIssuer,
           algorithms: ["RS256"],
         });
