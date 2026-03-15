@@ -21,6 +21,12 @@ import { commerceRoutes } from "./routes/commerce.js";
 import { composioRoutes } from "./routes/composio.js";
 import { coreRoutes } from "./routes/core.js";
 import { instanceRoutes } from "./routes/instances.js";
+import { trackingRoutes } from "./routes/tracking.js";
+import { retailRoutes } from "./routes/retail.routes.js";
+import { transitRoutes } from "./routes/transit.routes.js";
+import { vaultRoutes } from "./routes/vault.js";
+import { checkoutRoutes } from "./routes/checkout.js";
+import { storeRoutes } from "./routes/stores.js";
 import { startTimeoutChecker } from "./core/approval-manager.js";
 
 const app = Fastify({ logger: true });
@@ -60,6 +66,24 @@ await app.register(composioRoutes);
 
 // Instance management — slot manager, user router, spawner
 await app.register(instanceRoutes);
+
+// Tracking — package tracking (Correios, USPS, FedEx, etc)
+await app.register(trackingRoutes);
+
+// Retail — Walmart, CVS, Walgreens, Target, Publix, Macy's
+await app.register(retailRoutes);
+
+// Transit — Amtrak, FlixBus, Greyhound
+await app.register(transitRoutes);
+
+// Vault — encrypted session storage (Amazon, etc.)
+await app.register(vaultRoutes);
+
+// Amazon Checkout — real purchases via authenticated sessions
+await app.register(checkoutRoutes);
+
+// Connected Stores — universal store management (Browserbase Contexts)
+await app.register(storeRoutes);
 
 // Onboarding — platform detection and integration guides
 await app.register(onboardingRoutes);

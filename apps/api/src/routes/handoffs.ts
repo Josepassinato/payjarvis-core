@@ -72,7 +72,7 @@ export async function handoffRoutes(app: FastifyInstance) {
   });
 
   // ── Bot requests human handoff ──
-  app.post("/bots/:botId/request-handoff", { preHandler: [requireBotAuth] }, async (request, reply) => {
+  app.post("/api/bots/:botId/request-handoff", { preHandler: [requireBotAuth] }, async (request, reply) => {
     const botId = (request as any).botId as string;
     const botOwnerId = (request as any).botOwnerId as string;
     const urlBotId = (request.params as any).botId as string;
@@ -161,7 +161,7 @@ export async function handoffRoutes(app: FastifyInstance) {
   });
 
   // ── Bot polls handoff status ──
-  app.get("/handoffs/:id/status", { preHandler: [requireBotAuth] }, async (request, reply) => {
+  app.get("/api/handoffs/:id/status", { preHandler: [requireBotAuth] }, async (request, reply) => {
     const botId = (request as any).botId as string;
     const { id } = request.params as { id: string };
 
@@ -206,7 +206,7 @@ export async function handoffRoutes(app: FastifyInstance) {
   });
 
   // ── Owner marks handoff as resolved ──
-  app.post("/handoffs/:id/resolve", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.post("/api/handoffs/:id/resolve", { preHandler: [requireAuth] }, async (request, reply) => {
     const userId = (request as any).userId as string;
     const { id } = request.params as { id: string };
     const { note } = (request.body as any) ?? {};
@@ -259,7 +259,7 @@ export async function handoffRoutes(app: FastifyInstance) {
   });
 
   // ── Bot cancels handoff ──
-  app.post("/handoffs/:id/cancel", { preHandler: [requireBotAuth] }, async (request, reply) => {
+  app.post("/api/handoffs/:id/cancel", { preHandler: [requireBotAuth] }, async (request, reply) => {
     const botId = (request as any).botId as string;
     const { id } = request.params as { id: string };
 
@@ -296,7 +296,7 @@ export async function handoffRoutes(app: FastifyInstance) {
   });
 
   // ── Owner marks handoff as in-progress ──
-  app.post("/handoffs/:id/in-progress", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.post("/api/handoffs/:id/in-progress", { preHandler: [requireAuth] }, async (request, reply) => {
     const userId = (request as any).userId as string;
     const { id } = request.params as { id: string };
 
@@ -335,7 +335,7 @@ export async function handoffRoutes(app: FastifyInstance) {
   });
 
   // ── SSE stream for bot ──
-  app.get("/handoffs/stream/bot", { preHandler: [requireBotAuth] }, async (request, reply) => {
+  app.get("/api/handoffs/stream/bot", { preHandler: [requireBotAuth] }, async (request, reply) => {
     const botId = (request as any).botId as string;
 
     reply.raw.writeHead(200, {
@@ -367,7 +367,7 @@ export async function handoffRoutes(app: FastifyInstance) {
   });
 
   // ── List pending handoffs for owner ──
-  app.get("/handoffs", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.get("/api/handoffs", { preHandler: [requireAuth] }, async (request, reply) => {
     const userId = (request as any).userId as string;
     const user = await prisma.user.findUnique({ where: { clerkId: userId } });
     if (!user) return reply.status(404).send({ success: false, error: "User not found" });

@@ -112,7 +112,7 @@ export async function approvalRoutes(app: FastifyInstance) {
   });
 
   // SSE stream for real-time approval updates
-  app.get("/approvals/stream", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.get("/api/approvals/stream", { preHandler: [requireAuth] }, async (request, reply) => {
     const userId = (request as any).userId as string;
     const user = await prisma.user.findUnique({ where: { clerkId: userId } });
     if (!user) return reply.status(404).send({ success: false, error: "User not found" });
@@ -146,7 +146,7 @@ export async function approvalRoutes(app: FastifyInstance) {
   });
 
   // SSE stream for bot-auth (agent-sdk) — filters by botId
-  app.get("/approvals/stream/bot", { preHandler: [requireBotAuth] }, async (request, reply) => {
+  app.get("/api/approvals/stream/bot", { preHandler: [requireBotAuth] }, async (request, reply) => {
     const botId = (request as any).botId as string;
 
     reply.raw.writeHead(200, {
@@ -178,7 +178,7 @@ export async function approvalRoutes(app: FastifyInstance) {
   });
 
   // Respond to approval request
-  app.post("/approvals/:id/respond", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.post("/api/approvals/:id/respond", { preHandler: [requireAuth] }, async (request, reply) => {
     const userId = (request as any).userId as string;
     const { id } = request.params as { id: string };
     const { action, reason } = request.body as { action: "approve" | "reject"; reason?: string };
@@ -384,7 +384,7 @@ export async function approvalRoutes(app: FastifyInstance) {
   });
 
   // GET /approvals/:id/status — bot-auth: poll approval status from SDK
-  app.get("/approvals/:id/status", { preHandler: [requireBotAuth] }, async (request, reply) => {
+  app.get("/api/approvals/:id/status", { preHandler: [requireBotAuth] }, async (request, reply) => {
     const botId = (request as any).botId as string;
     const { id } = request.params as { id: string };
 
@@ -422,7 +422,7 @@ export async function approvalRoutes(app: FastifyInstance) {
   });
 
   // List pending approvals — with lazy expiration check
-  app.get("/approvals", { preHandler: [requireAuth] }, async (request) => {
+  app.get("/api/approvals", { preHandler: [requireAuth] }, async (request) => {
     const userId = (request as any).userId as string;
     const user = await prisma.user.findUnique({ where: { clerkId: userId } });
     if (!user) return { success: false, error: "User not found" };

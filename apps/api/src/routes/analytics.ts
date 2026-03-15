@@ -4,7 +4,7 @@ import { requireAuth } from "../middleware/auth.js";
 
 export async function analyticsRoutes(app: FastifyInstance) {
   // Spending trends — daily spending for the last 30 days
-  app.get("/analytics/spending-trends", { preHandler: [requireAuth] }, async (request) => {
+  app.get("/api/analytics/spending-trends", { preHandler: [requireAuth] }, async (request) => {
     const userId = (request as any).userId as string;
     const user = await prisma.user.findUnique({ where: { clerkId: userId } });
     if (!user) return { success: false, error: "User not found" };
@@ -53,7 +53,7 @@ export async function analyticsRoutes(app: FastifyInstance) {
   });
 
   // Spending by category
-  app.get("/analytics/by-category", { preHandler: [requireAuth] }, async (request) => {
+  app.get("/api/analytics/by-category", { preHandler: [requireAuth] }, async (request) => {
     const userId = (request as any).userId as string;
     const user = await prisma.user.findUnique({ where: { clerkId: userId } });
     if (!user) return { success: false, error: "User not found" };
@@ -86,7 +86,7 @@ export async function analyticsRoutes(app: FastifyInstance) {
   });
 
   // Decision breakdown
-  app.get("/analytics/decisions", { preHandler: [requireAuth] }, async (request) => {
+  app.get("/api/analytics/decisions", { preHandler: [requireAuth] }, async (request) => {
     const userId = (request as any).userId as string;
     const user = await prisma.user.findUnique({ where: { clerkId: userId } });
     if (!user) return { success: false, error: "User not found" };
@@ -117,7 +117,7 @@ export async function analyticsRoutes(app: FastifyInstance) {
   });
 
   // Spending per bot
-  app.get("/analytics/by-bot", { preHandler: [requireAuth] }, async (request) => {
+  app.get("/api/analytics/by-bot", { preHandler: [requireAuth] }, async (request) => {
     const userId = (request as any).userId as string;
     const user = await prisma.user.findUnique({ where: { clerkId: userId } });
     if (!user) return { success: false, error: "User not found" };

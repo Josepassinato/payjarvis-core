@@ -5,7 +5,7 @@ import { requireAuth } from "../middleware/auth.js";
 
 export async function transactionRoutes(app: FastifyInstance) {
   // List transactions with filters + pagination
-  app.get("/transactions", { preHandler: [requireAuth] }, async (request) => {
+  app.get("/api/transactions", { preHandler: [requireAuth] }, async (request) => {
     const userId = (request as any).userId as string;
     const { botId, dateFrom, dateTo, decision, category, page: pageStr, limit: limitStr } = request.query as {
       botId?: string;
@@ -63,7 +63,7 @@ export async function transactionRoutes(app: FastifyInstance) {
   });
 
   // Export transactions as PDF
-  app.get("/transactions/export/pdf", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.get("/api/transactions/export/pdf", { preHandler: [requireAuth] }, async (request, reply) => {
     const userId = (request as any).userId as string;
     const { botId, dateFrom, dateTo } = request.query as {
       botId?: string;

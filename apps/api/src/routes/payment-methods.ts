@@ -9,7 +9,7 @@ import { createAuditLog } from "../services/audit.js";
 
 export async function paymentMethodRoutes(app: FastifyInstance) {
   // GET /payment-methods — list all payment methods for the current user
-  app.get("/payment-methods", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.get("/api/payment-methods", { preHandler: [requireAuth] }, async (request, reply) => {
     const userId = (request as any).userId as string;
 
     const user = await prisma.user.findUnique({ where: { clerkId: userId } });
@@ -26,7 +26,7 @@ export async function paymentMethodRoutes(app: FastifyInstance) {
   });
 
   // POST /payment-methods/stripe/connect — save user's Stripe secret key
-  app.post("/payment-methods/stripe/connect", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.post("/api/payment-methods/stripe/connect", { preHandler: [requireAuth] }, async (request, reply) => {
     const userId = (request as any).userId as string;
     const { stripeSecretKey } = (request.body as { stripeSecretKey?: string }) ?? {};
 
@@ -87,7 +87,7 @@ export async function paymentMethodRoutes(app: FastifyInstance) {
   });
 
   // POST /payment-methods/setup-intent — create Stripe SetupIntent for card onboarding
-  app.post("/payment-methods/setup-intent", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.post("/api/payment-methods/setup-intent", { preHandler: [requireAuth] }, async (request, reply) => {
     const userId = (request as any).userId as string;
 
     const user = await prisma.user.findUnique({ where: { clerkId: userId } });
@@ -133,7 +133,7 @@ export async function paymentMethodRoutes(app: FastifyInstance) {
   });
 
   // POST /payment-methods/setup-intent/confirm — save the card after SetupIntent succeeds
-  app.post("/payment-methods/setup-intent/confirm", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.post("/api/payment-methods/setup-intent/confirm", { preHandler: [requireAuth] }, async (request, reply) => {
     const userId = (request as any).userId as string;
     const { setupIntentId } = (request.body as { setupIntentId?: string }) ?? {};
 
@@ -188,7 +188,7 @@ export async function paymentMethodRoutes(app: FastifyInstance) {
   });
 
   // POST /payment-methods/paypal/connect — save user's PayPal credentials
-  app.post("/payment-methods/paypal/connect", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.post("/api/payment-methods/paypal/connect", { preHandler: [requireAuth] }, async (request, reply) => {
     const userId = (request as any).userId as string;
     const { clientId, clientSecret } = (request.body as { clientId?: string; clientSecret?: string }) ?? {};
 
@@ -249,7 +249,7 @@ export async function paymentMethodRoutes(app: FastifyInstance) {
   });
 
   // GET /payment-methods/:provider/status — check connection status for a provider
-  app.get("/payment-methods/:provider/status", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.get("/api/payment-methods/:provider/status", { preHandler: [requireAuth] }, async (request, reply) => {
     const userId = (request as any).userId as string;
     const { provider: providerName } = request.params as { provider: string };
 
@@ -277,7 +277,7 @@ export async function paymentMethodRoutes(app: FastifyInstance) {
   });
 
   // DELETE /payment-methods/:provider — disconnect a payment method
-  app.delete("/payment-methods/:provider", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.delete("/api/payment-methods/:provider", { preHandler: [requireAuth] }, async (request, reply) => {
     const userId = (request as any).userId as string;
     const { provider: providerName } = request.params as { provider: string };
 

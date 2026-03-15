@@ -22,7 +22,7 @@ export async function notificationRoutes(app: FastifyInstance) {
   );
 
   // Generate Telegram link code
-  app.post("/notifications/telegram/link", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.post("/api/notifications/telegram/link", { preHandler: [requireAuth] }, async (request, reply) => {
     const userId = (request as any).userId as string;
     const user = await prisma.user.findUnique({ where: { clerkId: userId } });
     if (!user) return reply.status(404).send({ success: false, error: "User not found" });
@@ -51,7 +51,7 @@ export async function notificationRoutes(app: FastifyInstance) {
   });
 
   // Disconnect Telegram
-  app.delete("/notifications/telegram", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.delete("/api/notifications/telegram", { preHandler: [requireAuth] }, async (request, reply) => {
     const userId = (request as any).userId as string;
     const user = await prisma.user.findUnique({ where: { clerkId: userId } });
     if (!user) return reply.status(404).send({ success: false, error: "User not found" });
@@ -68,7 +68,7 @@ export async function notificationRoutes(app: FastifyInstance) {
   });
 
   // Telegram webhook — called by Telegram Bot API
-  app.post("/notifications/telegram/webhook", async (request, reply) => {
+  app.post("/api/notifications/telegram/webhook", async (request, reply) => {
     // Validate Telegram webhook secret if configured
     const expectedSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
     if (expectedSecret) {
@@ -448,7 +448,7 @@ export async function notificationRoutes(app: FastifyInstance) {
   });
 
   // ── Email endpoint ──
-  app.post("/notifications/email", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.post("/api/notifications/email", { preHandler: [requireAuth] }, async (request, reply) => {
     const userId = (request as any).userId as string;
     const user = await prisma.user.findUnique({ where: { clerkId: userId } });
     if (!user) return reply.status(404).send({ success: false, error: "User not found" });
@@ -488,7 +488,7 @@ export async function notificationRoutes(app: FastifyInstance) {
   });
 
   // ── Email status endpoint ──
-  app.get("/notifications/email/status", { preHandler: [requireAuth] }, async () => {
+  app.get("/api/notifications/email/status", { preHandler: [requireAuth] }, async () => {
     return {
       configured: isEmailConfigured(),
       sender: process.env.ZOHO_EMAIL ?? null,
@@ -496,7 +496,7 @@ export async function notificationRoutes(app: FastifyInstance) {
   });
 
   // Admin bot webhook — called by @Jarvis12Brain_bot for approval callbacks
-  app.post("/notifications/telegram/admin-webhook", async (request, reply) => {
+  app.post("/api/notifications/telegram/admin-webhook", async (request, reply) => {
     const body = request.body as any;
     const adminToken = process.env.ADMIN_TELEGRAM_BOT_TOKEN;
     if (!adminToken) return reply.status(500).send({ ok: false, error: "Admin bot not configured" });

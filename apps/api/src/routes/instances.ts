@@ -22,7 +22,7 @@ import {
 
 export async function instanceRoutes(app: FastifyInstance) {
   // ── GET /instances — List all instances with load info ──
-  app.get("/instances", { preHandler: [requireAuth] }, async () => {
+  app.get("/api/instances", { preHandler: [requireAuth] }, async () => {
     const instances = await getInstanceStatus();
 
     const totalCapacity = instances.reduce((sum, i) => sum + i.capacity, 0);
@@ -45,7 +45,7 @@ export async function instanceRoutes(app: FastifyInstance) {
   });
 
   // ── GET /instances/my — Get current user's assigned instance ──
-  app.get("/instances/my", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.get("/api/instances/my", { preHandler: [requireAuth] }, async (request, reply) => {
     const userId = (request as any).userId as string;
     const { prisma } = await import("@payjarvis/database");
     const user = await prisma.user.findUnique({ where: { clerkId: userId } });
@@ -61,7 +61,7 @@ export async function instanceRoutes(app: FastifyInstance) {
   });
 
   // ── POST /instances/assign — Assign current user to an instance ──
-  app.post("/instances/assign", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.post("/api/instances/assign", { preHandler: [requireAuth] }, async (request, reply) => {
     const userId = (request as any).userId as string;
     const { prisma } = await import("@payjarvis/database");
     const user = await prisma.user.findUnique({ where: { clerkId: userId } });
@@ -85,7 +85,7 @@ export async function instanceRoutes(app: FastifyInstance) {
   });
 
   // ── DELETE /instances/my — Remove current user from instance (release slot) ──
-  app.delete("/instances/my", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.delete("/api/instances/my", { preHandler: [requireAuth] }, async (request, reply) => {
     const userId = (request as any).userId as string;
     const { prisma } = await import("@payjarvis/database");
     const user = await prisma.user.findUnique({ where: { clerkId: userId } });
@@ -97,7 +97,7 @@ export async function instanceRoutes(app: FastifyInstance) {
   });
 
   // ── POST /instances/spawn — Manually spawn a new instance ──
-  app.post("/instances/spawn", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.post("/api/instances/spawn", { preHandler: [requireAuth] }, async (request, reply) => {
     const { capacity } = (request.body as { capacity?: number }) || {};
 
     const result = await spawnInstance({ capacity });
@@ -119,7 +119,7 @@ export async function instanceRoutes(app: FastifyInstance) {
   });
 
   // ── DELETE /instances/:id — Despawn an instance (remove if empty) ──
-  app.delete("/instances/:id", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.delete("/api/instances/:id", { preHandler: [requireAuth] }, async (request, reply) => {
     const { id } = request.params as { id: string };
 
     const result = await despawnInstance(id);
@@ -132,7 +132,7 @@ export async function instanceRoutes(app: FastifyInstance) {
   });
 
   // ── POST /instances/:id/deactivate — Take an instance offline (keep files) ──
-  app.post("/instances/:id/deactivate", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.post("/api/instances/:id/deactivate", { preHandler: [requireAuth] }, async (request, reply) => {
     const { id } = request.params as { id: string };
 
     const deactivated = await deactivateInstance(id);
@@ -145,14 +145,14 @@ export async function instanceRoutes(app: FastifyInstance) {
   });
 
   // ── GET /instances/:id/full — Check if instance is full ──
-  app.get("/instances/:id/full", { preHandler: [requireAuth] }, async (request) => {
+  app.get("/api/instances/:id/full", { preHandler: [requireAuth] }, async (request) => {
     const { id } = request.params as { id: string };
     const full = await isInstanceFull(id);
     return { success: true, full };
   });
 
   // ── GET /instances/route — Route current user to their instance endpoint ──
-  app.get("/instances/route", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.get("/api/instances/route", { preHandler: [requireAuth] }, async (request, reply) => {
     const userId = (request as any).userId as string;
     const { prisma } = await import("@payjarvis/database");
     const user = await prisma.user.findUnique({ where: { clerkId: userId } });
@@ -168,7 +168,7 @@ export async function instanceRoutes(app: FastifyInstance) {
   });
 
   // ── GET /instances/route/bot/:botId — Get endpoint for a specific bot ──
-  app.get("/instances/route/bot/:botId", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.get("/api/instances/route/bot/:botId", { preHandler: [requireAuth] }, async (request, reply) => {
     const { botId } = request.params as { botId: string };
 
     const result = await getRouteForBot(botId);
@@ -188,7 +188,7 @@ export async function instanceRoutes(app: FastifyInstance) {
   });
 
   // ── GET /instances/capacity — Check capacity and auto-spawn if all >= 90% ──
-  app.get("/instances/capacity", { preHandler: [requireAuth] }, async () => {
+  app.get("/api/instances/capacity", { preHandler: [requireAuth] }, async () => {
     const result = await checkAndSpawn();
     return { success: true, data: result };
   });

@@ -12,7 +12,7 @@ async function invalidatePolicyCache(botId: string): Promise<void> {
 
 export async function policyRoutes(app: FastifyInstance) {
   // Create or update policy for a bot
-  app.post("/bots/:botId/policy", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.post("/api/bots/:botId/policy", { preHandler: [requireAuth] }, async (request, reply) => {
     const userId = (request as any).userId as string;
     const { botId } = request.params as { botId: string };
     const policyData = request.body as Record<string, unknown>;
@@ -45,7 +45,7 @@ export async function policyRoutes(app: FastifyInstance) {
   });
 
   // Get policy for a bot
-  app.get("/bots/:botId/policy", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.get("/api/bots/:botId/policy", { preHandler: [requireAuth] }, async (request, reply) => {
     const userId = (request as any).userId as string;
     const { botId } = request.params as { botId: string };
 
@@ -62,7 +62,7 @@ export async function policyRoutes(app: FastifyInstance) {
   });
 
   // Update policy
-  app.patch("/bots/:botId/policy", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.patch("/api/bots/:botId/policy", { preHandler: [requireAuth] }, async (request, reply) => {
     const userId = (request as any).userId as string;
     const { botId } = request.params as { botId: string };
     const updates = request.body as Record<string, unknown>;
@@ -94,7 +94,7 @@ export async function policyRoutes(app: FastifyInstance) {
   });
 
   // Delete policy
-  app.delete("/bots/:botId/policy", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.delete("/api/bots/:botId/policy", { preHandler: [requireAuth] }, async (request, reply) => {
     const userId = (request as any).userId as string;
     const { botId } = request.params as { botId: string };
 

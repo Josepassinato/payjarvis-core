@@ -9,11 +9,16 @@
  */
 
 import type { FastifyInstance } from "fastify";
-import { prisma } from "@payjarvis/database";
+import { prisma, Prisma } from "@payjarvis/database";
 import { requireAuth, getKycLevel, getInitialTrustScore } from "../middleware/auth.js";
 import { createAuditLog } from "../services/audit.js";
 import { createAgent } from "../services/agent-identity.js";
+import { activateUserBot } from "../services/bot-provisioning.js";
 import { createHash, randomBytes } from "node:crypto";
+import { chatWithGemini } from "../services/gemini.js";
+import type { GeminiResult } from "../services/gemini.js";
+import { getAmazonDomain } from "../services/amazon/domains.js";
+import { saveStoreCredentials, deleteStoreCredentials, normalizeStoreName } from "../services/vault/credentials.js";
 
 // ─────────────────────────────────────────
 // PLATFORM DEFINITIONS
@@ -204,7 +209,7 @@ export async function onboardingRoutes(app: FastifyInstance) {
   // ─────────────────────────────────────────
 
   // GET /onboarding/status — current onboarding state
-  app.get("/onboarding/status", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.get("/api/onboarding/status", { preHandler: [requireAuth] }, async (request, reply) => {
     const userId = (request as any).userId as string;
     const user = await prisma.user.findUnique({ where: { clerkId: userId } });
     if (!user) {
@@ -217,7 +222,7 @@ export async function onboardingRoutes(app: FastifyInstance) {
   });
 
   // POST /onboarding/ocr — Extract document data via Claude Vision
-  app.post("/onboarding/ocr", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.post("/api/onboarding/ocr", { preHandler: [requireAuth] }, async (request, reply) => {
     const body = request.body as { image: string; mimeType?: string };
     const userId = (request as any).userId as string;
 
@@ -292,22 +297,19 @@ Rules: Return ONLY the JSON, no explanation, no markdown fences. If a field is n
     }
   });
 
-  // POST /onboarding/step/1 — KYC identity verification
-  app.post("/onboarding/step/1", { preHandler: [requireAuth] }, async (request, reply) => {
+  // POST /onboarding/step/1 — Basic user data + auto-create bot
+  app.post("/api/onboarding/step/1", { preHandler: [requireAuth] }, async (request, reply) => {
     const userId = (request as any).userId as string;
     const body = request.body as {
       fullName: string;
-      dateOfBirth: string;
-      documentNumber: string;
-      country: string;
-      address: { street?: string; number?: string; city?: string; state?: string; zip?: string; country?: string };
+      phone?: string;
+      country?: string;
     };
 
-    request.log.info({ clerkId: userId, fullName: body.fullName, dateOfBirth: body.dateOfBirth, country: body.country, hasDoc: !!body.documentNumber }, "[STEP1] KYC submission received");
+    request.log.info({ clerkId: userId, fullName: body.fullName, country: body.country }, "[STEP1] Basic data received");
 
-    if (!body.fullName || !body.dateOfBirth || !body.documentNumber || !body.country) {
-      request.log.warn({ clerkId: userId }, "[STEP1] Missing required fields");
-      return reply.status(400).send({ success: false, error: "fullName, dateOfBirth, documentNumber and country are required" });
+    if (!body.fullName) {
+      return reply.status(400).send({ success: false, error: "fullName is required" });
     }
 
     const user = await prisma.user.findUnique({ where: { clerkId: userId } });
@@ -317,110 +319,91 @@ Rules: Return ONLY the JSON, no explanation, no markdown fences. If a field is n
       where: { id: user.id },
       data: {
         fullName: body.fullName,
-        dateOfBirth: new Date(body.dateOfBirth),
-        documentNumber: body.documentNumber,
-        country: body.country,
-        address: body.address ?? {},
-        kycLevel: "BASIC",
-        kycSubmittedAt: new Date(),
+        phone: body.phone ?? null,
+        country: body.country ?? "BR",
         onboardingStep: 1,
       },
     });
 
-    await createAuditLog({
-      entityType: "user",
-      entityId: user.id,
-      action: "user.kyc_submitted",
-      actorType: "user",
-      actorId: user.id,
-      payload: { country: body.country },
-      ipAddress: request.ip,
-    });
+    // Auto-create bot if user doesn't have one yet
+    const existingBot = await prisma.bot.findFirst({ where: { ownerId: user.id } });
+    if (!existingBot) {
+      const apiKey = `pj_bot_${randomBytes(32).toString("hex")}`;
+      const apiKeyHash = createHash("sha256").update(apiKey).digest("hex");
+      const kycLevelNum = getKycLevel(user.kycLevel);
+      const initialTrustScore = getInitialTrustScore(kycLevelNum);
 
-    request.log.info({ clerkId: userId, userId: user.id }, "[STEP1] KYC saved — step 1 complete");
+      const bot = await prisma.bot.create({
+        data: {
+          name: "JARVIS",
+          platform: "TELEGRAM",
+          ownerId: user.id,
+          apiKeyHash,
+          trustScore: initialTrustScore,
+        },
+      });
+
+      await prisma.policy.create({
+        data: {
+          botId: bot.id,
+          maxPerTransaction: 50,
+          maxPerDay: 200,
+          maxPerWeek: 500,
+          maxPerMonth: 2000,
+          autoApproveLimit: 50,
+          requireApprovalUp: 200,
+          allowedDays: [1, 2, 3, 4, 5],
+          allowedHoursStart: 6,
+          allowedHoursEnd: 22,
+          allowedCategories: [],
+          blockedCategories: [],
+          merchantWhitelist: [],
+          merchantBlacklist: [],
+        },
+      });
+
+      await createAgent(bot.id, user.id, "JARVIS", user.kycLevel);
+      request.log.info({ botId: bot.id }, "[STEP1] Auto-created JARVIS bot");
+    }
+
+    request.log.info({ clerkId: userId }, "[STEP1] Step 1 complete");
     return { success: true, data: { onboardingStep: 1 } };
   });
 
-  // POST /onboarding/step/2 — Create bot
-  app.post("/onboarding/step/2", { preHandler: [requireAuth] }, async (request, reply) => {
+  // POST /onboarding/step/2 — Payment method selection
+  app.post("/api/onboarding/step/2", { preHandler: [requireAuth] }, async (request, reply) => {
     const userId = (request as any).userId as string;
-    const body = request.body as { name: string; description?: string; category?: string; platform: string };
+    const body = request.body as { method?: "sdk" | "stripe_card" };
 
-    request.log.info({ clerkId: userId, name: body.name, platform: body.platform }, "[STEP2] Bot creation request");
-
-    if (!body.name || !body.platform) {
-      request.log.warn({ clerkId: userId }, "[STEP2] Missing name or platform");
-      return reply.status(400).send({ success: false, error: "name and platform are required" });
-    }
+    request.log.info({ clerkId: userId, method: body.method }, "[STEP2] Payment method selection");
 
     const user = await prisma.user.findUnique({ where: { clerkId: userId } });
     if (!user) return reply.status(404).send({ success: false, error: "User not found" });
     if (user.onboardingStep < 1) {
-      request.log.warn({ clerkId: userId, currentStep: user.onboardingStep }, "[STEP2] Step 1 not completed");
       return reply.status(400).send({ success: false, error: "Complete step 1 first" });
     }
 
-    const apiKey = `pj_bot_${randomBytes(32).toString("hex")}`;
-    const apiKeyHash = createHash("sha256").update(apiKey).digest("hex");
-    const kycLevelNum = getKycLevel(user.kycLevel);
-    const initialTrustScore = getInitialTrustScore(kycLevelNum);
-
-    const bot = await prisma.bot.create({
-      data: {
-        name: body.name,
-        platform: body.platform as any,
-        ownerId: user.id,
-        apiKeyHash,
-        trustScore: initialTrustScore,
-      },
-    });
-
-    // Default policy
-    await prisma.policy.create({
-      data: {
-        botId: bot.id,
-        maxPerTransaction: 50,
-        maxPerDay: 200,
-        maxPerWeek: 500,
-        maxPerMonth: 2000,
-        autoApproveLimit: 50,
-        requireApprovalUp: 200,
-        allowedDays: [1, 2, 3, 4, 5],
-        allowedHoursStart: 6,
-        allowedHoursEnd: 22,
-        allowedCategories: [],
-        blockedCategories: [],
-        merchantWhitelist: [],
-        merchantBlacklist: [],
-      },
-    });
-
-    const agent = await createAgent(bot.id, user.id, body.name, user.kycLevel);
+    // If stripe_card, verify card was actually saved
+    if (body.method === "stripe_card") {
+      const pm = await prisma.paymentMethod.findFirst({
+        where: { userId: user.id, provider: "STRIPE", status: "CONNECTED" },
+      });
+      if (!pm) {
+        return reply.status(400).send({ success: false, error: "No Stripe card connected. Add a card first." });
+      }
+    }
 
     await prisma.user.update({
       where: { id: user.id },
       data: { onboardingStep: 2 },
     });
 
-    await createAuditLog({
-      entityType: "bot",
-      entityId: bot.id,
-      action: "bot.created",
-      actorType: "user",
-      actorId: user.id,
-      payload: { name: body.name, platform: body.platform, onboarding: true },
-      ipAddress: request.ip,
-    });
-
-    request.log.info({ clerkId: userId, botId: bot.id, agentId: agent.id, platform: bot.platform }, "[STEP2] Bot + agent created — step 2 complete");
-    return reply.status(201).send({
-      success: true,
-      data: { bot: { id: bot.id, name: bot.name, platform: bot.platform }, apiKey, agentId: agent.id },
-    });
+    request.log.info({ clerkId: userId }, "[STEP2] Step 2 complete");
+    return { success: true, data: { onboardingStep: 2 } };
   });
 
   // POST /onboarding/step/3 — Select integrations (providers)
-  app.post("/onboarding/step/3", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.post("/api/onboarding/step/3", { preHandler: [requireAuth] }, async (request, reply) => {
     const userId = (request as any).userId as string;
     const body = request.body as {
       skipped?: boolean;
@@ -467,7 +450,7 @@ Rules: Return ONLY the JSON, no explanation, no markdown fences. If a field is n
   });
 
   // POST /onboarding/step/4 — Payment method choice
-  app.post("/onboarding/step/4", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.post("/api/onboarding/step/4", { preHandler: [requireAuth] }, async (request, reply) => {
     const userId = (request as any).userId as string;
     const body = request.body as { method: "sdk" | "stripe_card" };
 
@@ -501,7 +484,7 @@ Rules: Return ONLY the JSON, no explanation, no markdown fences. If a field is n
   });
 
   // POST /onboarding/step/5 — Accept terms and complete onboarding
-  app.post("/onboarding/step/5", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.post("/api/onboarding/step/5", { preHandler: [requireAuth] }, async (request, reply) => {
     const userId = (request as any).userId as string;
     request.log.info({ clerkId: userId }, "[STEP5] Accept terms request");
 
@@ -553,6 +536,439 @@ Rules: Return ONLY the JSON, no explanation, no markdown fences. If a field is n
   });
 
   // ─────────────────────────────────────────
+  // TELEGRAM BOT TOKEN MANAGEMENT
+  // ─────────────────────────────────────────
+
+  // POST /api/bots/:botId/telegram/connect — Validate & save user's Telegram bot token
+  app.post("/api/bots/:botId/telegram/connect", { preHandler: [requireAuth] }, async (request, reply) => {
+    const userId = (request as any).userId as string;
+    const { botId } = request.params as { botId: string };
+    const { telegramBotToken } = request.body as { telegramBotToken: string };
+
+    if (!telegramBotToken || typeof telegramBotToken !== "string" || !telegramBotToken.trim()) {
+      return reply.status(400).send({ success: false, error: "telegramBotToken is required" });
+    }
+
+    const token = telegramBotToken.trim();
+
+    // Verify bot ownership
+    const user = await prisma.user.findUnique({ where: { clerkId: userId } });
+    if (!user) return reply.status(404).send({ success: false, error: "User not found" });
+
+    const bot = await prisma.bot.findFirst({ where: { id: botId, ownerId: user.id } });
+    if (!bot) return reply.status(404).send({ success: false, error: "Bot not found" });
+
+    // Validate token by calling Telegram getMe
+    let telegramBot: { id: number; is_bot: boolean; first_name: string; username?: string };
+    try {
+      const getMeRes = await fetch(`https://api.telegram.org/bot${token}/getMe`);
+      const getMeData = await getMeRes.json() as { ok: boolean; result?: typeof telegramBot; description?: string };
+
+      if (!getMeData.ok || !getMeData.result) {
+        request.log.warn({ botId }, "[TELEGRAM] Invalid bot token — getMe failed");
+        return reply.status(400).send({
+          success: false,
+          error: getMeData.description || "Invalid Telegram Bot Token. Please check and try again.",
+        });
+      }
+      telegramBot = getMeData.result;
+    } catch (err) {
+      request.log.error(err, "[TELEGRAM] Failed to reach Telegram API");
+      return reply.status(502).send({ success: false, error: "Could not reach Telegram API. Try again later." });
+    }
+
+    // Set webhook pointing to PayJarvis
+    const webhookUrl = `https://www.payjarvis.com/api/bots/${botId}/telegram/webhook`;
+    const webhookSecret = randomBytes(32).toString("hex");
+
+    try {
+      const setWebhookRes = await fetch(`https://api.telegram.org/bot${token}/setWebhook`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: webhookUrl,
+          secret_token: webhookSecret,
+          allowed_updates: ["message", "callback_query"],
+        }),
+      });
+      const webhookData = await setWebhookRes.json() as { ok: boolean; description?: string };
+
+      if (!webhookData.ok) {
+        request.log.warn({ botId, error: webhookData.description }, "[TELEGRAM] setWebhook failed");
+        return reply.status(400).send({
+          success: false,
+          error: `Failed to set webhook: ${webhookData.description || "Unknown error"}`,
+        });
+      }
+    } catch (err) {
+      request.log.error(err, "[TELEGRAM] setWebhook request failed");
+      return reply.status(502).send({ success: false, error: "Could not set Telegram webhook. Try again later." });
+    }
+
+    // Save token and bot info in BotIntegration
+    const config = {
+      telegramBotToken: token,
+      telegramBotId: telegramBot.id,
+      telegramBotUsername: telegramBot.username || null,
+      telegramBotName: telegramBot.first_name,
+      webhookUrl,
+      webhookSecret,
+      connectedAt: new Date().toISOString(),
+    };
+
+    await prisma.botIntegration.upsert({
+      where: { botId_provider: { botId, provider: "telegram_bot" } },
+      create: {
+        botId,
+        provider: "telegram_bot",
+        category: "messaging",
+        enabled: true,
+        connectedAt: new Date(),
+        config,
+      },
+      update: {
+        enabled: true,
+        connectedAt: new Date(),
+        config,
+      },
+    });
+
+    await createAuditLog({
+      entityType: "bot",
+      entityId: botId,
+      action: "bot.telegram_connected",
+      actorType: "user",
+      actorId: user.id,
+      payload: { telegramBotUsername: telegramBot.username, telegramBotId: telegramBot.id },
+      ipAddress: request.ip,
+    });
+
+    request.log.info({ botId, telegramUsername: telegramBot.username }, "[TELEGRAM] Bot token saved and webhook configured");
+
+    return {
+      success: true,
+      data: {
+        username: telegramBot.username,
+        name: telegramBot.first_name,
+        botId: telegramBot.id,
+        webhookUrl,
+      },
+    };
+  });
+
+  // GET /api/bots/:botId/telegram/status — Check Telegram bot connection status
+  app.get("/api/bots/:botId/telegram/status", { preHandler: [requireAuth] }, async (request, reply) => {
+    const userId = (request as any).userId as string;
+    const { botId } = request.params as { botId: string };
+
+    const user = await prisma.user.findUnique({ where: { clerkId: userId } });
+    if (!user) return reply.status(404).send({ success: false, error: "User not found" });
+
+    const bot = await prisma.bot.findFirst({ where: { id: botId, ownerId: user.id } });
+    if (!bot) return reply.status(404).send({ success: false, error: "Bot not found" });
+
+    const integration = await prisma.botIntegration.findUnique({
+      where: { botId_provider: { botId, provider: "telegram_bot" } },
+    });
+
+    if (!integration || !integration.enabled || !integration.config) {
+      return { success: true, data: { connected: false } };
+    }
+
+    const config = integration.config as Record<string, unknown>;
+    return {
+      success: true,
+      data: {
+        connected: true,
+        username: config.telegramBotUsername || null,
+        name: config.telegramBotName || null,
+        connectedAt: integration.connectedAt?.toISOString() || null,
+      },
+    };
+  });
+
+  // POST /api/bots/:botId/telegram/disconnect — Remove Telegram bot token
+  app.post("/api/bots/:botId/telegram/disconnect", { preHandler: [requireAuth] }, async (request, reply) => {
+    const userId = (request as any).userId as string;
+    const { botId } = request.params as { botId: string };
+
+    const user = await prisma.user.findUnique({ where: { clerkId: userId } });
+    if (!user) return reply.status(404).send({ success: false, error: "User not found" });
+
+    const bot = await prisma.bot.findFirst({ where: { id: botId, ownerId: user.id } });
+    if (!bot) return reply.status(404).send({ success: false, error: "Bot not found" });
+
+    const integration = await prisma.botIntegration.findUnique({
+      where: { botId_provider: { botId, provider: "telegram_bot" } },
+    });
+
+    if (integration?.config) {
+      const config = integration.config as Record<string, unknown>;
+      const token = config.telegramBotToken as string;
+
+      // Remove webhook from Telegram
+      if (token) {
+        try {
+          await fetch(`https://api.telegram.org/bot${token}/deleteWebhook`);
+        } catch {
+          // Non-critical — webhook will just stop receiving
+        }
+      }
+    }
+
+    if (integration) {
+      await prisma.botIntegration.update({
+        where: { id: integration.id },
+        data: { enabled: false, config: Prisma.DbNull },
+      });
+    }
+
+    await createAuditLog({
+      entityType: "bot",
+      entityId: botId,
+      action: "bot.telegram_disconnected",
+      actorType: "user",
+      actorId: user.id,
+      ipAddress: request.ip,
+    });
+
+    request.log.info({ botId }, "[TELEGRAM] Bot token removed");
+    return { success: true };
+  });
+
+  // POST /api/bots/:botId/telegram/webhook — Receive updates from user's Telegram bot
+  app.post("/api/bots/:botId/telegram/webhook", async (request, reply) => {
+    const { botId } = request.params as { botId: string };
+
+    // Look up the bot's Telegram integration to validate the secret
+    const integration = await prisma.botIntegration.findUnique({
+      where: { botId_provider: { botId, provider: "telegram_bot" } },
+    });
+
+    if (!integration || !integration.enabled || !integration.config) {
+      return reply.status(404).send({ success: false, error: "Telegram not configured for this bot" });
+    }
+
+    const config = integration.config as Record<string, unknown>;
+    const expectedSecret = config.webhookSecret as string;
+
+    // Validate webhook secret
+    const receivedSecret = request.headers["x-telegram-bot-api-secret-token"] as string;
+    if (expectedSecret && receivedSecret !== expectedSecret) {
+      request.log.warn({ botId }, "[TELEGRAM:WEBHOOK] Invalid secret token");
+      return reply.status(403).send({ success: false, error: "Invalid secret" });
+    }
+
+    const update = request.body as Record<string, unknown>;
+    request.log.info({ botId, updateId: (update as any)?.update_id }, "[TELEGRAM:WEBHOOK] Received update");
+
+    // Extract message from update
+    const message = (update.message ?? update.edited_message) as Record<string, unknown> | undefined;
+    if (!message || !message.text || !message.chat) {
+      // Non-text update (photo, sticker, etc.) — acknowledge silently
+      return { ok: true };
+    }
+
+    const chatId = String((message.chat as Record<string, unknown>).id);
+    const text = String(message.text);
+    const botToken = config.telegramBotToken as string;
+
+    if (!botToken) {
+      request.log.error({ botId }, "[TELEGRAM:WEBHOOK] No bot token in integration config");
+      return { ok: true };
+    }
+
+    // Look up bot + owner for personalized AI prompt
+    const bot = await prisma.bot.findUnique({
+      where: { id: botId },
+      include: { owner: { select: { fullName: true, country: true } } },
+    });
+
+    const fromUser = (message.from as Record<string, unknown> | undefined);
+    const firstName = fromUser?.first_name ? String(fromUser.first_name) : undefined;
+    const userLangCode = fromUser?.language_code ? String(fromUser.language_code) : undefined;
+
+    // Bot display name: custom > bot name in DB > Telegram username from integration > generic
+    const telegramUsername = config.telegramBotUsername as string | undefined;
+    const botDisplayName = bot?.botDisplayName || bot?.name || (telegramUsername ? `@${telegramUsername}` : "Assistant");
+    const botCaps = bot?.capabilities || [];
+    // Bot language: configured > infer from Telegram user's language > default english
+    const botLang = bot?.language || userLangCode || "en";
+
+    // Handle /start command — welcome message without AI
+    if (text.trim() === "/start") {
+      let welcome: string;
+      if (botCaps.length > 0) {
+        const capsList = botCaps.map(c => `  - ${c}`).join("\n");
+        welcome = botLang.startsWith("pt")
+          ? `Olá${firstName ? ` ${firstName}` : ""}! 👋\n\nEu sou o ${botDisplayName}, seu assistente pessoal.\n\nPosso te ajudar com:\n${capsList}\n\nÉ só me mandar uma mensagem e vamos começar!`
+          : botLang.startsWith("es")
+          ? `¡Hola${firstName ? ` ${firstName}` : ""}! 👋\n\nSoy ${botDisplayName}, tu asistente personal.\n\nPuedo ayudarte con:\n${capsList}\n\n¡Solo envíame un mensaje y comencemos!`
+          : `Hi${firstName ? ` ${firstName}` : ""}! 👋\n\nI'm ${botDisplayName}, your personal assistant.\n\nI can help you with:\n${capsList}\n\nJust send me a message and let's get started!`;
+      } else {
+        welcome = botLang.startsWith("pt")
+          ? `Olá${firstName ? ` ${firstName}` : ""}! 👋\n\nEu sou o ${botDisplayName}. Me manda uma mensagem e vamos conversar!`
+          : botLang.startsWith("es")
+          ? `¡Hola${firstName ? ` ${firstName}` : ""}! 👋\n\nSoy ${botDisplayName}. ¡Envíame un mensaje y conversemos!`
+          : `Hi${firstName ? ` ${firstName}` : ""}! 👋\n\nI'm ${botDisplayName}. Send me a message and let's chat!`;
+      }
+
+      try {
+        await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chat_id: chatId, text: welcome }),
+        });
+        request.log.info({ botId, chatId, firstName }, "[TELEGRAM:WEBHOOK] Welcome message sent");
+      } catch (err) {
+        request.log.error(err, "[TELEGRAM:WEBHOOK] Failed to send welcome");
+      }
+      return { ok: true };
+    }
+
+    // Process the message through the AI engine
+    try {
+      const geminiResult = await chatWithGemini(chatId, text, {
+        botId,
+        ownerName: bot?.owner?.fullName || undefined,
+        botName: botDisplayName,
+        systemPrompt: bot?.systemPrompt || undefined,
+        capabilities: botCaps,
+        language: botLang,
+        amazonDomain: getAmazonDomain(bot?.owner?.country),
+      });
+
+      // Handle function calls from Gemini
+      if (geminiResult.functionCall) {
+        const fc = geminiResult.functionCall;
+        let confirmationMsg: string;
+
+        if (fc.name === "save_store_credentials") {
+          const args = fc.args as { store_name: string; email: string; password: string };
+          const { provider, displayName, known } = normalizeStoreName(args.store_name);
+
+          // Find the bot owner's userId for vault storage
+          const ownerUserId = bot?.ownerId;
+          if (!ownerUserId) {
+            confirmationMsg = "Could not save credentials — user not found.";
+          } else {
+            await saveStoreCredentials({
+              userId: ownerUserId,
+              provider,
+              email: args.email,
+              password: args.password,
+              storeName: displayName,
+            });
+
+            const lang = botLang;
+            if (lang.startsWith("pt")) {
+              confirmationMsg = known
+                ? `✅ Credenciais da ${displayName} salvas com sucesso no seu Account Vault! Agora posso fazer compras e pesquisas na ${displayName} por você. 🔒 Seus dados são criptografados e nunca compartilhados.`
+                : `✅ Salvei suas credenciais de "${displayName}" como login genérico. Quando adicionarmos suporte oficial, já estará configurado! 🔒`;
+            } else if (lang.startsWith("es")) {
+              confirmationMsg = known
+                ? `✅ Credenciales de ${displayName} guardadas en tu Account Vault. Ahora puedo hacer compras en ${displayName} por ti. 🔒`
+                : `✅ Guardé tus credenciales de "${displayName}" como login genérico. 🔒`;
+            } else {
+              confirmationMsg = known
+                ? `✅ ${displayName} credentials saved to your Account Vault! I can now shop and search ${displayName} for you. 🔒 Your data is encrypted and never shared.`
+                : `✅ Saved your "${displayName}" credentials as a generic login. When we add official support, you'll be all set! 🔒`;
+            }
+          }
+        } else if (fc.name === "remove_store_credentials") {
+          const args = fc.args as { store_name: string };
+          const { provider, displayName } = normalizeStoreName(args.store_name);
+          const ownerUserId = bot?.ownerId;
+
+          if (ownerUserId) {
+            await deleteStoreCredentials(ownerUserId, provider);
+          }
+
+          const lang = botLang;
+          confirmationMsg = lang.startsWith("pt")
+            ? `✅ Login da ${displayName} removido com sucesso.`
+            : lang.startsWith("es")
+            ? `✅ Login de ${displayName} eliminado.`
+            : `✅ ${displayName} login removed successfully.`;
+        } else {
+          confirmationMsg = geminiResult.text || "Done.";
+        }
+
+        // Send confirmation
+        await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chat_id: chatId, text: confirmationMsg }),
+        });
+
+        // Security: delete the user's message that contained the password
+        if (fc.name === "save_store_credentials") {
+          const messageId = (message as any).message_id;
+          if (messageId) {
+            try {
+              await fetch(`https://api.telegram.org/bot${botToken}/deleteMessage`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ chat_id: chatId, message_id: messageId }),
+              });
+              // Notify user about deletion
+              const deletionNote = botLang.startsWith("pt")
+                ? "🔒 Sua mensagem com a senha foi apagada por segurança."
+                : botLang.startsWith("es")
+                ? "🔒 Tu mensaje con la contraseña fue eliminado por seguridad."
+                : "🔒 Your message containing the password was deleted for security.";
+              await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ chat_id: chatId, text: deletionNote }),
+              });
+            } catch {
+              // Bot may not have permission to delete messages — that's OK
+            }
+          }
+        }
+
+        request.log.info({ botId, chatId, functionCall: fc.name, store: (fc.args as Record<string, unknown>).store_name }, "[TELEGRAM:WEBHOOK] Function call executed");
+        return { ok: true };
+      }
+
+      // Regular text response (no function call)
+      const aiResponse = geminiResult.text;
+
+      const sendRes = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: aiResponse,
+          parse_mode: "Markdown",
+        }),
+      });
+
+      if (!sendRes.ok) {
+        const errBody = await sendRes.text();
+        request.log.error({ botId, chatId, error: errBody }, "[TELEGRAM:WEBHOOK] Failed to send reply");
+
+        // Retry without parse_mode in case Markdown broke
+        await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chat_id: chatId,
+            text: aiResponse,
+          }),
+        });
+      } else {
+        request.log.info({ botId, chatId }, "[TELEGRAM:WEBHOOK] Reply sent");
+      }
+    } catch (err) {
+      request.log.error(err, "[TELEGRAM:WEBHOOK] Error processing message");
+    }
+
+    return { ok: true };
+  });
+
+  // ─────────────────────────────────────────
   // BOT INTEGRATIONS MANAGEMENT (dashboard)
   // ─────────────────────────────────────────
 
@@ -571,6 +987,7 @@ Rules: Return ONLY the JSON, no explanation, no markdown fences. If a field is n
       { provider: "lyft", label: "Lyft", description: "Rides", category: "transport", envKey: "" },
       { provider: "uber_eats", label: "Uber Eats", description: "Food Delivery", category: "delivery", envKey: "" },
       { provider: "doordash", label: "DoorDash", description: "Food Delivery", category: "delivery", envKey: "" },
+      { provider: "ifood", label: "iFood", description: "Food Delivery (BR/LATAM)", category: "delivery", envKey: "IFOOD_CLIENT_ID" },
     ];
 
     const data = providers.map((p) => ({
@@ -585,7 +1002,7 @@ Rules: Return ONLY the JSON, no explanation, no markdown fences. If a field is n
   });
 
   // GET /bots/:botId/integrations — list integrations for a bot
-  app.get("/bots/:botId/integrations", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.get("/api/bots/:botId/integrations", { preHandler: [requireAuth] }, async (request, reply) => {
     const { botId } = request.params as { botId: string };
     const userId = (request as any).userId as string;
 
@@ -597,7 +1014,7 @@ Rules: Return ONLY the JSON, no explanation, no markdown fences. If a field is n
   });
 
   // POST /bots/:botId/integrations/toggle — toggle a single provider
-  app.post("/bots/:botId/integrations/toggle", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.post("/api/bots/:botId/integrations/toggle", { preHandler: [requireAuth] }, async (request, reply) => {
     const { botId } = request.params as { botId: string };
     const userId = (request as any).userId as string;
     const body = request.body as { provider: string; category: string; enabled: boolean };
@@ -628,7 +1045,7 @@ Rules: Return ONLY the JSON, no explanation, no markdown fences. If a field is n
   });
 
   // PUT /bots/:botId/integrations — bulk update integrations
-  app.put("/bots/:botId/integrations", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.put("/api/bots/:botId/integrations", { preHandler: [requireAuth] }, async (request, reply) => {
     const { botId } = request.params as { botId: string };
     const userId = (request as any).userId as string;
     const body = request.body as { integrations: Array<{ provider: string; category: string; enabled: boolean }> };
@@ -646,5 +1063,128 @@ Rules: Return ONLY the JSON, no explanation, no markdown fences. If a field is n
 
     const integrations = await prisma.botIntegration.findMany({ where: { botId } });
     return { success: true, data: integrations };
+  });
+
+  // ─────────────────────────────────────────
+  // JARVIS ACTIVATION (deep link flow)
+  // ─────────────────────────────────────────
+
+  // POST /api/onboarding/generate-link — Generate Telegram deep link code
+  app.post("/api/onboarding/generate-link", { preHandler: [requireAuth] }, async (request, reply) => {
+    const userId = (request as any).userId as string;
+    const body = request.body as { approvalThreshold?: number };
+
+    const user = await prisma.user.findUnique({ where: { clerkId: userId } });
+    if (!user) return reply.status(404).send({ success: false, error: "User not found" });
+
+    // Update threshold
+    if (body.approvalThreshold !== undefined) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { approvalThreshold: body.approvalThreshold },
+      });
+    }
+
+    // Generate or refresh link code (reuse TelegramLinkCode table)
+    const code = `act_${randomBytes(16).toString("hex")}`;
+    const expiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 min
+
+    await prisma.telegramLinkCode.upsert({
+      where: { userId: user.id },
+      create: { userId: user.id, code, expiresAt },
+      update: { code, expiresAt },
+    });
+
+    const botUsername = process.env.TELEGRAM_BOT_USERNAME ?? "Jarvis12Brain_bot";
+    const url = `https://t.me/${botUsername}?start=${code}`;
+
+    request.log.info({ clerkId: userId, code }, "[LINK] Activation link generated");
+    return { success: true, data: { url, code, expiresAt: expiresAt.toISOString() } };
+  });
+
+  // GET /api/onboarding/activation-status — Poll whether Telegram was connected
+  app.get("/api/onboarding/activation-status", { preHandler: [requireAuth] }, async (request) => {
+    const userId = (request as any).userId as string;
+    const user = await prisma.user.findUnique({
+      where: { clerkId: userId },
+      select: { telegramChatId: true, onboardingCompleted: true, botActivatedAt: true },
+    });
+
+    return {
+      success: true,
+      data: {
+        connected: !!user?.telegramChatId,
+        activated: !!user?.botActivatedAt,
+      },
+    };
+  });
+
+  // POST /api/onboarding/complete-activation — Called by OpenClaw when user clicks deep link
+  app.post("/api/onboarding/complete-activation", async (request, reply) => {
+    const body = request.body as { code: string; telegramId: string; name?: string };
+
+    if (!body.code || !body.telegramId) {
+      return reply.status(400).send({ success: false, error: "code and telegramId are required" });
+    }
+
+    const linkCode = await prisma.telegramLinkCode.findUnique({ where: { code: body.code } });
+    if (!linkCode) {
+      return reply.status(404).send({ success: false, error: "Invalid activation code" });
+    }
+    if (linkCode.expiresAt < new Date()) {
+      return reply.status(410).send({ success: false, error: "Activation code expired" });
+    }
+
+    // Activate the user
+    await prisma.user.update({
+      where: { id: linkCode.userId },
+      data: {
+        telegramChatId: body.telegramId,
+        onboardingCompleted: true,
+        botActivatedAt: new Date(),
+        onboardingStep: 4,
+        status: "ACTIVE",
+      },
+    });
+
+    // Delete used code
+    await prisma.telegramLinkCode.delete({ where: { id: linkCode.id } });
+
+    request.log.info({ userId: linkCode.userId, telegramId: body.telegramId }, "[ACTIVATE] Deep link activation complete");
+    return { success: true };
+  });
+
+  // GET /api/users/telegram/:telegramId — Resolve user info by Telegram ID
+  app.get("/api/users/telegram/:telegramId", async (request, reply) => {
+    const { telegramId } = request.params as { telegramId: string };
+
+    const user = await prisma.user.findFirst({
+      where: { telegramChatId: telegramId },
+      select: {
+        fullName: true,
+        email: true,
+        approvalThreshold: true,
+        onboardingCompleted: true,
+        botActivatedAt: true,
+        bots: { take: 1, select: { id: true, name: true } },
+      },
+    });
+
+    if (!user) {
+      return reply.status(404).send({ success: false, error: "User not found" });
+    }
+
+    return {
+      success: true,
+      data: {
+        name: user.fullName,
+        email: user.email,
+        approvalThreshold: user.approvalThreshold,
+        onboardingCompleted: user.onboardingCompleted,
+        botActivatedAt: user.botActivatedAt,
+        botId: user.bots[0]?.id ?? null,
+        botName: user.bots[0]?.name ?? null,
+      },
+    };
   });
 }

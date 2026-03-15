@@ -25,7 +25,7 @@ export async function paymentRoutes(app: FastifyInstance) {
   );
 
   // Request payment — authenticated by bot API key
-  app.post("/bots/:botId/request-payment", { preHandler: [requireBotAuth] }, async (request, reply) => {
+  app.post("/api/bots/:botId/request-payment", { preHandler: [requireBotAuth] }, async (request, reply) => {
     const botId = (request as any).botId as string;
     const botOwnerId = (request as any).botOwnerId as string;
     const { botId: paramBotId } = request.params as { botId: string };
@@ -341,7 +341,7 @@ export async function paymentRoutes(app: FastifyInstance) {
   });
 
   // BDIT confirm-use — mark token as used (one-time use enforcement)
-  app.post("/bdit/confirm-use", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.post("/api/bdit/confirm-use", { preHandler: [requireAuth] }, async (request, reply) => {
     const { jti } = request.body as { jti: string };
 
     if (!jti) {
@@ -416,7 +416,7 @@ export async function paymentRoutes(app: FastifyInstance) {
   });
 
   // BDIT check-status — verify if a JTI is valid for use
-  app.get("/bdit/status/:jti", async (request, reply) => {
+  app.get("/api/bdit/status/:jti", async (request, reply) => {
     const { jti } = request.params as { jti: string };
 
     // Fast check in Redis first

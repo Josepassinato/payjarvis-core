@@ -28,7 +28,7 @@ const DEFAULT_POLICY = {
 
 export async function botRoutes(app: FastifyInstance) {
   // Create bot + auto-create policy with defaults
-  app.post("/bots", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.post("/api/bots", { preHandler: [requireAuth] }, async (request, reply) => {
     const userId = (request as any).userId as string;
     const { name, platform } = request.body as { name: string; platform: string };
 
@@ -89,7 +89,7 @@ export async function botRoutes(app: FastifyInstance) {
   });
 
   // List bots
-  app.get("/bots", { preHandler: [requireAuth] }, async (request) => {
+  app.get("/api/bots", { preHandler: [requireAuth] }, async (request) => {
     const userId = (request as any).userId as string;
     const user = await prisma.user.findUnique({ where: { clerkId: userId } });
     if (!user) return { success: false, error: "User not found" };
@@ -103,7 +103,7 @@ export async function botRoutes(app: FastifyInstance) {
   });
 
   // Get single bot
-  app.get("/bots/:botId", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.get("/api/bots/:botId", { preHandler: [requireAuth] }, async (request, reply) => {
     const userId = (request as any).userId as string;
     const { botId } = request.params as { botId: string };
     const user = await prisma.user.findUnique({ where: { clerkId: userId } });
@@ -119,7 +119,7 @@ export async function botRoutes(app: FastifyInstance) {
   });
 
   // Update bot (name/platform)
-  app.patch("/bots/:botId", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.patch("/api/bots/:botId", { preHandler: [requireAuth] }, async (request, reply) => {
     const userId = (request as any).userId as string;
     const { botId } = request.params as { botId: string };
     const updates = request.body as Record<string, unknown>;
@@ -129,7 +129,7 @@ export async function botRoutes(app: FastifyInstance) {
     const existing = await prisma.bot.findFirst({ where: { id: botId, ownerId: user.id } });
     if (!existing) return reply.status(404).send({ success: false, error: "Bot not found" });
 
-    const allowedFields = ["name", "platform"];
+    const allowedFields = ["name", "platform", "systemPrompt", "botDisplayName", "capabilities", "language"];
     const filtered: Record<string, unknown> = {};
     for (const key of allowedFields) {
       if (key in updates) filtered[key] = updates[key];
@@ -154,7 +154,7 @@ export async function botRoutes(app: FastifyInstance) {
   });
 
   // Dedicated status endpoint — PATCH /bots/:botId/status
-  app.patch("/bots/:botId/status", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.patch("/api/bots/:botId/status", { preHandler: [requireAuth] }, async (request, reply) => {
     const userId = (request as any).userId as string;
     const { botId } = request.params as { botId: string };
     const { status } = request.body as { status: string };
@@ -220,7 +220,7 @@ export async function botRoutes(app: FastifyInstance) {
   });
 
   // Delete bot
-  app.delete("/bots/:botId", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.delete("/api/bots/:botId", { preHandler: [requireAuth] }, async (request, reply) => {
     const userId = (request as any).userId as string;
     const { botId } = request.params as { botId: string };
     const user = await prisma.user.findUnique({ where: { clerkId: userId } });
@@ -228,6 +228,25 @@ export async function botRoutes(app: FastifyInstance) {
 
     const existing = await prisma.bot.findFirst({ where: { id: botId, ownerId: user.id } });
     if (!existing) return reply.status(404).send({ success: false, error: "Bot not found" });
+
+    // Clean up Telegram webhook if connected
+    const telegramIntegration = await prisma.botIntegration.findUnique({
+      where: { botId_provider: { botId, provider: "telegram_bot" } },
+    });
+    if (telegramIntegration?.config) {
+      const tgConfig = telegramIntegration.config as Record<string, unknown>;
+      const tgToken = tgConfig.telegramBotToken as string;
+      if (tgToken) {
+        try {
+          await fetch(`https://api.telegram.org/bot${tgToken}/deleteWebhook`, {
+            method: "POST",
+            signal: AbortSignal.timeout(5_000),
+          });
+        } catch {
+          // Best-effort cleanup — don't block deletion
+        }
+      }
+    }
 
     // Revoke in Redis before deleting
     await redisSet(`revoked:bot:${botId}`, "1");
@@ -247,7 +266,7 @@ export async function botRoutes(app: FastifyInstance) {
   });
 
   // GET /bots/:botId/limits — check spending limits (bot-auth or user-auth)
-  app.get("/bots/:botId/limits", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.get("/api/bots/:botId/limits", { preHandler: [requireAuth] }, async (request, reply) => {
     const userId = (request as any).userId as string;
     const { botId } = request.params as { botId: string };
 
@@ -306,7 +325,7 @@ export async function botRoutes(app: FastifyInstance) {
   });
 
   // GET /bots/:botId/limits/sdk — bot-auth variant for agent-sdk
-  app.get("/bots/:botId/limits/sdk", { preHandler: [requireBotAuth] }, async (request, reply) => {
+  app.get("/api/bots/:botId/limits/sdk", { preHandler: [requireBotAuth] }, async (request, reply) => {
     const botId = (request as any).botId as string;
     const { botId: paramBotId } = request.params as { botId: string };
 
@@ -366,7 +385,7 @@ export async function botRoutes(app: FastifyInstance) {
   });
 
   // GET /bots/:botId/reputation — full agent reputation data
-  app.get("/bots/:botId/reputation", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.get("/api/bots/:botId/reputation", { preHandler: [requireAuth] }, async (request, reply) => {
     const userId = (request as any).userId as string;
     const { botId } = request.params as { botId: string };
     const user = await prisma.user.findUnique({ where: { clerkId: userId } });
@@ -385,7 +404,7 @@ export async function botRoutes(app: FastifyInstance) {
   });
 
   // GET /bots/:botId/reputation/sdk — bot-auth variant for agent-sdk
-  app.get("/bots/:botId/reputation/sdk", { preHandler: [requireBotAuth] }, async (request, reply) => {
+  app.get("/api/bots/:botId/reputation/sdk", { preHandler: [requireBotAuth] }, async (request, reply) => {
     const botId = (request as any).botId as string;
     const { botId: paramBotId } = request.params as { botId: string };
 

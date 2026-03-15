@@ -25,7 +25,7 @@ export async function agentRoutes(app: FastifyInstance) {
   });
 
   // Authenticated: GET /agents/:agentId — full agent details for owner
-  app.get("/agents/:agentId", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.get("/api/agents/:agentId", { preHandler: [requireAuth] }, async (request, reply) => {
     const userId = (request as any).userId as string;
     const { agentId } = request.params as { agentId: string };
 
@@ -50,7 +50,7 @@ export async function agentRoutes(app: FastifyInstance) {
 
   // POST /agents/:agentId/token — generate AIT (Agent Identity Token)
   // Authenticated by bot API key (agent's bot) or user auth (agent's owner)
-  app.post("/agents/:agentId/token", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.post("/api/agents/:agentId/token", { preHandler: [requireAuth] }, async (request, reply) => {
     const userId = (request as any).userId as string;
     const { agentId } = request.params as { agentId: string };
     const { ttl } = (request.body ?? {}) as { ttl?: number };
@@ -93,7 +93,7 @@ export async function agentRoutes(app: FastifyInstance) {
   });
 
   // POST /bots/:botId/agent-token — bot-auth variant for SDK
-  app.post("/bots/:botId/agent-token", { preHandler: [requireBotAuth] }, async (request, reply) => {
+  app.post("/api/bots/:botId/agent-token", { preHandler: [requireBotAuth] }, async (request, reply) => {
     const botId = (request as any).botId as string;
     const { botId: paramBotId } = request.params as { botId: string };
     const { ttl } = (request.body ?? {}) as { ttl?: number };
@@ -133,7 +133,7 @@ export async function agentRoutes(app: FastifyInstance) {
   });
 
   // Authenticated: GET /agents — list all agents for authenticated user
-  app.get("/agents", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.get("/api/agents", { preHandler: [requireAuth] }, async (request, reply) => {
     const userId = (request as any).userId as string;
 
     const user = await prisma.user.findUnique({ where: { clerkId: userId } });
