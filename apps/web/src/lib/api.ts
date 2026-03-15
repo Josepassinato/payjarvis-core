@@ -492,6 +492,76 @@ export function disconnectTelegramBot(
   return request(`/bots/${botId}/telegram/disconnect`, { token, method: "POST", body: JSON.stringify({}) });
 }
 
+// ── Bot Share ──
+
+export interface ShareLink {
+  code: string;
+  url: string;
+  qrCode: string;
+  expiresAt: string | null;
+  maxUses: number | null;
+}
+
+export interface SharePreview {
+  botName: string;
+  platform: string;
+  skills: string[];
+  sharedByName: string;
+  useCount: number;
+  valid: boolean;
+  message: string;
+}
+
+export interface ShareLinkDetails {
+  id: string;
+  code: string;
+  botId: string;
+  useCount: number;
+  active: boolean;
+  expiresAt: string | null;
+  maxUses: number | null;
+  createdAt: string;
+  clones: Array<{ id: string; newUserId: string; clonedAt: string }>;
+}
+
+export interface CloneResult {
+  bot: Bot;
+  alreadyHasBot: boolean;
+  nextStep: string;
+}
+
+export function createShareLink(
+  botId: string,
+  data?: { expiresInHours?: number; maxUses?: number },
+  token?: string | null
+): Promise<ShareLink> {
+  return request<ShareLink>(`/api/bots/${botId}/share`, {
+    token,
+    method: "POST",
+    body: JSON.stringify(data ?? {}),
+  });
+}
+
+export function getSharePreview(code: string): Promise<SharePreview> {
+  return request<SharePreview>(`/api/share/${code}`);
+}
+
+export function cloneSharedBot(code: string, token?: string | null): Promise<CloneResult> {
+  return request<CloneResult>(`/api/share/${code}/clone`, {
+    token,
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export function getBotShareLinks(botId: string, token?: string | null): Promise<ShareLinkDetails[]> {
+  return request<ShareLinkDetails[]>(`/api/bots/${botId}/share`, { token });
+}
+
+export function deactivateShareLink(code: string, token?: string | null): Promise<void> {
+  return request<void>(`/api/share/${code}`, { token, method: "DELETE" });
+}
+
 export function toggleBotIntegration(
   botId: string,
   provider: string,

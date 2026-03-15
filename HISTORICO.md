@@ -1,5 +1,36 @@
 # HISTORICO.md — PayJarvis
 
+## 2026-03-15 — Bot Share (Viral Growth Engine)
+
+### O que foi feito
+- **Schema**: 2 novos modelos Prisma — `BotShareLink`, `BotClone` com relacoes a Bot e User
+- **Migration**: `20260315125847_add_bot_share` aplicada no PostgreSQL
+- **Service**: `bot-share.service.ts` — gera links, preview publico, clonagem de bot (sem credenciais), stats
+- **Routes**: 5 endpoints — POST share, GET preview (publico), POST clone, GET links, DELETE deactivate
+- **Referral**: `referral.service.ts` — tracking de clones e conversoes
+- **Join Page**: `/join/[code]` — pagina publica viral, dark theme, gradients, CTA adaptativo
+- **NFC**: `nfc-share.tsx` — Web NFC API para Android com fallback QR Code
+- **Dashboard**: Botao "Compartilhar" no card do bot com modal (QR, copy link, WhatsApp, Telegram)
+- **Middleware**: `/join(.*)` adicionado as rotas publicas do Clerk
+- **QR Code**: Dependencia `qrcode` instalada na API
+
+### Testes producao
+- `GET /api/share/TESTCODE` → 404 (correto, code inexistente)
+- `GET /join/TESTCODE` → 200 (pagina publica acessivel)
+- `POST /api/bots/:id/share` → 401 (auth obrigatoria, correto)
+- `POST /api/share/:code/clone` → 401 (auth obrigatoria, correto)
+- Logs sem erros criticos
+
+### Integracoes ativas
+- Clerk auth middleware com /join como rota publica
+- QR Code generation via `qrcode` npm
+- Web NFC API (Android only, fallback QR para iOS)
+
+### Backup
+- `pre-botshare-20260315-1258` em `/root/backups/`
+
+---
+
 ## 2026-03-15 — PRIMEIRA COMPRA APROVADA
 
 ### Marco

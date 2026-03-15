@@ -142,6 +142,8 @@ model User {
   paymentMethods     PaymentMethod[]
   instanceAssignment InstanceUser?
   storeContexts      StoreContext[]
+  shareLinks         BotShareLink[]
+  botClones          BotClone[]        // bots que este user clonou
 
   @@map("users")
 }
@@ -231,6 +233,8 @@ model Bot {
   handoffRequests  HandoffRequest[]
   integrations     BotIntegration[]
   storePermissions StoreBotPermission[]
+  shareLinks       BotShareLink[]
+  clones           BotClone[]        // bots clonados a partir deste
 
   @@index([ownerId])
   @@map("bots")
@@ -629,4 +633,47 @@ model StoreBotPermission {
   @@index([botId])
   @@index([storeContextId])
   @@map("store_bot_permissions")
+}
+
+// ─── Bot Share (Viral Growth) ───
+
+model BotShareLink {
+  id              String    @id @default(cuid())
+  code            String    @unique
+  botId           String
+  createdByUserId String
+  templateConfig  Json
+  expiresAt       DateTime?
+  maxUses         Int?
+  useCount        Int       @default(0)
+  active          Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  bot       Bot        @relation(fields: [botId], references: [id], onDelete: Cascade)
+  createdBy User       @relation(fields: [createdByUserId], references: [id], onDelete: Cascade)
+  clones    BotClone[]
+
+  @@index([code])
+  @@index([createdByUserId])
+  @@index([botId])
+  @@map("bot_share_links")
+}
+
+model BotClone {
+  id               String   @id @default(cuid())
+  shareCode        String
+  newBotId         String
+  newUserId        String
+  referredByUserId String
+  clonedAt         DateTime @default(now())
+
+  shareLink BotShareLink @relation(fields: [shareCode], references: [code], onDelete: Cascade)
+  newBot    Bot          @relation(fields: [newBotId], references: [id], onDelete: Cascade)
+  newUser   User         @relation(fields: [newUserId], references: [id], onDelete: Cascade)
+
+  @@index([shareCode])
+  @@index([newUserId])
+  @@index([referredByUserId])
+  @@map("bot_clones")
 }

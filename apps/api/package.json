@@ -19,10 +19,12 @@
     "@payjarvis/bdit": "*",
     "@payjarvis/database": "*",
     "@payjarvis/types": "*",
+    "@types/qrcode": "^1.5.6",
     "fastify": "^5.0.0",
     "ioredis": "^5.10.0",
     "nodemailer": "^8.0.2",
     "pdfkit": "^0.15.0",
+    "qrcode": "^1.5.4",
     "stripe": "^17.0.0"
   },
   "devDependencies": {

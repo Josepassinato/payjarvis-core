@@ -27,6 +27,7 @@ import { transitRoutes } from "./routes/transit.routes.js";
 import { vaultRoutes } from "./routes/vault.js";
 import { checkoutRoutes } from "./routes/checkout.js";
 import { storeRoutes } from "./routes/stores.js";
+import { botShareRoutes } from "./routes/bot-share.js";
 import { startTimeoutChecker } from "./core/approval-manager.js";
 
 const app = Fastify({ logger: true });
@@ -87,6 +88,9 @@ await app.register(storeRoutes);
 
 // Onboarding — platform detection and integration guides
 await app.register(onboardingRoutes);
+
+// Bot Share — viral sharing links, QR codes, cloning
+await app.register(botShareRoutes);
 
 // Serve adapter.js for merchant integration
 app.get("/adapter.js", async (request, reply) => {

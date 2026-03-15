@@ -4,11 +4,12 @@ import { useState } from "react";
 import Link from "next/link";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "@clerk/nextjs";
-import { getBots, updateBotStatus, deleteBot } from "@/lib/api";
-import type { Bot } from "@/lib/api";
+import { getBots, updateBotStatus, deleteBot, createShareLink, deactivateShareLink as deactivateShareLinkApi } from "@/lib/api";
+import type { Bot, ShareLink } from "@/lib/api";
 import { useApi } from "@/lib/use-api";
 import { TrustBar } from "@/components/trust-bar";
 import { LoadingSpinner, ErrorBox } from "@/components/loading";
+import { NfcShare } from "@/components/nfc-share";
 
 const statusStyles: Record<string, string> = {
   ACTIVE: "bg-approved/10 text-approved",
@@ -84,6 +85,10 @@ export default function BotsPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Bot | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [shareTarget, setShareTarget] = useState<Bot | null>(null);
+  const [shareData, setShareData] = useState<ShareLink | null>(null);
+  const [shareLoading, setShareLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const statusLabels: Record<string, string> = {
     ACTIVE: t("bots.statusActive"),
@@ -118,6 +123,42 @@ export default function BotsPage() {
     } finally {
       setDeleting(false);
     }
+  };
+
+  const handleShare = async (bot: Bot) => {
+    setShareTarget(bot);
+    setShareData(null);
+    setShareLoading(true);
+    setCopied(false);
+    try {
+      const token = await getToken();
+      const data = await createShareLink(bot.id, {}, token);
+      setShareData(data);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to generate share link");
+      setShareTarget(null);
+    } finally {
+      setShareLoading(false);
+    }
+  };
+
+  const handleCopyLink = async () => {
+    if (!shareData) return;
+    await navigator.clipboard.writeText(shareData.url);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleShareWhatsApp = () => {
+    if (!shareData || !shareTarget) return;
+    const msg = encodeURIComponent(`Ei! Estou usando o ${shareTarget.name} para fazer compras automaticamente pelo WhatsApp. É incrível! Ativa o seu aqui: ${shareData.url}`);
+    window.open(`https://wa.me/?text=${msg}`, "_blank");
+  };
+
+  const handleShareTelegram = () => {
+    if (!shareData || !shareTarget) return;
+    const msg = encodeURIComponent(`Ei! Usa este link para ativar o ${shareTarget.name} no Telegram: ${shareData.url}`);
+    window.open(`https://t.me/share/url?url=${encodeURIComponent(shareData.url)}&text=${msg}`, "_blank");
   };
 
   if (loading) return <LoadingSpinner />;
@@ -235,6 +276,15 @@ export default function BotsPage() {
                     {t("bots.deactivate")}
                   </button>
                 )}
+                {bot.status === "ACTIVE" && (
+                  <button
+                    onClick={() => handleShare(bot)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs text-indigo-400 bg-indigo-600/10 rounded hover:bg-indigo-600/20 transition-colors"
+                  >
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+                    {t("common.share") ?? "Compartilhar"}
+                  </button>
+                )}
                 <button
                   onClick={() => setDeleteTarget(bot)}
                   disabled={actionLoading === bot.id}
@@ -273,6 +323,63 @@ export default function BotsPage() {
                 {deleting ? "..." : t("bots.deleteAction")}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Share modal */}
+      {shareTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 max-w-md w-full mx-4 shadow-2xl">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-white">Compartilhar {shareTarget.name}</h3>
+              <button
+                onClick={() => { setShareTarget(null); setShareData(null); }}
+                className="text-gray-400 hover:text-white transition-colors"
+              >
+                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12" /></svg>
+              </button>
+            </div>
+
+            {shareLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <div className="w-8 h-8 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+              </div>
+            ) : shareData ? (
+              <div className="space-y-5">
+                {/* NFC + QR Code */}
+                <NfcShare url={shareData.url} qrCodeBase64={shareData.qrCode} />
+
+                {/* Copyable URL */}
+                <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-lg p-2.5">
+                  <span className="flex-1 text-sm text-white/70 truncate font-mono">{shareData.url}</span>
+                  <button
+                    onClick={handleCopyLink}
+                    className="px-3 py-1.5 text-xs font-medium bg-white/10 text-white rounded hover:bg-white/20 transition-colors shrink-0"
+                  >
+                    {copied ? "Copiado!" : "Copiar"}
+                  </button>
+                </div>
+
+                {/* Share buttons */}
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={handleShareWhatsApp}
+                    className="flex items-center justify-center gap-2 py-2.5 bg-green-600/20 border border-green-500/30 text-green-300 rounded-xl hover:bg-green-600/30 transition-colors text-sm font-medium"
+                  >
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M20 2H4a2 2 0 00-2 2v18l4-4h14a2 2 0 002-2V4a2 2 0 00-2-2zm0 14H6l-2 2V4h16v12z" /></svg>
+                    WhatsApp
+                  </button>
+                  <button
+                    onClick={handleShareTelegram}
+                    className="flex items-center justify-center gap-2 py-2.5 bg-blue-600/20 border border-blue-500/30 text-blue-300 rounded-xl hover:bg-blue-600/30 transition-colors text-sm font-medium"
+                  >
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" /></svg>
+                    Telegram
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
       )}
