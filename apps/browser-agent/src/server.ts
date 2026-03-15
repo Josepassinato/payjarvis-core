@@ -33,6 +33,9 @@ import {
   resolveHandoff,
   type ObstacleType,
 } from "./services/handoff-manager.js";
+import { scrapeRoutes } from "./routes/scrape.js";
+import { amazonLoginRoutes } from "./routes/amazon-login.js";
+import { storeActionRoutes } from "./routes/store-actions.js";
 
 const app = Fastify({ logger: true });
 
@@ -260,7 +263,13 @@ app.post("/openclaw/tool-invoke", async (request, reply) => {
 
 /** Navegar para uma URL no Chrome via CDP — com comportamento humano completo */
 app.post("/navigate", async (request, reply) => {
-  const body = request.body as { url: string; botId?: string; searchTerm?: string };
+  const body = request.body as {
+    url: string;
+    botId?: string;
+    searchTerm?: string;
+    injectCookies?: unknown[];
+    userAgent?: string;
+  };
 
   if (!body.url) {
     return reply.status(400).send({
@@ -370,9 +379,15 @@ app.post("/navigate", async (request, reply) => {
       "Stealth profile applied"
     );
 
+    // ─── Vault: Inject external cookies (from authenticated session) ───
+    if (body.injectCookies && Array.isArray(body.injectCookies) && body.injectCookies.length > 0) {
+      await HumanBehavior.restoreCookies(sendCmd, body.injectCookies as any);
+      app.log.info({ count: body.injectCookies.length }, "Injected vault cookies");
+    }
+
     // ─── Camada 3: Restore cached cookies before navigation ───
     const isAmazon = body.url.includes("amazon");
-    if (isAmazon) {
+    if (isAmazon && !body.injectCookies) {
       const cachedCookies = cookieCache.get("amazon");
       if (cachedCookies && cachedCookies.length > 0) {
         await HumanBehavior.restoreCookies(sendCmd, cachedCookies as any);
@@ -699,6 +714,98 @@ app.post("/navigate", async (request, reply) => {
 });
 
 
+// ─── Vault: Extract cookies from current CDP session ──
+
+/** Extract cookies from the browser for vault storage */
+app.post("/extract-cookies", async (request, reply) => {
+  const body = request.body as { domain?: string };
+
+  if (!cdpMonitor?.isConnected) {
+    return reply.status(400).send({
+      success: false,
+      error: "CDP not connected.",
+    });
+  }
+
+  try {
+    const targetsRes = await fetch(
+      `http://localhost:${cdpMonitor.cdpPort}/json/list`
+    );
+    const targets = (await targetsRes.json()) as Array<{
+      id: string;
+      type: string;
+      webSocketDebuggerUrl?: string;
+    }>;
+    const pageTarget = targets.find((t) => t.type === "page");
+
+    if (!pageTarget?.webSocketDebuggerUrl) {
+      return reply.status(500).send({
+        success: false,
+        error: "No page target available",
+      });
+    }
+
+    const { default: WS } = await import("ws");
+    const ws = new WS(pageTarget.webSocketDebuggerUrl);
+
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error("WS timeout")), 5000);
+      ws.on("open", () => { clearTimeout(timeout); resolve(); });
+      ws.on("error", (err: Error) => { clearTimeout(timeout); reject(err); });
+    });
+
+    let msgId = 0;
+    const sendWsCmd = (method: string, params: Record<string, unknown> = {}) =>
+      new Promise<Record<string, unknown>>((resolve, reject) => {
+        const id = ++msgId;
+        const timeout = setTimeout(() => reject(new Error(`Timeout: ${method}`)), 10000);
+        const handler = (data: Buffer) => {
+          const msg = JSON.parse(data.toString());
+          if (msg.id === id) {
+            clearTimeout(timeout);
+            ws.off("message", handler);
+            if (msg.error) reject(new Error(msg.error.message));
+            else resolve(msg.result ?? {});
+          }
+        };
+        ws.on("message", handler);
+        ws.send(JSON.stringify({ id, method, params }));
+      });
+
+    await sendWsCmd("Network.enable");
+    const cookies = await HumanBehavior.saveCookies(sendWsCmd);
+
+    // Get user agent
+    const uaResult = await sendWsCmd("Runtime.evaluate", {
+      expression: "navigator.userAgent",
+      returnByValue: true,
+    });
+    const userAgent = (uaResult as any)?.result?.value ?? "";
+
+    ws.close();
+
+    // Filter by domain if specified
+    const filtered = body.domain
+      ? cookies.filter((c: any) => c.domain?.includes(body.domain))
+      : cookies;
+
+    app.log.info(
+      { total: cookies.length, filtered: filtered.length, domain: body.domain },
+      "Cookies extracted"
+    );
+
+    return reply.send({
+      success: true,
+      cookies: filtered,
+      userAgent,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to extract cookies";
+    app.log.error({ err }, "Cookie extraction error");
+    return reply.status(500).send({ success: false, error: message });
+  }
+});
+
 // ─── Layer 4: Browserbase Routes ─────────────────────
 
 /** Create a Browserbase cloud browser session */
@@ -932,6 +1039,12 @@ app.get("/browser/sessions", async (_request, reply) => {
     return reply.status(500).send({ success: false, error: message });
   }
 });
+
+// ─── Register scrape bridge ──────────────────────────
+
+await app.register(scrapeRoutes);
+await app.register(amazonLoginRoutes);
+await app.register(storeActionRoutes);
 
 // ─── Start ───────────────────────────────────────────
 
