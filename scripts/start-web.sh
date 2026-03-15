@@ -23,5 +23,13 @@ fi
 
 echo "[start-web] Static assets synced at $(date '+%H:%M:%S')"
 
+# --- Load .env.local (standalone mode doesn't auto-load it) ---
+if [ -f "$WEB/.env.local" ]; then
+  set -a
+  source "$WEB/.env.local"
+  set +a
+  echo "[start-web] Loaded .env.local"
+fi
+
 # --- Start the server (exec replaces shell so PM2 manages the node process directly) ---
 exec node "$STANDALONE_WEB/server.js"
