@@ -11,6 +11,12 @@
 import type { FastifyInstance } from "fastify";
 import { prisma } from "@payjarvis/database";
 import { completeOnboarding } from "../services/onboarding-bot.service.js";
+import {
+  handleInvoicePaid,
+  handleInvoicePaymentFailed,
+  handleSubscriptionDeleted,
+  handleSubscriptionUpdated,
+} from "../services/subscription.service.js";
 import Stripe from "stripe";
 
 export async function stripeWebhookRoutes(app: FastifyInstance) {
@@ -111,6 +117,26 @@ export async function stripeWebhookRoutes(app: FastifyInstance) {
               console.log(`[Stripe Webhook] Onboarding session ${session.id} completed via webhook`);
             }
           }
+          break;
+        }
+
+        case "invoice.paid": {
+          await handleInvoicePaid(event.data.object as Stripe.Invoice);
+          break;
+        }
+
+        case "invoice.payment_failed": {
+          await handleInvoicePaymentFailed(event.data.object as Stripe.Invoice);
+          break;
+        }
+
+        case "customer.subscription.deleted": {
+          await handleSubscriptionDeleted(event.data.object as Stripe.Subscription);
+          break;
+        }
+
+        case "customer.subscription.updated": {
+          await handleSubscriptionUpdated(event.data.object as Stripe.Subscription);
           break;
         }
 

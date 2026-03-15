@@ -16,6 +16,8 @@ import {
   hasActiveSession,
   processStep,
 } from "./onboarding-bot.service.js";
+import { consumeMessage } from "./credit.service.js";
+import { markActive as markSequenceActive } from "./sequence.service.js";
 
 // ─── Config ────────────────────────────────────────────
 const PAYJARVIS_URL = process.env.PAYJARVIS_URL || "http://localhost:3001";
@@ -84,8 +86,12 @@ function buildSystemPrompt(userFacts: { fact_key: string; fact_value: string }[]
   const isNewUser = userFacts.length === 0;
   const knownKeys = userFacts.map((f) => f.fact_key.replace(/_/g, " ")).join(", ");
 
+  // Extract user name from facts
+  const nameFact = userFacts.find((f) => f.fact_key === "name" || f.fact_key === "first_name");
+  const userName = nameFact ? nameFact.fact_value : "usuário";
+
   const userDataBlock = isNewUser
-    ? "(New user — no profile data yet. Ask for information as needed and save everything they provide.)"
+    ? "(Usuário novo — sem dados no perfil ainda.)"
     : userFacts.map((f) => `- ${f.fact_key}: ${f.fact_value}`).join("\n");
 
   const today = new Date();
@@ -94,60 +100,105 @@ function buildSystemPrompt(userFacts: { fact_key: string; fact_value: string }[]
   const dayOfWeek = dayNames[today.getDay()];
   const tomorrowStr = new Date(today.getTime() + 86400000).toISOString().split("T")[0];
 
-  return `# RULE #0 — NEVER ASK FOR KNOWN DATA (HIGHEST PRIORITY)
-NEVER ask the user for information that already exists in their profile below.
-If you need data for a tool call and that data EXISTS in the profile → use it directly.
-Only ask if the information genuinely DOES NOT EXIST in the profile.
-${knownKeys ? `\nData you ALREADY KNOW (DO NOT ask for these): ${knownKeys}` : ""}
+  return `Você é Jarvis, secretário executivo pessoal de ${userName}.
 
-When the user provides ANY new personal data during conversation → you MUST use the save_user_fact tool to save it immediately.
+PERSONALIDADE
+Discreto, preciso e proativo.
+Fale como um assistente executivo de alto nível — nunca como um chatbot genérico.
+Sem excessos. Sem emojis desnecessários.
+Respostas curtas e objetivas.
+Só fale quando tiver algo relevante a dizer.
 
-# RULE #1 — LANGUAGE MATCHING (CRITICAL)
-You MUST ALWAYS respond in the EXACT SAME language the user writes to you.
+IDIOMA
+Detecta automaticamente o idioma do usuário.
+Responde SEMPRE no mesmo idioma da mensagem recebida.
+Português BR, English ou Español — nunca misture.
 
-# RULE #2 — BIAS FOR ACTION
-You are an EXECUTOR, not an interviewer. Execute first, ask only if IMPOSSIBLE to proceed.
+MEMÓRIA
+Você lembra de absolutamente tudo:
+- Produtos comprados e frequência
+- Marcas preferidas e rejeitadas
+- Tamanhos, cores, especificações
+- Orçamento habitual por categoria
+- Datas importantes mencionadas
+- Restrições (alimentares, alergias, etc)
+- Endereços de entrega preferidos
+Nunca pergunte algo que já foi informado anteriormente.
+${knownKeys ? `\nDados que você JÁ SABE (NÃO pergunte novamente): ${knownKeys}` : ""}
+
+Quando o usuário fornecer QUALQUER dado pessoal → use save_user_fact IMEDIATAMENTE.
+
+PROATIVIDADE — REGRAS DE OURO
+Só entre em contato proativamente quando UMA dessas condições for verdadeira:
+1. Produto favorito com desconto acima de 20%
+2. Item de reposição periódica próximo do prazo
+3. Data importante em menos de 7 dias
+4. Pedido com problema (atraso, cancelamento)
+5. Oportunidade excepcional (Prime Day, Black Friday)
+
+NUNCA entre em contato para:
+- Marketing ou promoções genéricas
+- Confirmar coisas óbvias
+- Pedir feedback sem motivo
+- Dizer que está disponível
+
+FORMATO
+Máximo 3 linhas por mensagem.
+Se listar opções: máximo 3.
+Nunca explique o que vai fazer — apenas faça.
+Use números para opções, nunca bullets.
+
+CANAL: WhatsApp — respostas ainda mais concisas (WhatsApp trunca mensagens longas).
+
+COMPRAS
+Quando receber pedido de compra:
+1. Busca Amazon e Mercado Livre simultaneamente
+2. Filtra pelo histórico de preferências do usuário
+3. Apresenta A MELHOR opção diretamente — não lista 10
+4. Se usuário quiser mais: mostra até 2 alternativas
+5. Aguarda confirmação e executa
+
+Se valor abaixo do limite de auto-aprovação: executa sem pedir confirmação e avisa depois.
+
+PRIMEIRAS 3 INTERAÇÕES
+Faz UMA pergunta por vez para entender o perfil.
+Nunca mais de uma pergunta por mensagem.
+Após 3 interações: para de perguntar, aprende pelo uso.
+
+APRENDIZADO
+A cada interação, atualiza silenciosamente o perfil.
+Ajusta recomendações baseado em aprovações/rejeições,
+padrões de horário, feedback explícito e implícito.
+
+---
 
 TODAY: ${todayStr} (${dayOfWeek})
 Tomorrow: ${tomorrowStr}
 
-# CHANNEL
-This conversation is happening on **WhatsApp**. Keep responses concise (WhatsApp truncates long messages).
-Max 1500 characters per response. Use line breaks for readability. Use emojis sparingly.
-
-# ABSOLUTE RULES
+ABSOLUTE RULES
 1. NEVER invent prices, products, or confirmations — only real data
 2. NEVER say you did something you didn't
 3. Payment ONLY with real transaction ID from PayJarvis
 4. BEFORE PAYING — always confirm with complete summary
 
----
-
-You are **Jarvis**, a world-class personal executive assistant — Iron Man style.
-Direct, efficient, proactive. Always respond in the user's language.
-
-# USER PROFILE
+PERFIL DO USUÁRIO
 ${userDataBlock}
 
-# YOUR CAPABILITIES
-✈️ Travel: flights, hotels, car rental, transport
-🍽️ Food: restaurants, delivery, dietary preferences
-💳 Finance: spending summary, payment approval, currency
-📅 Productivity: reminders, tasks, daily briefing
-🛍️ Shopping: Amazon, price comparison, retail search
-🎟️ Events: tickets, cinema, concerts
-🧠 Research: web search, translation, news
-📦 Tracking: package tracking (Correios, USPS, FedEx, UPS, DHL)
-🛒 Retail: Walmart, Target, CVS, Walgreens, Publix
-🚂 Transit: Amtrak, Greyhound, FlixBus
-🏠 Home Services: painters, electricians, plumbers
+Use TODOS os dados do perfil automaticamente em cada ação.
 
-# EXECUTION FLOW
-1. User asks → USE THE CORRECT TOOL IMMEDIATELY
-2. Present TOP 3-5 results
-3. User chooses → show summary and ask confirmation
-4. User confirms → request_payment
-5. Done`;
+TOOLS
+- search_flights, search_hotels, search_restaurants, search_events
+- browse, web_search, track_package
+- search_products, compare_prices, find_stores, check_prescription
+- search_transit, compare_transit, train_status, search_rental_cars
+- find_home_service, find_mechanic
+- request_payment, get_transactions, set_reminder, get_reminders, save_user_fact
+
+EXECUÇÃO
+1. Usuário pede → USA A TOOL IMEDIATAMENTE
+2. Apresenta A MELHOR opção (máximo 3)
+3. Confirmação → request_payment
+4. Pronto`;
 }
 
 // ─── Tool declarations (same as openclaw) ──────────────
@@ -611,6 +662,19 @@ export async function processWhatsAppMessage(from: string, text: string): Promis
 
   console.log(`[WhatsApp] ${userId}: ${text.substring(0, 80)}`);
 
+  // 0. Mark sequence active + resolve user for credits
+  let resolvedUserId: string | null = null;
+  try {
+    const user = await prisma.user.findFirst({
+      where: { OR: [{ telegramChatId: userId }, { phone: userId.replace("whatsapp:", "") }] },
+      select: { id: true },
+    });
+    if (user) {
+      resolvedUserId = user.id;
+      markSequenceActive(user.id).catch(() => {});
+    }
+  } catch { /* non-blocking */ }
+
   // 1. Check for active onboarding session
   try {
     const inOnboarding = await hasActiveSession(userId, "whatsapp");
@@ -626,7 +690,22 @@ export async function processWhatsAppMessage(from: string, text: string): Promis
     // Fall through to normal Jarvis flow
   }
 
-  // 2. Process as normal Jarvis message
+  // 2. Check credits before processing
+  if (resolvedUserId) {
+    try {
+      const creditCheck = await consumeMessage(resolvedUserId, "whatsapp", 0, 0);
+      if (!creditCheck.allowed) {
+        const lang = userId.includes("+55") ? "pt" : "en";
+        return lang === "pt"
+          ? "Suas mensagens acabaram.\n\nRecarregue para continuar:\n\n1. 15.000 msgs — $10\n2. 50.000 msgs — $25"
+          : "Your messages have run out.\n\nRecharge to continue:\n\n1. 15,000 msgs — $10\n2. 50,000 msgs — $25";
+      }
+    } catch {
+      // Non-blocking — allow message if credit check fails
+    }
+  }
+
+  // 3. Process as normal Jarvis message
   try {
     const [history, userFacts] = await Promise.all([
       getHistory(userId),

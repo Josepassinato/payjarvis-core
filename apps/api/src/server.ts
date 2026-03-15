@@ -1,5 +1,9 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import fastifyStatic from "@fastify/static";
+import { readFileSync, existsSync } from "fs";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
 import { healthRoutes } from "./routes/health.js";
 import { jwksRoutes } from "./routes/jwks.js";
 import { botRoutes } from "./routes/bots.js";
@@ -31,7 +35,14 @@ import { botShareRoutes } from "./routes/bot-share.js";
 import { onboardingBotRoutes } from "./routes/onboarding-bot.js";
 import { stripeWebhookRoutes } from "./routes/stripe-webhook.js";
 import { whatsappWebhookRoutes } from "./routes/whatsapp-webhook.js";
+import { creditRoutes } from "./routes/credits.js";
+import { sequenceRoutes } from "./routes/sequence.js";
+import { subscriptionRoutes } from "./routes/subscription.js";
 import { startTimeoutChecker } from "./core/approval-manager.js";
+
+// Cron jobs
+import "./jobs/sequence-cron.js";
+import "./jobs/trial-cron.js";
 
 const app = Fastify({ logger: true });
 
@@ -103,6 +114,25 @@ await app.register(stripeWebhookRoutes);
 
 // WhatsApp Webhook — Twilio sandbox, Jarvis AI responses
 await app.register(whatsappWebhookRoutes);
+
+// Credits — LLM message billing, packages, balance
+await app.register(creditRoutes);
+
+// Onboarding Sequence — drip banners over 60 days
+await app.register(sequenceRoutes);
+
+// Subscription — Jarvis Premium $20/month
+await app.register(subscriptionRoutes);
+
+// Static files — banners, public assets
+const publicDir = join(process.cwd(), "public");
+if (existsSync(publicDir)) {
+  await app.register(fastifyStatic, {
+    root: publicDir,
+    prefix: "/public/",
+    decorateReply: false,
+  });
+}
 
 // Serve adapter.js for merchant integration
 app.get("/adapter.js", async (request, reply) => {

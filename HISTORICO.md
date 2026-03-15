@@ -1,5 +1,102 @@
 # HISTORICO.md — PayJarvis
 
+## 2026-03-15 — Subscription $20/mês + Sistema Completo de Billing
+
+### O que foi feito
+
+#### Stripe Setup
+1. Produto criado: `prod_U9gj6oSC4kKM1E` (Jarvis Executive Assistant)
+2. Preço recorrente: `price_1TBNLaPqILx9X6lsIkOO4mOc` ($20/mês)
+3. Customer Portal: `bpc_1TBNLaPqILx9X6lsKhG5G9KM` (cancelar, trocar cartão)
+4. Customer duplicado do José deletado (manteve cus_U8YITiNRBEFXER)
+
+#### Backend
+5. `subscription.service.ts` — create, cancel, portal URL, status, webhook handlers
+6. `subscription.ts` (rota) — 4 endpoints: create, status, portal, cancel
+7. `stripe-webhook.ts` — +4 handlers: invoice.paid, invoice.payment_failed, subscription.deleted, subscription.updated
+8. `credit.service.ts` — premium subscribers = unlimited messages (não desconta créditos)
+9. Schema Prisma: +stripeSubscriptionId, +subscriptionStatus, +subscriptionEndsAt, +planType
+
+#### Frontend
+10. `/billing` page — status atual, upgrade to Premium, manage subscription, message packs
+11. Sidebar: +Billing item no menu principal
+12. i18n: +nav.billing em en/pt/es
+
+#### Migração
+13. `20260315223000_add_subscription_fields` — via `prisma migrate deploy` (seguro)
+
+### Estado atual
+- Stripe: Product + Price + Portal ativos
+- payjarvis-api: ONLINE, subscription endpoints funcionais
+- payjarvis-web: ONLINE, /billing acessível (307 redirect para auth)
+- Tabelas openclaw_*: intactas
+- Webhooks: prontos para invoice.paid, payment_failed, subscription.deleted/updated
+
+### Integracoes ativas
+- Stripe Subscriptions: $20/mês recurring via `stripe.subscriptions.create()`
+- Stripe Customer Portal: self-service (cancelar, trocar cartão)
+- Notificações: Telegram/WhatsApp em eventos de subscription
+- STRIPE_WEBHOOK_SECRET: precisa configurar no Stripe Dashboard → apontar para https://www.payjarvis.com/api/webhooks/stripe
+
+### Pendente
+- Configurar webhook no Stripe Dashboard (events: invoice.paid, invoice.payment_failed, customer.subscription.deleted, customer.subscription.updated, setup_intent.succeeded)
+- STRIPE_WEBHOOK_SECRET vazio no .env — precisa do signing secret do webhook configurado
+- INTERNAL_SECRET ainda como dev-internal-secret
+
+---
+
+## 2026-03-15 — Credits, Sequence Drip, Prisma Migrate Deploy
+
+### O que foi feito
+
+#### Sistema de Créditos LLM
+1. `credit.service.ts` — 5.000 msgs grátis, trial 60 dias por referral, alertas 75%/90%/100%, compra via Stripe
+2. `credits.ts` (rota) — 4 endpoints: consume, balance, purchase, packages (público)
+3. `trial-cron.ts` — alertas de trial dia 55, 58, 60 (cron diário 9AM)
+
+#### Sequência de Onboarding (Drip)
+4. `sequence.service.ts` — 8 etapas ao longo de 60 dias, pausa se inativo >2d, resume automaticamente
+5. `sequence.ts` (rota) — 2 endpoints: active, status
+6. `sequence-cron.ts` — processa sequências a cada hora + 9AM
+7. 8 banners em `public/banners/` (welcome, health, learning, news, documents, finance, travel, intelligence)
+
+#### Integração WhatsApp
+8. `jarvis-whatsapp.service.ts` — credit check antes de processar mensagem, markSequenceActive, system prompt reescrito em PT com personalidade executiva
+
+#### Integração OpenClaw (Telegram)
+9. `index.js` — credit check em text/photo/voice handlers, markSequenceActive, fail-open se API offline
+
+#### Infra
+10. Migração para `prisma migrate deploy` (NÃO mais `db push`) — tabelas raw SQL (openclaw_*) protegidas
+11. Nginx: rota `/public/` → Fastify static (banners acessíveis via HTTPS)
+12. `onboarding-bot.service.ts` — initCredits + initSequence ao completar onboarding
+
+#### Package.json
+13. +node-cron, +@fastify/static, +@types/node-cron
+
+### Estado atual
+- payjarvis-api: ONLINE (pm2, porta 3001) — com crons de sequence e trial
+- payjarvis-web: ONLINE (pm2, porta 3000)
+- payjarvis-rules: ONLINE (pm2, porta 3002)
+- openclaw: ONLINE (pm2, porta 4000) — com credit check integrado
+- Banners: https://www.payjarvis.com/public/banners/ → 200
+- Credits API: https://www.payjarvis.com/api/credits/packages → 200
+
+### Integracoes ativas
+- Stripe: cobranças off_session para credit packs
+- Telegram: credit check + sequence active mark
+- WhatsApp (Twilio): credit check + alertas de crédito
+- Prisma Migrate Deploy: migrações formais, sem risco para tabelas raw SQL
+- Crons: sequence (horário + 9AM), trial alerts (diário 9AM)
+
+### Riscos / Atencao
+- `INTERNAL_SECRET` está como `dev-internal-secret` — trocar em produção
+- Tabelas openclaw_* são raw SQL (não gerenciadas pelo Prisma) — NUNCA usar `prisma db push`
+- payjarvis-kyc: em restart loop (168 restarts) — investigar separadamente
+- Banners dependem de Nginx roteando `/public/` → API (configurado)
+
+---
+
 ## 2026-03-15 — Share via Bot + Fix "Link nao encontrado"
 
 ### O que foi feito

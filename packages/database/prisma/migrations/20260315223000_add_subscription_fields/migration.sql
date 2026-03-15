@@ -1,0 +1,5 @@
+-- AlterTable
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "stripeSubscriptionId" TEXT;
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "subscriptionStatus" TEXT;
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "subscriptionEndsAt" TIMESTAMP(3);
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "planType" TEXT NOT NULL DEFAULT 'free';

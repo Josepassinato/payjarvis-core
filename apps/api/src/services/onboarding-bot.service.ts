@@ -10,6 +10,8 @@ import { randomBytes, createHash } from "crypto";
 import { sendOnboardingConfirmation } from "./email.js";
 import { StripeProvider } from "./payments/providers/stripe.provider.js";
 import { getPaymentProvider } from "./payments/payment-factory.js";
+import { initCredits } from "./credit.service.js";
+import { initSequence } from "./sequence.service.js";
 
 export interface BotResponse {
   message: string;
@@ -302,6 +304,23 @@ export async function completeOnboarding(sessionId: string): Promise<BotResponse
       where: { id: session.userId },
       data: { onboardingCompleted: true, onboardingStep: 5 },
     });
+  }
+
+  // Initialize credits + onboarding sequence
+  if (session.userId) {
+    const platform = session.telegramChatId ? "telegram" : "whatsapp";
+    const chatId = session.telegramChatId ?? session.whatsappPhone ?? "";
+    const referrerName = session.shareCode ? await getSharedByName(session.shareCode) : null;
+
+    initCredits(session.userId, session.shareCode ?? undefined).catch((err) => {
+      console.error("[Onboarding] initCredits error:", (err as Error).message);
+    });
+
+    if (chatId) {
+      initSequence(session.userId, platform, chatId, referrerName ?? undefined).catch((err) => {
+        console.error("[Onboarding] initSequence error:", (err as Error).message);
+      });
+    }
   }
 
   // Notify referrer

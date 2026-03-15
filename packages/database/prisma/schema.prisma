@@ -128,9 +128,13 @@ model User {
   onboardingCompleted Boolean    @default(false)
   botActivatedAt      DateTime?
   notificationChannel String     @default("none") // "none" | "telegram" | "email"
-  stripeAccountId     String?
-  stripeCustomerId    String?
-  createdAt           DateTime   @default(now())
+  stripeAccountId        String?
+  stripeCustomerId       String?
+  stripeSubscriptionId   String?
+  subscriptionStatus     String?    // active | past_due | canceled | trialing
+  subscriptionEndsAt     DateTime?
+  planType               String     @default("free") // free | premium
+  createdAt              DateTime   @default(now())
   updatedAt           DateTime   @updatedAt
 
   bots               Bot[]
@@ -659,6 +663,85 @@ model OnboardingSession {
   @@index([shareCode])
   @@index([userId])
   @@map("onboarding_sessions")
+}
+
+// ─── LLM Credits ───
+
+model LlmCredit {
+  id                String    @id @default(cuid())
+  userId            String    @unique
+  messagesTotal     Int       @default(5000)
+  messagesUsed      Int       @default(0)
+  messagesRemaining Int       @default(5000)
+  freeTrialEndsAt   DateTime?
+  freeTrialActive   Boolean   @default(false)
+  alert75Sent       Boolean   @default(false)
+  alert90Sent       Boolean   @default(false)
+  alert100Sent      Boolean   @default(false)
+  alertDay55Sent    Boolean   @default(false)
+  alertDay58Sent    Boolean   @default(false)
+  alertDay60Sent    Boolean   @default(false)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([freeTrialEndsAt])
+  @@map("llm_credits")
+}
+
+model LlmUsageLog {
+  id              String   @id @default(cuid())
+  userId          String
+  platform        String
+  model           String
+  inputTokens     Int
+  outputTokens    Int
+  totalTokens     Int
+  costReal        Float
+  costCharged     Float
+  messagesCharged Int      @default(1)
+  createdAt       DateTime @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
+  @@map("llm_usage_logs")
+}
+
+model CreditPurchase {
+  id              String   @id @default(cuid())
+  userId          String
+  packageId       String
+  messagesAdded   Int
+  amountUsd       Float
+  stripePaymentId String?
+  status          String   @default("pending")
+  createdAt       DateTime @default(now())
+
+  @@index([userId])
+  @@index([status])
+  @@map("credit_purchases")
+}
+
+// ─── Onboarding Sequence (drip banners) ───
+
+model OnboardingSequence {
+  id             String    @id @default(cuid())
+  userId         String    @unique
+  platform       String
+  chatId         String
+  joinedAt       DateTime  @default(now())
+  lastActiveAt   DateTime  @default(now())
+  currentStep    Int       @default(0)
+  nextSendAt     DateTime?
+  stepsCompleted Int[]     @default([])
+  active         Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([nextSendAt])
+  @@index([active])
+  @@map("onboarding_sequences")
 }
 
 // ─── Bot Share (Viral Growth) ───
