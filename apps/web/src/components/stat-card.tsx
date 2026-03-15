@@ -16,7 +16,7 @@ export function StatCard({
   label,
   value,
   sub,
-  color = "text-white",
+  color = "text-gray-900",
 }: {
   label: string;
   value: string | number;
@@ -27,7 +27,7 @@ export function StatCard({
   const bg = bgMap[color] ?? "from-transparent to-transparent";
 
   return (
-    <div className={`bg-gradient-to-br ${bg} bg-surface-card border border-surface-border rounded-xl p-5 transition-all duration-200 hover:scale-[1.02] hover:border-surface-hover hover:shadow-lg hover:shadow-black/20 group`}>
+    <div className={`bg-gradient-to-br ${bg} bg-white border border-gray-200 rounded-xl p-5 transition-all duration-200 hover:scale-[1.02] hover:border-gray-100 hover:shadow-lg hover:shadow-black/20 group`}>
       <div className="flex items-start justify-between">
         <div>
           <p className="text-[11px] text-gray-500 uppercase tracking-wider font-medium">{label}</p>
@@ -35,7 +35,7 @@ export function StatCard({
           {sub && <p className="text-[11px] text-gray-500 mt-1">{sub}</p>}
         </div>
         {icon && (
-          <div className={`p-2 rounded-lg bg-surface-hover/50 ${color} opacity-40 group-hover:opacity-60 transition-opacity`}>
+          <div className={`p-2 rounded-lg bg-gray-100/50 ${color} opacity-40 group-hover:opacity-60 transition-opacity`}>
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d={icon} />
             </svg>

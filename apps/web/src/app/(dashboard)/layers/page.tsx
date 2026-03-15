@@ -46,7 +46,7 @@ export default function LayersPage() {
     async function fetchStatus() {
       try {
         const token = await getToken();
-        const res = await fetch(`${API_URL}/api/core/status`, {
+        const res = await fetch(`${API_URL}/core/status`, {
           headers: {
             "Content-Type": "application/json",
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -83,7 +83,7 @@ export default function LayersPage() {
   return (
     <div>
       <div className="mb-8">
-        <h2 className="text-2xl font-display font-bold text-white">{t("layers.title")}</h2>
+        <h2 className="text-2xl font-display font-bold text-gray-900">{t("layers.title")}</h2>
         <p className="text-sm text-gray-500 mt-1">{t("layers.subtitle")}</p>
       </div>
 
@@ -98,12 +98,12 @@ export default function LayersPage() {
 
       <div className="space-y-4">
         {/* Layer 1 — PayJarvis Core */}
-        <div className="bg-[#161B22] border border-[#21262D] rounded-xl p-6 transition-colors hover:border-[#30363D]">
+        <div className="bg-white border border-gray-200 rounded-xl p-6 transition-colors hover:border-gray-300">
           <div className="flex items-start justify-between">
             <div className="flex items-center gap-3">
               <StatusDot status={layer1Status} />
               <div>
-                <h3 className="text-white font-display font-semibold">
+                <h3 className="text-gray-900 font-display font-semibold">
                   <span className="text-[#0066FF] text-lg font-bold mr-2">{t("layers.layer1Number")}</span>
                   {t("layers.layer1Name")}
                 </h3>
@@ -123,13 +123,13 @@ export default function LayersPage() {
           <div className="mt-4 flex items-center gap-3">
             <Link
               href="/approvals"
-              className="border border-[#21262D] hover:border-[#0066FF] rounded-lg px-4 py-2 text-sm text-gray-300 hover:text-white transition-colors"
+              className="border border-gray-200 hover:border-[#0066FF] rounded-lg px-4 py-2 text-sm text-gray-300 hover:text-gray-900 transition-colors"
             >
               {t("layers.configurePolicy")}
             </Link>
             <Link
               href="/transactions"
-              className="border border-[#21262D] hover:border-[#0066FF] rounded-lg px-4 py-2 text-sm text-gray-300 hover:text-white transition-colors"
+              className="border border-gray-200 hover:border-[#0066FF] rounded-lg px-4 py-2 text-sm text-gray-300 hover:text-gray-900 transition-colors"
             >
               {t("layers.viewAuditLog")}
             </Link>
@@ -137,12 +137,12 @@ export default function LayersPage() {
         </div>
 
         {/* Layer 2 — Official APIs */}
-        <div className="bg-[#161B22] border border-[#21262D] rounded-xl p-6 transition-colors hover:border-[#30363D]">
+        <div className="bg-white border border-gray-200 rounded-xl p-6 transition-colors hover:border-gray-300">
           <div className="flex items-start justify-between">
             <div className="flex items-center gap-3">
               <StatusDot status={layer2Status} />
               <div>
-                <h3 className="text-white font-display font-semibold">
+                <h3 className="text-gray-900 font-display font-semibold">
                   <span className="text-[#0066FF] text-lg font-bold mr-2">{t("layers.layer2Number")}</span>
                   {t("layers.layer2Name")}
                 </h3>
@@ -162,12 +162,12 @@ export default function LayersPage() {
           <div className="mt-4 flex items-center gap-3">
             <Link
               href="/integrations"
-              className="border border-[#21262D] hover:border-[#0066FF] rounded-lg px-4 py-2 text-sm text-gray-300 hover:text-white transition-colors"
+              className="border border-gray-200 hover:border-[#0066FF] rounded-lg px-4 py-2 text-sm text-gray-300 hover:text-gray-900 transition-colors"
             >
               {t("layers.manageApis")}
             </Link>
             <button
-              className="border border-[#21262D] hover:border-[#0066FF] rounded-lg px-4 py-2 text-sm text-gray-300 hover:text-white transition-colors"
+              className="border border-gray-200 hover:border-[#0066FF] rounded-lg px-4 py-2 text-sm text-gray-300 hover:text-gray-900 transition-colors"
             >
               {t("layers.apiKeys")}
             </button>
@@ -175,12 +175,12 @@ export default function LayersPage() {
         </div>
 
         {/* Layer 3 — Composio */}
-        <div className="bg-[#161B22] border border-[#21262D] rounded-xl p-6 transition-colors hover:border-[#30363D]">
+        <div className="bg-white border border-gray-200 rounded-xl p-6 transition-colors hover:border-gray-300">
           <div className="flex items-start justify-between">
             <div className="flex items-center gap-3">
               <StatusDot status={layer3Status} />
               <div>
-                <h3 className="text-white font-display font-semibold">
+                <h3 className="text-gray-900 font-display font-semibold">
                   <span className="text-[#0066FF] text-lg font-bold mr-2">{t("layers.layer3Number")}</span>
                   {t("layers.layer3Name")}
                 </h3>
@@ -200,12 +200,12 @@ export default function LayersPage() {
           </div>
           <div className="mt-4 flex items-center gap-3">
             <button
-              className="border border-[#21262D] hover:border-[#0066FF] rounded-lg px-4 py-2 text-sm text-gray-300 hover:text-white transition-colors"
+              className="border border-gray-200 hover:border-[#0066FF] rounded-lg px-4 py-2 text-sm text-gray-300 hover:text-gray-900 transition-colors"
             >
               {t("layers.connectApps")}
             </button>
             <button
-              className="border border-[#21262D] hover:border-[#0066FF] rounded-lg px-4 py-2 text-sm text-gray-300 hover:text-white transition-colors"
+              className="border border-gray-200 hover:border-[#0066FF] rounded-lg px-4 py-2 text-sm text-gray-300 hover:text-gray-900 transition-colors"
             >
               {t("layers.viewActions")}
             </button>
@@ -213,12 +213,12 @@ export default function LayersPage() {
         </div>
 
         {/* Layer 4 — Browserbase */}
-        <div className="bg-[#161B22] border border-[#21262D] rounded-xl p-6 transition-colors hover:border-[#30363D]">
+        <div className="bg-white border border-gray-200 rounded-xl p-6 transition-colors hover:border-gray-300">
           <div className="flex items-start justify-between">
             <div className="flex items-center gap-3">
               <StatusDot status={layer4Status} />
               <div>
-                <h3 className="text-white font-display font-semibold">
+                <h3 className="text-gray-900 font-display font-semibold">
                   <span className="text-[#0066FF] text-lg font-bold mr-2">{t("layers.layer4Number")}</span>
                   {t("layers.layer4Name")}
                 </h3>
@@ -236,12 +236,12 @@ export default function LayersPage() {
           </div>
           <div className="mt-4 flex items-center gap-3">
             <button
-              className="border border-[#21262D] hover:border-[#0066FF] rounded-lg px-4 py-2 text-sm text-gray-300 hover:text-white transition-colors"
+              className="border border-gray-200 hover:border-[#0066FF] rounded-lg px-4 py-2 text-sm text-gray-300 hover:text-gray-900 transition-colors"
             >
               {t("common.configure")}
             </button>
             <button
-              className="border border-[#21262D] hover:border-[#0066FF] rounded-lg px-4 py-2 text-sm text-gray-300 hover:text-white transition-colors"
+              className="border border-gray-200 hover:border-[#0066FF] rounded-lg px-4 py-2 text-sm text-gray-300 hover:text-gray-900 transition-colors"
             >
               {t("layers.viewSessions")}
             </button>

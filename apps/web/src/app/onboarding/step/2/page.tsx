@@ -1,40 +1,173 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
 import { useTranslation } from "react-i18next";
+import { loadStripe } from "@stripe/stripe-js";
+import { Elements, CardElement, useStripe, useElements } from "@stripe/react-stripe-js";
 import { submitOnboardingStep, getOnboardingStatus } from "@/lib/api";
 import { OnboardingProgress } from "@/components/onboarding-progress";
 
-const PLATFORMS = [
-  { value: "CUSTOM_API", label: "Custom API" },
-  { value: "TELEGRAM", label: "Telegram" },
-  { value: "WHATSAPP", label: "WhatsApp" },
-  { value: "DISCORD", label: "Discord" },
-  { value: "SLACK", label: "Slack" },
-];
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
+const STRIPE_PK = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? "";
+const stripePromise = STRIPE_PK ? loadStripe(STRIPE_PK) : null;
+
+const stripeAppearance = {
+  theme: "night" as const,
+  variables: {
+    colorPrimary: "#2563eb",
+    colorBackground: "#1e2330",
+    colorText: "#e5e7eb",
+    colorDanger: "#ef4444",
+    fontFamily: '"DM Sans", system-ui, sans-serif',
+    borderRadius: "8px",
+  },
+};
+
+function OnboardingCardForm({ onSuccess, onError }: { onSuccess: () => void; onError: (msg: string) => void }) {
+  const { t } = useTranslation();
+  const stripe = useStripe();
+  const elements = useElements();
+  const { getToken } = useAuth();
+  const [saving, setSaving] = useState(false);
+  const [setupIntent, setSetupIntent] = useState<{ clientSecret: string; setupIntentId: string } | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const token = await getToken();
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (token) headers["Authorization"] = `Bearer ${token}`;
+
+        const res = await fetch(`${API_URL}/payment-methods/setup-intent`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({}),
+        });
+        const json = await res.json();
+
+        if (cancelled) return;
+
+        if (!res.ok || !json.success) {
+          onError(json.error ?? t("onboarding.step2.cardSaveFailed"));
+          return;
+        }
+
+        const { clientSecret, setupIntentId } = json.data;
+        setSetupIntent({ clientSecret, setupIntentId });
+      } catch {
+        if (!cancelled) onError(t("onboarding.step2.cardSaveFailed"));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [getToken, onError, t]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!stripe || !elements || !setupIntent) return;
+    setSaving(true);
+
+    try {
+      const token = await getToken();
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      const cardEl = elements.getElement(CardElement);
+      if (!cardEl) { onError("Card element not found"); return; }
+
+      const { error: stripeError } = await stripe.confirmCardSetup(setupIntent.clientSecret, {
+        payment_method: { card: cardEl },
+      });
+
+      if (stripeError) {
+        onError(stripeError.message ?? t("onboarding.step2.cardSaveFailed"));
+        return;
+      }
+
+      const confirmRes = await fetch(`${API_URL}/payment-methods/setup-intent/confirm`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ setupIntentId: setupIntent.setupIntentId }),
+      });
+      const confirmJson = await confirmRes.json();
+      if (!confirmRes.ok || !confirmJson.success) {
+        onError(confirmJson.error ?? t("onboarding.step2.cardSaveFailed"));
+        return;
+      }
+
+      onSuccess();
+    } catch {
+      onError(t("onboarding.step2.cardSaveFailed"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-4">
+        <div className="h-5 w-5 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
+        <span className="ml-2 text-sm text-gray-400">{t("common.loading")}</span>
+      </div>
+    );
+  }
+
+  if (!setupIntent) return null;
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-3">
+      <div className="bg-gray-100 border border-gray-200 rounded-lg p-3">
+        <CardElement
+          options={{
+            style: {
+              base: {
+                fontSize: "14px",
+                color: "#e5e7eb",
+                "::placeholder": { color: "#6b7280" },
+              },
+              invalid: { color: "#ef4444" },
+            },
+          }}
+        />
+      </div>
+      <p className="text-xs text-gray-500">
+        {t("onboarding.step2.stripeNote")}
+      </p>
+      <button
+        type="submit"
+        disabled={saving || !stripe}
+        className="w-full px-4 py-2.5 text-sm rounded-lg bg-brand-600 text-white hover:bg-brand-500 transition-colors disabled:opacity-50"
+      >
+        {saving ? t("common.loading") : t("onboarding.step2.saveCard")}
+      </button>
+    </form>
+  );
+}
 
 export default function OnboardingStep2() {
   const { t } = useTranslation();
   const { getToken } = useAuth();
   const router = useRouter();
 
-  const [name, setName] = useState("");
-  const [platform, setPlatform] = useState("CUSTOM_API");
-  const [description, setDescription] = useState("");
-
+  const [method, setMethod] = useState<"sdk" | "stripe_card">("sdk");
+  const [cardSaved, setCardSaved] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ botId: string; apiKey: string; agentId: string } | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [stripeFormKey, setStripeFormKey] = useState(0);
 
   useEffect(() => {
     (async () => {
       try {
         const token = await getToken();
         const status = await getOnboardingStatus(token);
-        if (status.onboardingStep >= 5) {
+        if (status.onboardingStep >= 4) {
           router.replace("/dashboard");
         } else if (status.onboardingStep < 1) {
           router.replace("/onboarding/step/1");
@@ -45,164 +178,123 @@ export default function OnboardingStep2() {
     })();
   }, [getToken, router]);
 
+  const handleSelectStripeCard = useCallback(() => {
+    setMethod("stripe_card");
+    setError(null);
+    setStripeFormKey((k) => k + 1);
+  }, []);
+
   const handleSubmit = async () => {
-    console.log("[PJ:STEP2] Submit clicked", { name: name.trim(), platform, description: description.trim() });
-    if (!name.trim() || !platform) return;
     setSubmitting(true);
     setError(null);
 
     try {
       const token = await getToken();
-      console.log("[PJ:STEP2] Submitting bot creation...");
-      const res = await submitOnboardingStep(2, {
-        name: name.trim(),
-        platform,
-        description: description.trim(),
-      }, token) as any;
-
-      console.log("[PJ:STEP2] Bot created:", { botId: res.bot?.id, agentId: res.agentId, hasApiKey: !!res.apiKey });
-      setResult({
-        botId: res.bot?.id ?? "",
-        apiKey: res.apiKey ?? "",
-        agentId: res.agentId ?? "",
-      });
+      await submitOnboardingStep(2, { method }, token);
+      router.push("/onboarding/step/3");
     } catch (err) {
-      console.error("[PJ:STEP2] Bot creation failed:", err);
       setError(err instanceof Error ? err.message : t("onboarding.step2.submitError"));
     } finally {
       setSubmitting(false);
     }
   };
 
-  const handleCopy = async (text: string) => {
-    await navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const handleContinue = () => {
-    router.push("/onboarding/step/3");
-  };
-
   return (
     <div>
       <OnboardingProgress current={2} />
 
-      <div className="bg-surface-card border border-surface-border rounded-xl p-6 space-y-6">
+      <div className="bg-white border border-gray-200 rounded-xl p-6 space-y-6">
         <div>
-          <h2 className="text-xl font-bold text-white">{t("onboarding.step2.title")}</h2>
+          <h2 className="text-xl font-bold text-gray-900">{t("onboarding.step2.title")}</h2>
           <p className="text-sm text-gray-400 mt-1">{t("onboarding.step2.subtitle")}</p>
         </div>
 
-        {!result ? (
-          <div className="space-y-4">
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">{t("onboarding.step2.botName")} *</label>
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder={t("onboarding.step2.botNamePlaceholder")}
-                className="w-full bg-surface border border-surface-border rounded-lg px-3 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-brand-500"
-                autoFocus
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">{t("onboarding.step2.platform")} *</label>
-              <select
-                value={platform}
-                onChange={(e) => setPlatform(e.target.value)}
-                className="w-full bg-surface border border-surface-border rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-brand-500"
-              >
-                {PLATFORMS.map((p) => (
-                  <option key={p.value} value={p.value}>{p.label}</option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">{t("onboarding.step2.description")}</label>
-              <textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder={t("onboarding.step2.descriptionPlaceholder")}
-                rows={2}
-                className="w-full bg-surface border border-surface-border rounded-lg px-3 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-brand-500 resize-none"
-              />
-            </div>
-
-            {error && (
-              <div className="rounded-lg bg-blocked/10 border border-blocked/20 px-4 py-2 text-sm text-blocked">
-                {error}
+        <div className="space-y-3">
+          <button
+            onClick={() => { setMethod("sdk"); setCardSaved(false); setError(null); }}
+            className={`w-full text-left rounded-xl border p-4 transition-colors ${
+              method === "sdk"
+                ? "border-brand-600 bg-brand-600/10"
+                : "border-gray-200 bg-gray-50 hover:border-gray-600"
+            }`}
+          >
+            <div className="flex items-start gap-3">
+              <div className={`mt-0.5 h-5 w-5 rounded-full border-2 flex items-center justify-center ${
+                method === "sdk" ? "border-brand-600" : "border-gray-600"
+              }`}>
+                {method === "sdk" && <div className="h-2.5 w-2.5 rounded-full bg-brand-600" />}
               </div>
-            )}
-
-            <div className="flex justify-between pt-2">
-              <button
-                onClick={() => router.push("/onboarding/step/1")}
-                className="px-4 py-2.5 text-sm text-gray-400 hover:text-white transition-colors"
-              >
-                {t("common.back")}
-              </button>
-              <button
-                onClick={handleSubmit}
-                disabled={!name.trim() || submitting}
-                className="px-8 py-2.5 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-500 transition-colors disabled:opacity-50"
-              >
-                {submitting ? t("common.loading") : t("onboarding.step2.createBot")}
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <div className="rounded-lg bg-approved/10 border border-approved/20 px-4 py-3">
-              <p className="text-sm text-approved font-medium">{t("onboarding.step2.botCreated")}</p>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-blocked mb-2">
-                {t("onboarding.step2.apiKeyWarning")}
-              </label>
-              <div className="flex items-center gap-2 bg-surface rounded-lg p-3 border border-surface-border">
-                <code className="flex-1 text-xs text-white font-mono break-all select-all">
-                  {result.apiKey}
-                </code>
-                <button
-                  onClick={() => handleCopy(result.apiKey)}
-                  className={`px-3 py-1.5 text-xs rounded-lg transition-colors shrink-0 ${
-                    copied ? "bg-approved/20 text-approved" : "bg-surface-hover text-gray-400 hover:text-white"
-                  }`}
-                >
-                  {copied ? t("common.copied") : t("common.copy")}
-                </button>
+              <div className="flex-1">
+                <p className="text-sm font-medium text-gray-900">{t("onboarding.step2.sdkTitle")}</p>
+                <p className="text-xs text-gray-400 mt-1">{t("onboarding.step2.sdkDesc")}</p>
               </div>
             </div>
+          </button>
 
-            <div>
-              <label className="block text-xs text-gray-500 mb-2">{t("onboarding.step2.quickStart")}</label>
-              <pre className="bg-surface rounded-lg p-3 border border-surface-border text-xs text-gray-300 overflow-x-auto">
-                <code>{`npm install @payjarvis/agent-sdk
-
-import { PayJarvis } from "@payjarvis/agent-sdk";
-
-const pj = new PayJarvis({
-  apiKey: "${result.apiKey}",
-  botId: "${result.botId}",
-});`}</code>
-              </pre>
+          <button
+            onClick={handleSelectStripeCard}
+            className={`w-full text-left rounded-xl border p-4 transition-colors ${
+              method === "stripe_card"
+                ? "border-brand-600 bg-brand-600/10"
+                : "border-gray-200 bg-gray-50 hover:border-gray-600"
+            }`}
+          >
+            <div className="flex items-start gap-3">
+              <div className={`mt-0.5 h-5 w-5 rounded-full border-2 flex items-center justify-center ${
+                method === "stripe_card" ? "border-brand-600" : "border-gray-600"
+              }`}>
+                {method === "stripe_card" && <div className="h-2.5 w-2.5 rounded-full bg-brand-600" />}
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-medium text-gray-900">{t("onboarding.step2.stripeTitle")}</p>
+                <p className="text-xs text-gray-400 mt-1">{t("onboarding.step2.stripeDesc")}</p>
+              </div>
             </div>
+          </button>
+        </div>
 
-            <div className="flex justify-end pt-2">
-              <button
-                onClick={handleContinue}
-                className="px-8 py-2.5 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-500 transition-colors"
-              >
-                {t("common.next")}
-              </button>
-            </div>
+        {method === "stripe_card" && !cardSaved && stripePromise && (
+          <Elements key={stripeFormKey} stripe={stripePromise} options={{ appearance: stripeAppearance }}>
+            <OnboardingCardForm
+              onSuccess={() => setCardSaved(true)}
+              onError={(msg) => setError(msg)}
+            />
+          </Elements>
+        )}
+
+        {method === "stripe_card" && !stripePromise && (
+          <div className="rounded-lg bg-blocked/10 border border-blocked/20 px-4 py-3 text-xs text-blocked">
+            Stripe is not configured. Contact support.
           </div>
         )}
+
+        {cardSaved && (
+          <div className="rounded-lg bg-approved/10 border border-approved/20 px-4 py-3 text-sm text-approved">
+            {t("onboarding.step2.cardSaved")}
+          </div>
+        )}
+
+        {error && (
+          <div className="rounded-lg bg-blocked/10 border border-blocked/20 px-4 py-2 text-sm text-blocked">
+            {error}
+          </div>
+        )}
+
+        <div className="flex justify-between pt-2">
+          <button
+            onClick={() => router.push("/onboarding/step/1")}
+            className="px-4 py-2.5 text-sm text-gray-400 hover:text-gray-900 transition-colors"
+          >
+            {t("common.back")}
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={submitting || (method === "stripe_card" && !cardSaved)}
+            className="px-8 py-2.5 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-500 transition-colors disabled:opacity-50"
+          >
+            {submitting ? t("common.loading") : t("common.next")}
+          </button>
+        </div>
       </div>
     </div>
   );

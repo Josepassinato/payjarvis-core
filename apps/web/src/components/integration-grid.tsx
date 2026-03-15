@@ -27,6 +27,7 @@ const PROVIDER_EMOJI: Record<string, string> = {
   lyft: "\uD83D\uDE95",
   uber_eats: "\uD83C\uDF54",
   doordash: "\uD83D\uDEF5",
+  ifood: "\uD83C\uDF5B",
 };
 
 // ─── Types ──────────────────────────────────────────────
@@ -62,10 +63,10 @@ function Toggle({ checked, disabled, onChange }: { checked: boolean; disabled: b
       onClick={(e) => { e.stopPropagation(); onChange(); }}
       className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
         disabled
-          ? "bg-surface-border cursor-not-allowed opacity-50"
+          ? "bg-gray-200 cursor-not-allowed opacity-50"
           : checked
           ? "bg-approved"
-          : "bg-surface-border hover:bg-gray-600"
+          : "bg-gray-200 hover:bg-gray-600"
       }`}
     >
       <span
@@ -98,15 +99,15 @@ function ProviderCard({
     <div
       className={`relative rounded-xl border p-4 transition-all duration-200 ${
         comingSoon
-          ? "border-surface-border bg-surface/50 opacity-60"
+          ? "border-gray-200 bg-gray-50/50 opacity-60"
           : enabled
           ? "border-brand-600 bg-brand-600/5 ring-1 ring-brand-600/20"
-          : "border-surface-border bg-surface hover:border-gray-600"
+          : "border-gray-200 bg-gray-50 hover:border-gray-600"
       }`}
     >
       {/* Coming Soon badge */}
       {comingSoon && (
-        <span className="absolute top-2 right-2 text-[10px] font-medium text-gray-500 bg-surface-hover px-2 py-0.5 rounded-full uppercase tracking-wider">
+        <span className="absolute top-2 right-2 text-[10px] font-medium text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full uppercase tracking-wider">
           {t("integrations.comingSoon")}
         </span>
       )}
@@ -124,7 +125,7 @@ function ProviderCard({
       <div className="flex items-start gap-3 mt-1">
         <span className="text-2xl">{emoji}</span>
         <div className="flex-1 min-w-0">
-          <p className={`text-sm font-medium ${enabled ? "text-brand-400" : "text-white"}`}>
+          <p className={`text-sm font-medium ${enabled ? "text-brand-400" : "text-gray-900"}`}>
             {provider.label}
           </p>
           <p className="text-xs text-gray-500 mt-0.5">{provider.description}</p>

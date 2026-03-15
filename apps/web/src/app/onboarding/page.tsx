@@ -16,12 +16,12 @@ export default function OnboardingRedirect() {
         const token = await getToken();
         const status = await getOnboardingStatus(token);
 
-        if (status.onboardingStep >= 6) {
+        if (status.onboardingStep >= 4) {
           router.replace("/dashboard");
           return;
         }
 
-        const nextStep = Math.min(status.onboardingStep + 1, 5);
+        const nextStep = Math.min(status.onboardingStep + 1, 3);
         router.replace(`/onboarding/step/${nextStep}`);
       } catch {
         // New user, start at step 1

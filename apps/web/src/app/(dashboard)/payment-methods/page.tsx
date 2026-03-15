@@ -123,7 +123,7 @@ function CardForm({ onSuccess, onError }: { onSuccess: (card: { brand: string; l
 
   return (
     <form onSubmit={handleSubmit} className="space-y-3">
-      <div className="bg-surface-hover border border-surface-border rounded-lg p-3">
+      <div className="bg-gray-100 border border-gray-200 rounded-lg p-3">
         <CardElement
           options={{
             style: {
@@ -140,7 +140,7 @@ function CardForm({ onSuccess, onError }: { onSuccess: (card: { brand: string; l
       <button
         type="submit"
         disabled={saving || !stripe}
-        className="w-full px-4 py-2 text-sm rounded-lg bg-brand-600 text-white hover:bg-brand-500 transition-colors disabled:opacity-50"
+        className="w-full px-4 py-2 text-sm rounded-lg bg-brand-600 text-gray-900 hover:bg-brand-500 transition-colors disabled:opacity-50"
       >
         {saving ? t("paymentMethods.savingCard") : t("paymentMethods.addCard")}
       </button>
@@ -253,7 +253,7 @@ export default function PaymentMethodsPage() {
       )}
 
       <div className="mb-8">
-        <h2 className="text-2xl font-bold text-white">{t("paymentMethods.title")}</h2>
+        <h2 className="text-2xl font-bold text-gray-900">{t("paymentMethods.title")}</h2>
         <p className="text-sm text-gray-500 mt-1">{t("paymentMethods.subtitle")}</p>
       </div>
 
@@ -285,18 +285,18 @@ export default function PaymentMethodsPage() {
           return (
             <div
               key={card.id}
-              className="bg-surface-card border border-surface-border rounded-xl p-5 flex flex-col justify-between"
+              className="bg-white border border-gray-200 rounded-xl p-5 flex flex-col justify-between"
             >
               <div>
                 <div className="flex items-center gap-3 mb-3">
-                  <div className="w-10 h-10 bg-surface-hover rounded-lg flex items-center justify-center">
+                  <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center">
                     <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d={card.icon} />
                     </svg>
                   </div>
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
-                      <h3 className="text-sm font-semibold text-white">{card.name}</h3>
+                      <h3 className="text-sm font-semibold text-gray-900">{card.name}</h3>
                       {card.comingSoon && (
                         <span className="px-2 py-0.5 text-[10px] font-medium bg-yellow-500/20 text-yellow-400 rounded-full">
                           {t("common.comingSoon")}
@@ -335,7 +335,7 @@ export default function PaymentMethodsPage() {
                 {card.comingSoon ? (
                   <button
                     disabled
-                    className="w-full px-4 py-2 text-sm rounded-lg bg-surface-hover text-gray-600 cursor-not-allowed"
+                    className="w-full px-4 py-2 text-sm rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed"
                   >
                     {t("common.comingSoon")}
                   </button>
@@ -358,7 +358,7 @@ export default function PaymentMethodsPage() {
                         </Elements>
                         <button
                           onClick={() => { setShowCardForm(false); setErrorMessage(null); }}
-                          className="w-full px-4 py-2 text-sm rounded-lg bg-surface-hover text-gray-400 hover:text-white transition-colors"
+                          className="w-full px-4 py-2 text-sm rounded-lg bg-gray-100 text-gray-400 hover:text-gray-900 transition-colors"
                         >
                           {t("common.cancel")}
                         </button>
@@ -379,7 +379,7 @@ export default function PaymentMethodsPage() {
                     </Elements>
                     <button
                       onClick={() => { setShowCardForm(false); setErrorMessage(null); }}
-                      className="w-full px-4 py-2 text-sm rounded-lg bg-surface-hover text-gray-400 hover:text-white transition-colors"
+                      className="w-full px-4 py-2 text-sm rounded-lg bg-gray-100 text-gray-400 hover:text-gray-900 transition-colors"
                     >
                       {t("common.cancel")}
                     </button>
@@ -388,7 +388,7 @@ export default function PaymentMethodsPage() {
                   <button
                     onClick={() => { setShowCardForm(true); setErrorMessage(null); }}
                     disabled={isLoading}
-                    className="w-full px-4 py-2 text-sm rounded-lg bg-brand-600 text-white hover:bg-brand-500 transition-colors disabled:opacity-50"
+                    className="w-full px-4 py-2 text-sm rounded-lg bg-brand-600 text-gray-900 hover:bg-brand-500 transition-colors disabled:opacity-50"
                   >
                     {t("paymentMethods.addCard")}
                   </button>
@@ -396,7 +396,7 @@ export default function PaymentMethodsPage() {
                   <button
                     disabled
                     title="Stripe not configured"
-                    className="w-full px-4 py-2 text-sm rounded-lg bg-surface-hover text-gray-600 cursor-not-allowed"
+                    className="w-full px-4 py-2 text-sm rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed"
                   >
                     {t("common.configure")}
                   </button>
@@ -404,7 +404,7 @@ export default function PaymentMethodsPage() {
                   <button
                     onClick={() => { setShowCardForm(true); setErrorMessage(null); }}
                     disabled={isLoading}
-                    className="w-full px-4 py-2 text-sm rounded-lg bg-brand-600 text-white hover:bg-brand-500 transition-colors disabled:opacity-50"
+                    className="w-full px-4 py-2 text-sm rounded-lg bg-brand-600 text-gray-900 hover:bg-brand-500 transition-colors disabled:opacity-50"
                   >
                     {t("paymentMethods.addCard")}
                   </button>

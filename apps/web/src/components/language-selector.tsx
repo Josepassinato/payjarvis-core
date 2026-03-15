@@ -29,7 +29,7 @@ export function LanguageSelector() {
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-surface-hover transition-colors"
+        className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-sm text-gray-400 hover:text-gray-900 hover:bg-gray-100 transition-colors"
       >
         <span className="text-base">{current.flag}</span>
         <svg className={`w-3 h-3 transition-transform ${open ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -37,7 +37,7 @@ export function LanguageSelector() {
         </svg>
       </button>
       {open && (
-        <div className="absolute right-0 bottom-full mb-1 bg-surface-card border border-surface-border rounded-lg shadow-lg py-1 min-w-[140px] z-50">
+        <div className="absolute right-0 bottom-full mb-1 bg-white border border-gray-200 rounded-lg shadow-lg py-1 min-w-[140px] z-50">
           {languages.map((lang) => (
             <button
               key={lang.code}
@@ -48,7 +48,7 @@ export function LanguageSelector() {
               className={`w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors ${
                 lang.code === i18n.language
                   ? "text-brand-400 bg-brand-600/10"
-                  : "text-gray-400 hover:text-white hover:bg-surface-hover"
+                  : "text-gray-400 hover:text-gray-900 hover:bg-gray-100"
               }`}
             >
               <span className="text-base">{lang.flag}</span>

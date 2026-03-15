@@ -3,11 +3,9 @@
 import { useTranslation } from "react-i18next";
 
 const STEPS = [
-  { key: "identity", label: "onboarding.steps.identity" },
-  { key: "bot", label: "onboarding.steps.bot" },
-  { key: "integrations", label: "onboarding.steps.integrations" },
+  { key: "basics", label: "onboarding.steps.basics" },
   { key: "payment", label: "onboarding.steps.payment" },
-  { key: "terms", label: "onboarding.steps.terms" },
+  { key: "limits", label: "onboarding.steps.limits" },
 ];
 
 export function OnboardingProgress({ current }: { current: number }) {
@@ -26,10 +24,10 @@ export function OnboardingProgress({ current }: { current: number }) {
               <div
                 className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold transition-colors ${
                   isCompleted
-                    ? "bg-approved text-white"
+                    ? "bg-approved text-gray-900"
                     : isCurrent
-                    ? "bg-brand-600 text-white"
-                    : "bg-surface-hover text-gray-500"
+                    ? "bg-brand-600 text-gray-900"
+                    : "bg-gray-100 text-gray-500"
                 }`}
               >
                 {isCompleted ? (
@@ -42,7 +40,7 @@ export function OnboardingProgress({ current }: { current: number }) {
               </div>
               <span
                 className={`text-xs hidden sm:block ${
-                  isCurrent ? "text-white font-medium" : "text-gray-500"
+                  isCurrent ? "text-gray-900 font-medium" : "text-gray-500"
                 }`}
               >
                 {t(step.label)}
@@ -51,7 +49,7 @@ export function OnboardingProgress({ current }: { current: number }) {
             {i < STEPS.length - 1 && (
               <div
                 className={`h-px flex-1 min-w-4 ${
-                  isCompleted ? "bg-approved" : "bg-surface-border"
+                  isCompleted ? "bg-approved" : "bg-gray-200"
                 }`}
               />
             )}

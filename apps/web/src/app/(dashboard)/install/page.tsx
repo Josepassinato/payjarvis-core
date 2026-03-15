@@ -162,7 +162,7 @@ if (decision.approved) {
       className={`absolute top-2 right-2 px-2 py-1 text-xs rounded transition-colors ${
         copiedBlock === id
           ? "bg-approved/20 text-approved"
-          : "bg-surface-hover text-gray-400 hover:text-white"
+          : "bg-gray-100 text-gray-400 hover:text-gray-900"
       }`}
     >
       {copiedBlock === id ? t("common.copied") : t("common.copy")}
@@ -171,7 +171,7 @@ if (decision.approved) {
 
   const CodeBlock = ({ code, id }: { code: string; id: string }) => (
     <div className="relative">
-      <pre className="bg-surface border border-surface-border rounded-lg p-4 text-xs text-green-400 font-mono overflow-x-auto">
+      <pre className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-xs text-green-400 font-mono overflow-x-auto">
         {code}
       </pre>
       <CopyButton text={code} id={id} />
@@ -181,7 +181,7 @@ if (decision.approved) {
   return (
     <div className="max-w-4xl">
       <div className="mb-8">
-        <h2 className="text-2xl font-bold text-white">{t("install.title")}</h2>
+        <h2 className="text-2xl font-bold text-gray-900">{t("install.title")}</h2>
         <p className="text-sm text-gray-500 mt-1">
           {t("install.subtitle")}
         </p>
@@ -189,10 +189,10 @@ if (decision.approved) {
 
       {/* ─── SECTION: Bot Integration Guide ─── */}
       <div className="mb-10">
-        <h3 className="text-lg font-semibold text-white mb-4">Bot Integration Guide</h3>
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">Bot Integration Guide</h3>
 
         {/* Bot type tabs */}
-        <div className="flex flex-wrap gap-1 mb-6 bg-surface-card border border-surface-border rounded-lg p-1">
+        <div className="flex flex-wrap gap-1 mb-6 bg-white border border-gray-200 rounded-lg p-1">
           {([
             { key: "openclaw" as BotTab, label: "OpenClaw / ClawdBot" },
             { key: "api" as BotTab, label: "API (curl / Python / Node)" },
@@ -203,7 +203,7 @@ if (decision.approved) {
               onClick={() => setActiveBotTab(tab.key)}
               className={`flex-1 px-4 py-2 text-sm rounded-md transition-colors ${
                 activeBotTab === tab.key
-                  ? "bg-brand-600 text-white font-medium"
+                  ? "bg-brand-600 text-gray-900 font-medium"
                   : "text-gray-400 hover:text-gray-200"
               }`}
             >
@@ -215,7 +215,7 @@ if (decision.approved) {
         {/* OpenClaw / ClawdBot */}
         {activeBotTab === "openclaw" && (
           <div className="space-y-4">
-            <div className="bg-surface-card border border-surface-border rounded-xl p-5">
+            <div className="bg-white border border-gray-200 rounded-xl p-5">
               <h4 className="text-sm font-semibold text-gray-300 mb-3">OpenClaw / ClawdBot Setup</h4>
               <p className="text-xs text-gray-500 mb-4">
                 Connect your OpenClaw or ClawdBot agent to PayJarvis for autonomous purchases.
@@ -228,15 +228,15 @@ if (decision.approved) {
         {/* API genérica */}
         {activeBotTab === "api" && (
           <div className="space-y-4">
-            <div className="bg-surface-card border border-surface-border rounded-xl p-5">
+            <div className="bg-white border border-gray-200 rounded-xl p-5">
               <h4 className="text-sm font-semibold text-gray-300 mb-3">cURL</h4>
               <CodeBlock code={apiGenericCurl} id="api-curl" />
             </div>
-            <div className="bg-surface-card border border-surface-border rounded-xl p-5">
+            <div className="bg-white border border-gray-200 rounded-xl p-5">
               <h4 className="text-sm font-semibold text-gray-300 mb-3">Python</h4>
               <CodeBlock code={apiGenericPython} id="api-python" />
             </div>
-            <div className="bg-surface-card border border-surface-border rounded-xl p-5">
+            <div className="bg-white border border-gray-200 rounded-xl p-5">
               <h4 className="text-sm font-semibold text-gray-300 mb-3">Node.js</h4>
               <CodeBlock code={apiGenericNode} id="api-node" />
             </div>
@@ -245,14 +245,14 @@ if (decision.approved) {
 
         {/* Coming Soon */}
         {activeBotTab === "coming" && (
-          <div className="bg-surface-card border border-surface-border rounded-xl p-5">
+          <div className="bg-white border border-gray-200 rounded-xl p-5">
             <h4 className="text-sm font-semibold text-gray-300 mb-3">Coming Soon</h4>
             <div className="space-y-3 text-sm text-gray-400">
-              <div className="flex items-center gap-3 p-3 bg-surface rounded-lg border border-surface-border">
+              <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
                 <span className="text-xs bg-pending/20 text-pending px-2 py-0.5 rounded font-medium">Soon</span>
                 <span>Perplexity</span>
               </div>
-              <div className="flex items-center gap-3 p-3 bg-surface rounded-lg border border-surface-border">
+              <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
                 <span className="text-xs bg-pending/20 text-pending px-2 py-0.5 rounded font-medium">Soon</span>
                 <span>GPT Actions (OpenAI)</span>
               </div>
@@ -263,9 +263,9 @@ if (decision.approved) {
 
       {/* ─── SECTION: Connect your bot to browser agent ─── */}
       <div className="mb-10">
-        <h3 className="text-lg font-semibold text-white mb-4">Connect your bot to browser agent</h3>
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">Connect your bot to browser agent</h3>
         <div className="space-y-4">
-          <div className="bg-surface-card border border-surface-border rounded-xl p-5">
+          <div className="bg-white border border-gray-200 rounded-xl p-5">
             <h4 className="text-sm font-semibold text-gray-300 mb-2">1. Start Chrome with CDP</h4>
             <p className="text-xs text-gray-500 mb-3">
               Your bot needs Chrome running with the Chrome DevTools Protocol enabled.
@@ -276,7 +276,7 @@ if (decision.approved) {
             />
           </div>
 
-          <div className="bg-surface-card border border-surface-border rounded-xl p-5">
+          <div className="bg-white border border-gray-200 rounded-xl p-5">
             <h4 className="text-sm font-semibold text-gray-300 mb-2">2. Connect to PayJarvis Browser Agent</h4>
             <p className="text-xs text-gray-500 mb-3">
               Register your bot with the browser agent endpoint.
@@ -284,7 +284,7 @@ if (decision.approved) {
             <CodeBlock code={browserAgentConnect} id="browser-connect" />
           </div>
 
-          <div className="bg-surface-card border border-surface-border rounded-xl p-5">
+          <div className="bg-white border border-gray-200 rounded-xl p-5">
             <h4 className="text-sm font-semibold text-gray-300 mb-2">3. Check status</h4>
             <p className="text-xs text-gray-500 mb-3">
               Verify that your bot is connected and healthy.
@@ -296,8 +296,8 @@ if (decision.approved) {
 
       {/* ─── SECTION: request-payment example ─── */}
       <div className="mb-10">
-        <h3 className="text-lg font-semibold text-white mb-4">SDK: requestPayment example</h3>
-        <div className="bg-surface-card border border-surface-border rounded-xl p-5">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">SDK: requestPayment example</h3>
+        <div className="bg-white border border-gray-200 rounded-xl p-5">
           <p className="text-xs text-gray-500 mb-3">
             Full example using the <code className="text-brand-400">@payjarvis/agent-sdk</code> to request a payment and receive a BDIT token.
           </p>
@@ -307,21 +307,21 @@ if (decision.approved) {
 
       {/* ─── SECTION: Merchant Integration ─── */}
       <div className="mb-8">
-        <h3 className="text-lg font-semibold text-white mb-4">{t("install.title")}</h3>
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">{t("install.title")}</h3>
         <p className="text-sm text-gray-500 mb-4">
           {t("install.subtitle")}
         </p>
       </div>
 
       {/* Merchant Tabs */}
-      <div className="flex flex-wrap gap-1 mb-6 bg-surface-card border border-surface-border rounded-lg p-1">
+      <div className="flex flex-wrap gap-1 mb-6 bg-white border border-gray-200 rounded-lg p-1">
         {merchantTabs.map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
             className={`flex-1 px-4 py-2 text-sm rounded-md transition-colors ${
               activeTab === tab
-                ? "bg-brand-600 text-white font-medium"
+                ? "bg-brand-600 text-gray-900 font-medium"
                 : "text-gray-400 hover:text-gray-200"
             }`}
           >
@@ -333,7 +333,7 @@ if (decision.approved) {
       {/* HTML Tab */}
       {activeTab === "HTML" && (
         <div className="space-y-6">
-          <div className="bg-surface-card border border-surface-border rounded-xl p-5">
+          <div className="bg-white border border-gray-200 rounded-xl p-5">
             <h3 className="text-sm font-semibold text-gray-300 mb-3">
               {t("install.htmlTitle")}
             </h3>
@@ -351,17 +351,17 @@ if (decision.approved) {
       {/* WooCommerce Tab */}
       {activeTab === "WooCommerce" && (
         <div className="space-y-6">
-          <div className="bg-surface-card border border-surface-border rounded-xl p-5">
+          <div className="bg-white border border-gray-200 rounded-xl p-5">
             <h3 className="text-sm font-semibold text-gray-300 mb-3">{t("install.wooTitle")}</h3>
             <div className="space-y-4">
               <div className="flex items-center gap-4">
-                <button className="px-4 py-2.5 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-500 transition-colors">
+                <button className="px-4 py-2.5 bg-brand-600 text-gray-900 text-sm font-medium rounded-lg hover:bg-brand-500 transition-colors">
                   {t("install.wooDownload")}
                 </button>
                 <span className="text-xs text-gray-500">{t("install.wooVersion")}</span>
               </div>
 
-              <div className="border-t border-surface-border pt-4">
+              <div className="border-t border-gray-200 pt-4">
                 <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
                   {t("install.wooInstructions")}
                 </h4>
@@ -382,14 +382,14 @@ if (decision.approved) {
       {/* Shopify Tab */}
       {activeTab === "Shopify" && (
         <div className="space-y-6">
-          <div className="bg-surface-card border border-surface-border rounded-xl p-5">
+          <div className="bg-white border border-gray-200 rounded-xl p-5">
             <h3 className="text-sm font-semibold text-gray-300 mb-3">{t("install.shopifyTitle")}</h3>
             <div className="space-y-4">
               <p className="text-sm text-gray-400">
                 {t("install.shopifyDesc")}
               </p>
 
-              <div className="border-t border-surface-border pt-4">
+              <div className="border-t border-gray-200 pt-4">
                 <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
                   {t("install.shopifyHow")}
                 </h4>
@@ -408,10 +408,10 @@ if (decision.approved) {
       {/* API Tab */}
       {activeTab === "API" && (
         <div className="space-y-6">
-          <div className="bg-surface-card border border-surface-border rounded-xl p-5">
+          <div className="bg-white border border-gray-200 rounded-xl p-5">
             <h3 className="text-sm font-semibold text-gray-300 mb-3">{t("install.sdkTitle")}</h3>
             <div className="relative mb-4">
-              <pre className="bg-surface border border-surface-border rounded-lg p-4 text-xs text-green-400 font-mono">
+              <pre className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-xs text-green-400 font-mono">
                 {sdkInstall}
               </pre>
               <CopyButton text={sdkInstall} id="sdk-install" />
@@ -419,12 +419,12 @@ if (decision.approved) {
             <CodeBlock code={sdkCode} id="sdk-code" />
           </div>
 
-          <div className="bg-surface-card border border-surface-border rounded-xl p-5">
+          <div className="bg-white border border-gray-200 rounded-xl p-5">
             <h3 className="text-sm font-semibold text-gray-300 mb-3">{t("install.curlTitle")}</h3>
             <CodeBlock code={curlVerify} id="curl" />
           </div>
 
-          <div className="bg-surface-card border border-surface-border rounded-xl p-5">
+          <div className="bg-white border border-gray-200 rounded-xl p-5">
             <h3 className="text-sm font-semibold text-gray-300 mb-3">{t("install.jsTitle")}</h3>
             <CodeBlock code={jsVerify} id="js" />
           </div>

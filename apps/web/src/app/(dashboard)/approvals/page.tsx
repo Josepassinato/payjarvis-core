@@ -46,7 +46,7 @@ function Toast({ message, onDismiss }: { message: string; onDismiss: () => void 
   }, [onDismiss]);
 
   return (
-    <div className="fixed bottom-6 right-6 bg-surface-card border-l-2 border-l-blocked border border-blocked/20 rounded-xl px-5 py-3 shadow-2xl shadow-black/30 z-50 animate-slide-in-right">
+    <div className="fixed bottom-6 right-6 bg-white border-l-2 border-l-blocked border border-blocked/20 rounded-xl px-5 py-3 shadow-2xl shadow-black/30 z-50 animate-slide-in-right">
       <div className="flex items-center gap-2">
         <svg className="w-4 h-4 text-blocked shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -137,14 +137,14 @@ export default function ApprovalsPage() {
       {toast && <Toast message={toast} onDismiss={() => setToast(null)} />}
 
       <div className="mb-8">
-        <h2 className="text-2xl font-bold text-white">{t("approvals.title")}</h2>
+        <h2 className="text-2xl font-bold text-gray-900">{t("approvals.title")}</h2>
         <p className="text-sm text-gray-500 mt-1">
           {t("approvals.count", { count: list.length })}
         </p>
       </div>
 
       {list.length === 0 ? (
-        <div className="bg-surface-card border border-surface-border rounded-xl p-12 text-center">
+        <div className="bg-white border border-gray-200 rounded-xl p-12 text-center">
           <p className="text-gray-400">{t("approvals.none")}</p>
           <p className="text-xs text-gray-600 mt-1">{t("approvals.noneHint")}</p>
         </div>
@@ -156,7 +156,7 @@ export default function ApprovalsPage() {
             return (
               <div
                 key={approval.id}
-                className={`bg-surface-card border rounded-xl p-5 transition-all ${
+                className={`bg-white border rounded-xl p-5 transition-all ${
                   taken === "approved"
                     ? "border-approved/30 opacity-60"
                     : taken === "rejected"
@@ -173,8 +173,8 @@ export default function ApprovalsPage() {
                       <span className="w-1 h-1 rounded-full bg-gray-700" />
                       <span className="text-xs text-gray-500">{approval.category}</span>
                     </div>
-                    <p className="text-lg font-semibold text-white">{approval.merchantName}</p>
-                    <p className="text-2xl font-bold text-white mt-1">{currency(approval.amount)}</p>
+                    <p className="text-lg font-semibold text-gray-900">{approval.merchantName}</p>
+                    <p className="text-2xl font-bold text-gray-900 mt-1">{currency(approval.amount)}</p>
                   </div>
                   <div className="text-right">
                     <p className="text-xs text-gray-500 mb-1">{t("approvals.expiresIn")}</p>
@@ -183,7 +183,7 @@ export default function ApprovalsPage() {
                 </div>
 
                 {!taken && !expired && (
-                  <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 mt-5 pt-4 border-t border-surface-border">
+                  <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 mt-5 pt-4 border-t border-gray-200">
                     <button
                       onClick={() => handleAction(approval.id, "approve")}
                       disabled={actionLoading === approval.id}
@@ -202,7 +202,7 @@ export default function ApprovalsPage() {
                 )}
 
                 {taken && (
-                  <div className="mt-4 pt-3 border-t border-surface-border">
+                  <div className="mt-4 pt-3 border-t border-gray-200">
                     <p className={`text-sm font-medium ${taken === "approved" ? "text-approved" : "text-blocked"}`}>
                       {taken === "approved" ? t("decisions.approved") : t("decisions.blocked")}
                     </p>
@@ -210,7 +210,7 @@ export default function ApprovalsPage() {
                 )}
 
                 {expired && !taken && (
-                  <div className="mt-4 pt-3 border-t border-surface-border">
+                  <div className="mt-4 pt-3 border-t border-gray-200">
                     <p className="text-sm font-medium text-gray-500">{t("approvals.expiredPurchase")}</p>
                   </div>
                 )}

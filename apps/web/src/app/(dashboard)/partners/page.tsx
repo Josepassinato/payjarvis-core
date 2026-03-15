@@ -151,7 +151,7 @@ export default function PartnersPage() {
           ].map((item) => (
             <div
               key={item.step}
-              className="flex gap-6 rounded-xl border border-surface-border bg-surface-card p-6"
+              className="flex gap-6 rounded-xl border border-gray-200 bg-white p-6"
             >
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-600 text-lg font-bold">
                 {item.step}
@@ -180,7 +180,7 @@ export default function PartnersPage() {
           ].map((item) => (
             <div
               key={item.title}
-              className="rounded-xl border border-surface-border bg-surface-card p-6"
+              className="rounded-xl border border-gray-200 bg-white p-6"
             >
               <div className="mb-2 text-lg font-semibold text-brand-400">
                 &#10003; {item.title}
@@ -220,7 +220,7 @@ export default function PartnersPage() {
                 onChange={(e) =>
                   setFormData({ ...formData, company: e.target.value })
                 }
-                className="w-full rounded-lg border border-surface-border bg-surface-card px-4 py-3 text-white placeholder-gray-500 outline-none focus:border-brand-500"
+                className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-gray-900 placeholder-gray-500 outline-none focus:border-brand-500"
                 placeholder={t("partners.companyPlaceholder")}
               />
             </div>
@@ -235,7 +235,7 @@ export default function PartnersPage() {
                 onChange={(e) =>
                   setFormData({ ...formData, website: e.target.value })
                 }
-                className="w-full rounded-lg border border-surface-border bg-surface-card px-4 py-3 text-white placeholder-gray-500 outline-none focus:border-brand-500"
+                className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-gray-900 placeholder-gray-500 outline-none focus:border-brand-500"
                 placeholder="https://www.example.com"
               />
             </div>
@@ -250,7 +250,7 @@ export default function PartnersPage() {
                 onChange={(e) =>
                   setFormData({ ...formData, email: e.target.value })
                 }
-                className="w-full rounded-lg border border-surface-border bg-surface-card px-4 py-3 text-white placeholder-gray-500 outline-none focus:border-brand-500"
+                className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-gray-900 placeholder-gray-500 outline-none focus:border-brand-500"
                 placeholder="contact@example.com"
               />
             </div>
@@ -264,7 +264,7 @@ export default function PartnersPage() {
                 onChange={(e) =>
                   setFormData({ ...formData, volume: e.target.value })
                 }
-                className="w-full rounded-lg border border-surface-border bg-surface-card px-4 py-3 text-white outline-none focus:border-brand-500"
+                className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-gray-900 outline-none focus:border-brand-500"
               >
                 <option value="">{t("partners.volumeSelect")}</option>
                 <option value="<1000">{t("partners.volume1")}</option>
@@ -275,7 +275,7 @@ export default function PartnersPage() {
             </div>
             <button
               type="submit"
-              className="w-full rounded-lg bg-brand-600 px-6 py-3 font-semibold text-white transition-colors hover:bg-brand-500"
+              className="w-full rounded-lg bg-brand-600 px-6 py-3 font-semibold text-gray-900 transition-colors hover:bg-brand-500"
             >
               {t("partners.submitButton")}
             </button>

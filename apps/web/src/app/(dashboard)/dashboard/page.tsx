@@ -69,9 +69,9 @@ function ChartCard({
 }) {
   return (
     <div
-      className={`bg-surface-card border border-surface-border rounded-xl transition-all duration-200 hover:border-surface-hover ${className}`}
+      className={`bg-white border border-gray-200 rounded-xl transition-all duration-200 hover:border-gray-300 ${className}`}
     >
-      <div className="px-5 py-4 border-b border-surface-border">
+      <div className="px-5 py-4 border-b border-gray-200">
         <h3 className="text-sm font-display font-semibold text-gray-300">{title}</h3>
       </div>
       <div className="p-5">{children}</div>
@@ -82,7 +82,7 @@ function ChartCard({
 function ChartSkeleton({ height = 250 }: { height?: number }) {
   return (
     <div
-      className="animate-pulse bg-surface-hover rounded-lg"
+      className="animate-pulse bg-gray-100 rounded-lg"
       style={{ height }}
     />
   );
@@ -97,10 +97,10 @@ interface ChartTooltipProps {
 function SpendingTooltip({ active, payload, label }: ChartTooltipProps) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="bg-surface border border-surface-border rounded-lg px-3 py-2 shadow-lg">
+    <div className="bg-gray-50border border-gray-200 rounded-lg px-3 py-2 shadow-lg">
       <p className="text-xs text-gray-400 mb-1">{label ?? ""}</p>
       {payload.map((p, i) => (
-        <p key={i} className="text-sm text-white font-medium">
+        <p key={i} className="text-sm text-gray-900 font-medium">
           {currency(p.value)}
         </p>
       ))}
@@ -111,10 +111,10 @@ function SpendingTooltip({ active, payload, label }: ChartTooltipProps) {
 function BotTooltip({ active, payload, label }: ChartTooltipProps) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="bg-surface border border-surface-border rounded-lg px-3 py-2 shadow-lg">
+    <div className="bg-gray-50border border-gray-200 rounded-lg px-3 py-2 shadow-lg">
       <p className="text-xs text-gray-400 mb-1">{label}</p>
       {payload.map((p, i) => (
-        <p key={i} className="text-sm text-white font-medium">
+        <p key={i} className="text-sm text-gray-900 font-medium">
           {currency(p.value)}
         </p>
       ))}
@@ -140,12 +140,12 @@ export default function DashboardPage() {
   function DecisionTooltip({ active, payload, label }: ChartTooltipProps) {
     if (!active || !payload?.length) return null;
     return (
-      <div className="bg-surface border border-surface-border rounded-lg px-3 py-2 shadow-lg">
+      <div className="bg-gray-50border border-gray-200 rounded-lg px-3 py-2 shadow-lg">
         <p className="text-xs text-gray-400 mb-1">
           {label ? decisionLabels[label] ?? label : ""}
         </p>
         {payload.map((p, i) => (
-          <p key={i} className="text-sm text-white font-medium">
+          <p key={i} className="text-sm text-gray-900 font-medium">
             {p.name === "total" ? currency(p.value) : t("dashboard.txCount", { count: p.value })}
           </p>
         ))}
@@ -224,7 +224,7 @@ export default function DashboardPage() {
   return (
     <div className="animate-fade-in">
       <div className="mb-8">
-        <h2 className="text-2xl font-display font-bold text-white">{t("dashboard.title")}</h2>
+        <h2 className="text-2xl font-display font-bold text-gray-900">{t("dashboard.title")}</h2>
         <p className="text-sm text-gray-500 mt-1">{t("dashboard.subtitle")}</p>
       </div>
 
@@ -350,9 +350,9 @@ export default function DashboardPage() {
                       if (!active || !payload?.length) return null;
                       const item = payload[0];
                       return (
-                        <div className="bg-surface border border-surface-border rounded-lg px-3 py-2 shadow-lg">
+                        <div className="bg-gray-50border border-gray-200 rounded-lg px-3 py-2 shadow-lg">
                           <p className="text-xs text-gray-400">{String(item.name)}</p>
-                          <p className="text-sm text-white font-medium">{currency(Number(item.value))}</p>
+                          <p className="text-sm text-gray-900 font-medium">{currency(Number(item.value))}</p>
                         </div>
                       );
                     }}
@@ -483,8 +483,8 @@ export default function DashboardPage() {
       </div>
 
       {/* Recent Transactions */}
-      <div className="bg-surface-card border border-surface-border rounded-xl mb-6">
-        <div className="px-5 py-4 border-b border-surface-border">
+      <div className="bg-white border border-gray-200 rounded-xl mb-6">
+        <div className="px-5 py-4 border-b border-gray-200">
           <h3 className="text-sm font-semibold text-gray-300">
             {t("dashboard.recentTx")}
           </h3>
@@ -494,14 +494,14 @@ export default function DashboardPage() {
             {t("dashboard.noTx")}
           </div>
         ) : (
-          <div className="divide-y divide-surface-border">
+          <div className="divide-y divide-gray-200">
             {recentTxs.map((tx) => (
               <div
                 key={tx.id}
-                className="flex items-center justify-between px-5 py-3.5 hover:bg-surface-hover transition-colors"
+                className="flex items-center justify-between px-5 py-3.5 hover:bg-gray-100 transition-colors"
               >
                 <div className="flex-1">
-                  <p className="text-sm font-medium text-white">
+                  <p className="text-sm font-medium text-gray-900">
                     {tx.merchantName}
                   </p>
                   <p className="text-xs text-gray-500">
@@ -522,13 +522,13 @@ export default function DashboardPage() {
 
       {/* Alerts */}
       {(suspiciousAlerts.length > 0 || nearLimitAlerts.length > 0) && (
-        <div className="bg-surface-card border border-surface-border rounded-xl">
-          <div className="px-5 py-4 border-b border-surface-border">
+        <div className="bg-white border border-gray-200 rounded-xl">
+          <div className="px-5 py-4 border-b border-gray-200">
             <h3 className="text-sm font-display font-semibold text-gray-300">
               {t("dashboard.alerts")}
             </h3>
           </div>
-          <div className="divide-y divide-surface-border">
+          <div className="divide-y divide-gray-200">
             {suspiciousAlerts.map((a) => (
               <div
                 key={a.id}
@@ -538,7 +538,7 @@ export default function DashboardPage() {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
                 </svg>
                 <p className="text-sm text-gray-300">
-                  <span className="text-white font-medium">{a.name}</span> — {a.message}
+                  <span className="text-gray-900 font-medium">{a.name}</span> — {a.message}
                 </p>
               </div>
             ))}
@@ -551,7 +551,7 @@ export default function DashboardPage() {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
                 <p className="text-sm text-gray-300">
-                  <span className="text-white font-medium">{a.name}</span> {a.message}
+                  <span className="text-gray-900 font-medium">{a.name}</span> {a.message}
                 </p>
               </div>
             ))}

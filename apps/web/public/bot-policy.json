@@ -1,0 +1,12 @@
+{
+  "version": "1.0",
+  "merchant": "payjarvis.com",
+  "agent_id": "payjarvis-bot-v1",
+  "verified_by": ["visa-tap", "mc-agentpay", "cloudflare-web-bot-auth"],
+  "checkout_endpoint": "https://payjarvis.com/api/verify-passport",
+  "rate_limits": {
+    "verified_bot": 1000,
+    "unknown_bot": 10,
+    "unit": "per_minute"
+  }
+}

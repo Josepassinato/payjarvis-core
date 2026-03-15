@@ -25,7 +25,7 @@ export function ErrorBox({ message, onRetry }: { message: string; onRetry?: () =
         <div>
           <p className="text-sm text-blocked">{message}</p>
           {onRetry && (
-            <button onClick={onRetry} className="mt-3 px-4 py-1.5 text-xs bg-surface-hover text-gray-300 rounded-lg hover:text-white hover:bg-surface-border transition-colors">
+            <button onClick={onRetry} className="mt-3 px-4 py-1.5 text-xs bg-gray-100 text-gray-700 rounded-lg hover:text-gray-900 hover:bg-gray-200 transition-colors">
               {t("common.tryAgain")}
             </button>
           )}
@@ -37,7 +37,7 @@ export function ErrorBox({ message, onRetry }: { message: string; onRetry?: () =
 
 export function EmptyState({ message, sub }: { message: string; sub?: string }) {
   return (
-    <div className="bg-surface-card border border-surface-border rounded-xl p-12 text-center animate-fade-in">
+    <div className="bg-white border border-gray-200 rounded-xl p-12 text-center animate-fade-in">
       <svg className="w-12 h-12 text-gray-700 mx-auto mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
       </svg>

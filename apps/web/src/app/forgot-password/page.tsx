@@ -104,7 +104,7 @@ export default function ForgotPasswordPage() {
   // Shared layout wrapper
   function AuthWrapper({ children }: { children: React.ReactNode }) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-surface px-4">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
         <div className="hero-mesh fixed inset-0 pointer-events-none" />
         <div className="grid-pattern fixed inset-0 pointer-events-none opacity-30" />
         <div className="relative w-full max-w-md animate-fade-in">
@@ -112,7 +112,7 @@ export default function ForgotPasswordPage() {
             <h1 className="text-3xl font-display font-bold text-gradient-brand">PayJarvis</h1>
             <p className="text-gray-400 mt-2 font-body text-sm">Bot Payment Identity</p>
           </div>
-          <div className="bg-surface-card border border-surface-border rounded-2xl p-8 shadow-xl">
+          <div className="bg-white border border-gray-200 rounded-2xl p-8 shadow-xl">
             {children}
           </div>
         </div>
@@ -132,7 +132,7 @@ export default function ForgotPasswordPage() {
           </div>
         </div>
 
-        <h2 className="text-xl font-display font-semibold text-white mb-2 text-center">
+        <h2 className="text-xl font-display font-semibold text-gray-900 mb-2 text-center">
           Recuperar senha
         </h2>
         <p className="text-gray-400 text-sm text-center mb-6">
@@ -141,7 +141,7 @@ export default function ForgotPasswordPage() {
 
         <form onSubmit={handleSendCode} className="space-y-5">
           <div>
-            <label htmlFor="email" className="block text-sm font-medium text-gray-300 mb-1.5">
+            <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1.5">
               Email
             </label>
             <input
@@ -151,7 +151,7 @@ export default function ForgotPasswordPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="seu@email.com"
-              className="w-full px-4 py-3 bg-surface border border-surface-border rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-all"
+              className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-all"
             />
           </div>
 
@@ -201,16 +201,16 @@ export default function ForgotPasswordPage() {
           </div>
         </div>
 
-        <h2 className="text-xl font-display font-semibold text-white mb-2 text-center">
+        <h2 className="text-xl font-display font-semibold text-gray-900 mb-2 text-center">
           Verifique seu email
         </h2>
         <p className="text-gray-400 text-sm text-center mb-6">
-          Enviamos um código para <span className="text-white font-medium">{email}</span>
+          Enviamos um código para <span className="text-gray-900 font-medium">{email}</span>
         </p>
 
         <form onSubmit={handleVerifyCode} className="space-y-5">
           <div>
-            <label htmlFor="code" className="block text-sm font-medium text-gray-300 mb-1.5">
+            <label htmlFor="code" className="block text-sm font-medium text-gray-700 mb-1.5">
               Código de recuperação
             </label>
             <input
@@ -221,7 +221,7 @@ export default function ForgotPasswordPage() {
               onChange={(e) => setCode(e.target.value)}
               placeholder="123456"
               maxLength={6}
-              className="w-full px-4 py-3 bg-surface border border-surface-border rounded-lg text-white text-center text-2xl tracking-[0.5em] font-mono placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-all"
+              className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg text-gray-900 text-center text-2xl tracking-[0.5em] font-mono placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-all"
             />
           </div>
 
@@ -280,7 +280,7 @@ export default function ForgotPasswordPage() {
           </div>
         </div>
 
-        <h2 className="text-xl font-display font-semibold text-white mb-2 text-center">
+        <h2 className="text-xl font-display font-semibold text-gray-900 mb-2 text-center">
           Nova senha
         </h2>
         <p className="text-gray-400 text-sm text-center mb-6">
@@ -289,7 +289,7 @@ export default function ForgotPasswordPage() {
 
         <form onSubmit={handleResetPassword} className="space-y-5">
           <div>
-            <label htmlFor="password" className="block text-sm font-medium text-gray-300 mb-1.5">
+            <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1.5">
               Nova senha
             </label>
             <input
@@ -299,12 +299,12 @@ export default function ForgotPasswordPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Mínimo 8 caracteres"
-              className="w-full px-4 py-3 bg-surface border border-surface-border rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-all"
+              className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-all"
             />
           </div>
 
           <div>
-            <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-300 mb-1.5">
+            <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-1.5">
               Confirmar nova senha
             </label>
             <input
@@ -314,7 +314,7 @@ export default function ForgotPasswordPage() {
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               placeholder="Repita a nova senha"
-              className="w-full px-4 py-3 bg-surface border border-surface-border rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-all"
+              className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-all"
             />
           </div>
 
@@ -357,7 +357,7 @@ export default function ForgotPasswordPage() {
         </div>
       </div>
 
-      <h2 className="text-xl font-display font-semibold text-white mb-2 text-center">
+      <h2 className="text-xl font-display font-semibold text-gray-900 mb-2 text-center">
         Senha redefinida!
       </h2>
       <p className="text-gray-400 text-sm text-center mb-6">

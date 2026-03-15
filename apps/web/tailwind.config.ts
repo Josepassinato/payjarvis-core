@@ -6,10 +6,11 @@ const config: Config = {
     extend: {
       colors: {
         surface: {
-          DEFAULT: "#080B12",
-          card: "#0D1117",
-          hover: "#161B22",
-          border: "#21262D",
+          DEFAULT: "#F8F9FB",
+          card: "#FFFFFF",
+          hover: "#F0F2F5",
+          border: "#E2E6EB",
+          elevated: "#FFFFFF",
         },
         approved: "#22c55e",
         blocked: "#ef4444",

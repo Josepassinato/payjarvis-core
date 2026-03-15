@@ -6,7 +6,7 @@
 
 @layer base {
   body {
-    @apply bg-surface text-gray-100 font-body;
+    @apply bg-surface text-gray-800 font-body;
   }
 
   h1, h2, h3, h4, h5, h6 {
@@ -23,22 +23,42 @@
 /* Mesh gradient background for hero */
 .hero-mesh {
   background:
-    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(0, 71, 255, 0.15), transparent),
-    radial-gradient(ellipse 60% 40% at 80% 50%, rgba(0, 212, 170, 0.08), transparent),
-    radial-gradient(ellipse 50% 50% at 20% 80%, rgba(0, 71, 255, 0.06), transparent);
+    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(0, 71, 255, 0.08), transparent),
+    radial-gradient(ellipse 60% 40% at 80% 50%, rgba(0, 212, 170, 0.05), transparent),
+    radial-gradient(ellipse 50% 50% at 20% 80%, rgba(0, 71, 255, 0.04), transparent);
 }
 
 /* Grid pattern for hero background */
 .grid-pattern {
   background-image:
-    linear-gradient(rgba(33, 38, 45, 0.4) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(33, 38, 45, 0.4) 1px, transparent 1px);
+    linear-gradient(rgba(0, 0, 0, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.04) 1px, transparent 1px);
   background-size: 60px 60px;
 }
 
+/* Floating orb animations */
+@keyframes float {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-20px) scale(1.05); }
+}
+@keyframes float-delay {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(15px) scale(1.03); }
+}
+.animate-float { animation: float 8s ease-in-out infinite; }
+.animate-float-delay { animation: float-delay 10s ease-in-out 2s infinite; }
+
 /* Code syntax colors */
-.code-keyword { color: #c084fc; }
-.code-string { color: #00D4AA; }
-.code-function { color: #3d8bfd; }
-.code-comment { color: #4a5568; }
-.code-type { color: #fbbf24; }
+.code-keyword { color: #7c3aed; }
+.code-string { color: #059669; }
+.code-function { color: #2563eb; }
+.code-comment { color: #9ca3af; }
+.code-type { color: #d97706; }
+
+/* Light theme card shadows */
+.shadow-card {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+.shadow-card-hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08), 0 2px 4px rgba(0, 0, 0, 0.04);
+}

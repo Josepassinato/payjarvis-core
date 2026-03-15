@@ -1,0 +1,13 @@
+{
+  "name": "PayJarvis Shopping Agent",
+  "id": "payjarvis-bot-v1",
+  "version": "1.0",
+  "protocols": ["visa-tap", "mc-agentpay", "web-bot-auth", "mcp"],
+  "public_key_url": "https://payjarvis.com/api/agent/public-key",
+  "bot_policy_url": "https://payjarvis.com/bot-policy.json",
+  "agentic_commerce": {
+    "spending_limits": true,
+    "kyc_verified": true,
+    "audit_trail": true
+  }
+}

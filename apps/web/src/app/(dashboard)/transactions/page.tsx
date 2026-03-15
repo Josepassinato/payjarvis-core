@@ -55,14 +55,14 @@ export default function TransactionsPage() {
     <div>
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 md:mb-8">
         <div>
-          <h2 className="text-xl md:text-2xl font-bold text-white">{t("transactions.title")}</h2>
+          <h2 className="text-xl md:text-2xl font-bold text-gray-900">{t("transactions.title")}</h2>
           <p className="text-sm text-gray-500 mt-1">
             {t("transactions.count", { count: totalItems })}
           </p>
         </div>
         <button
           onClick={handleExport}
-          className="px-4 py-2.5 bg-surface-card border border-surface-border text-sm text-gray-300 rounded-lg hover:bg-surface-hover transition-colors self-start sm:self-auto"
+          className="px-4 py-2.5 bg-white border border-gray-200 text-sm text-gray-300 rounded-lg hover:bg-gray-100 transition-colors self-start sm:self-auto"
         >
           {t("transactions.exportPdf")}
         </button>
@@ -73,7 +73,7 @@ export default function TransactionsPage() {
         <select
           value={botFilter}
           onChange={(e) => { setBotFilter(e.target.value); setPage(1); }}
-          className="bg-surface-card border border-surface-border rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500"
+          className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-brand-500"
         >
           <option value="">{t("transactions.allBots")}</option>
           {(bots.data ?? []).map((b) => (
@@ -83,7 +83,7 @@ export default function TransactionsPage() {
         <select
           value={decisionFilter}
           onChange={(e) => { setDecisionFilter(e.target.value); setPage(1); }}
-          className="bg-surface-card border border-surface-border rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500"
+          className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-brand-500"
         >
           {decisionOptions.map((opt) => (
             <option key={opt} value={opt}>{decisionLabels[opt]}</option>
@@ -94,19 +94,19 @@ export default function TransactionsPage() {
           value={categoryFilter}
           onChange={(e) => { setCategoryFilter(e.target.value); setPage(1); }}
           placeholder={t("transactions.category")}
-          className="bg-surface-card border border-surface-border rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-brand-500 col-span-2 md:col-span-1 md:w-44"
+          className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-brand-500 col-span-2 md:col-span-1 md:w-44"
         />
         <input
           type="date"
           value={dateFrom}
           onChange={(e) => { setDateFrom(e.target.value); setPage(1); }}
-          className="bg-surface-card border border-surface-border rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500"
+          className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-brand-500"
         />
         <input
           type="date"
           value={dateTo}
           onChange={(e) => { setDateTo(e.target.value); setPage(1); }}
-          className="bg-surface-card border border-surface-border rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500"
+          className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-brand-500"
         />
       </div>
 
@@ -115,10 +115,10 @@ export default function TransactionsPage() {
       {!txs.error && (
         <>
           {/* Desktop table */}
-          <div className="hidden md:block bg-surface-card border border-surface-border rounded-xl overflow-hidden">
+          <div className="hidden md:block bg-white border border-gray-200 rounded-xl overflow-hidden">
             <table className="w-full">
               <thead>
-                <tr className="border-b border-surface-border">
+                <tr className="border-b border-gray-200">
                   <th className="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">{t("transactions.date")}</th>
                   <th className="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">{t("transactions.bot")}</th>
                   <th className="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">{t("transactions.merchant")}</th>
@@ -127,17 +127,17 @@ export default function TransactionsPage() {
                   <th className="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">{t("transactions.decision")}</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-surface-border">
+              <tbody className="divide-y divide-gray-200">
                 {transactions.map((tx) => {
                   const botName = (bots.data ?? []).find((b) => b.id === tx.botId)?.name ?? tx.botId.slice(0, 8);
                   return (
-                    <tr key={tx.id} className="hover:bg-surface-hover transition-colors">
+                    <tr key={tx.id} className="hover:bg-gray-100 transition-colors">
                       <td className="px-5 py-3.5 text-sm text-gray-400">{shortDate(tx.createdAt)}</td>
-                      <td className="px-5 py-3.5 text-sm text-white">{botName}</td>
+                      <td className="px-5 py-3.5 text-sm text-gray-900">{botName}</td>
                       <td className="px-5 py-3.5 text-sm text-gray-300">{tx.merchantName}</td>
-                      <td className="px-5 py-3.5 text-sm font-mono text-right text-white">{currency(tx.amount, tx.currency)}</td>
+                      <td className="px-5 py-3.5 text-sm font-mono text-right text-gray-900">{currency(tx.amount, tx.currency)}</td>
                       <td className="px-5 py-3.5">
-                        <span className="px-2 py-0.5 bg-surface-hover rounded text-xs text-gray-400">{tx.category}</span>
+                        <span className="px-2 py-0.5 bg-gray-100 rounded text-xs text-gray-400">{tx.category}</span>
                       </td>
                       <td className="px-5 py-3.5"><DecisionBadge decision={tx.decision} /></td>
                     </tr>
@@ -153,24 +153,24 @@ export default function TransactionsPage() {
           {/* Mobile cards */}
           <div className="md:hidden space-y-3">
             {transactions.length === 0 ? (
-              <div className="bg-surface-card border border-surface-border rounded-xl p-8 text-center text-gray-500 text-sm">
+              <div className="bg-white border border-gray-200 rounded-xl p-8 text-center text-gray-500 text-sm">
                 {t("transactions.noTx")}
               </div>
             ) : (
               transactions.map((tx) => {
                 const botName = (bots.data ?? []).find((b) => b.id === tx.botId)?.name ?? tx.botId.slice(0, 8);
                 return (
-                  <div key={tx.id} className="bg-surface-card border border-surface-border rounded-xl p-4">
+                  <div key={tx.id} className="bg-white border border-gray-200 rounded-xl p-4">
                     <div className="flex items-start justify-between mb-2">
                       <div>
-                        <p className="text-sm font-medium text-white">{tx.merchantName}</p>
+                        <p className="text-sm font-medium text-gray-900">{tx.merchantName}</p>
                         <p className="text-xs text-gray-500 mt-0.5">{botName} &middot; {tx.category}</p>
                       </div>
                       <DecisionBadge decision={tx.decision} />
                     </div>
                     <div className="flex items-center justify-between mt-3">
                       <span className="text-xs text-gray-500">{shortDate(tx.createdAt)}</span>
-                      <span className="text-sm font-mono font-semibold text-white">{currency(tx.amount, tx.currency)}</span>
+                      <span className="text-sm font-mono font-semibold text-gray-900">{currency(tx.amount, tx.currency)}</span>
                     </div>
                   </div>
                 );
@@ -190,14 +190,14 @@ export default function TransactionsPage() {
             <button
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={page <= 1}
-              className="px-3 py-1.5 text-xs bg-surface-card border border-surface-border rounded-lg text-gray-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              className="px-3 py-1.5 text-xs bg-white border border-gray-200 rounded-lg text-gray-400 hover:text-gray-900 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
             >
               {t("common.previous")}
             </button>
             <button
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
               disabled={page >= totalPages}
-              className="px-3 py-1.5 text-xs bg-surface-card border border-surface-border rounded-lg text-gray-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              className="px-3 py-1.5 text-xs bg-white border border-gray-200 rounded-lg text-gray-400 hover:text-gray-900 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
             >
               {t("common.next")}
             </button>

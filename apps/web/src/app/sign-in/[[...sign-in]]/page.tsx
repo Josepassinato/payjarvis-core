@@ -2,7 +2,7 @@ import { SignIn } from "@clerk/nextjs";
 
 export default function SignInPage() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-surface px-4">
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
       <div className="hero-mesh fixed inset-0 pointer-events-none" />
       <div className="grid-pattern fixed inset-0 pointer-events-none opacity-30" />
       <div className="relative animate-fade-in">
@@ -14,18 +14,18 @@ export default function SignInPage() {
           appearance={{
             elements: {
               rootBox: "mx-auto",
-              card: "bg-surface-card border border-surface-border shadow-xl",
-              headerTitle: "text-white font-display",
+              card: "bg-white border border-gray-200 shadow-xl",
+              headerTitle: "text-gray-900 font-display",
               headerSubtitle: "text-gray-400",
-              socialButtonsBlockButton: "bg-surface border border-surface-border hover:bg-surface-hover text-white",
-              socialButtonsBlockButtonText: "text-white font-medium",
-              formFieldLabel: "text-gray-300",
-              formFieldInput: "bg-surface border-surface-border text-white placeholder-gray-500",
+              socialButtonsBlockButton: "bg-gray-50 border border-gray-200 hover:bg-gray-100 text-gray-900",
+              socialButtonsBlockButtonText: "text-gray-900 font-medium",
+              formFieldLabel: "text-gray-700",
+              formFieldInput: "bg-gray-50 border-gray-200 text-gray-900 placeholder-gray-500",
               footerActionLink: "text-brand-400 hover:text-brand-500",
               formButtonPrimary: "bg-brand-600 hover:bg-brand-500 shadow-lg shadow-brand-600/20",
-              dividerLine: "bg-surface-border",
+              dividerLine: "bg-gray-200",
               dividerText: "text-gray-500",
-              identityPreviewText: "text-white",
+              identityPreviewText: "text-gray-900",
               identityPreviewEditButton: "text-brand-400",
               formFieldAction: "text-brand-400",
               alert: "bg-red-500/10 border-red-500/30 text-red-400",

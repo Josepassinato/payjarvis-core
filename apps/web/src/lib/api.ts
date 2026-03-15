@@ -87,6 +87,10 @@ export interface Bot {
   totalBlocked: number;
   createdAt: string;
   updatedAt: string;
+  systemPrompt: string | null;
+  botDisplayName: string | null;
+  capabilities: string[];
+  language: string;
   policy: Policy | null;
 }
 
@@ -131,7 +135,7 @@ export function createBot(name: string, platform: string, token?: string | null)
   });
 }
 
-export function updateBot(id: string, data: Partial<Pick<Bot, "name" | "platform">>, token?: string | null): Promise<Bot> {
+export function updateBot(id: string, data: Partial<Pick<Bot, "name" | "platform" | "systemPrompt" | "botDisplayName" | "capabilities" | "language">>, token?: string | null): Promise<Bot> {
   return request<Bot>(`/bots/${id}`, {
     token,
     method: "PATCH",
@@ -144,6 +148,13 @@ export function updateBotStatus(id: string, status: string, token?: string | nul
     token,
     method: "PATCH",
     body: JSON.stringify({ status }),
+  });
+}
+
+export function deleteBot(id: string, token?: string | null): Promise<void> {
+  return request<void>(`/bots/${id}`, {
+    token,
+    method: "DELETE",
   });
 }
 
@@ -358,6 +369,25 @@ export function ocrDocument(image: string, mimeType: string, token?: string | nu
   });
 }
 
+// ── JARVIS Activation (deep link) ──
+
+export function generateActivationLink(
+  data: { approvalThreshold: number },
+  token?: string | null
+): Promise<{ url: string; code: string; expiresAt: string }> {
+  return request("/onboarding/generate-link", {
+    token,
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export function getActivationStatus(
+  token?: string | null
+): Promise<{ connected: boolean; activated: boolean }> {
+  return request("/onboarding/activation-status", { token });
+}
+
 // ── Agent Reputation ──
 
 export interface AgentReputation {
@@ -417,7 +447,49 @@ export interface AvailableProvider {
 }
 
 export function getAvailableIntegrations(token?: string | null): Promise<AvailableProvider[]> {
-  return request<AvailableProvider[]>("/api/integrations/available", { token });
+  return request<AvailableProvider[]>("/integrations/available", { token });
+}
+
+// ── Telegram Bot Token ──
+
+export interface TelegramConnectResult {
+  username: string | null;
+  name: string;
+  botId: number;
+  webhookUrl: string;
+}
+
+export interface TelegramStatus {
+  connected: boolean;
+  username?: string | null;
+  name?: string | null;
+  connectedAt?: string | null;
+}
+
+export function connectTelegramBot(
+  botId: string,
+  telegramBotToken: string,
+  token?: string | null
+): Promise<TelegramConnectResult> {
+  return request<TelegramConnectResult>(`/bots/${botId}/telegram/connect`, {
+    token,
+    method: "POST",
+    body: JSON.stringify({ telegramBotToken }),
+  });
+}
+
+export function getTelegramBotStatus(
+  botId: string,
+  token?: string | null
+): Promise<TelegramStatus> {
+  return request<TelegramStatus>(`/bots/${botId}/telegram/status`, { token });
+}
+
+export function disconnectTelegramBot(
+  botId: string,
+  token?: string | null
+): Promise<void> {
+  return request(`/bots/${botId}/telegram/disconnect`, { token, method: "POST", body: JSON.stringify({}) });
 }
 
 export function toggleBotIntegration(
