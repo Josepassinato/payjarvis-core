@@ -141,7 +141,7 @@ export async function botShareRoutes(app: FastifyInstance) {
       }
 
       const { botId } = request.params as { botId: string };
-      const { telegramId } = request.query as { telegramId?: string };
+      const { telegramId, platform } = request.query as { telegramId?: string; platform?: string };
 
       if (!telegramId) {
         return reply.status(400).send({ success: false, error: "telegramId query param required" });
@@ -168,19 +168,28 @@ export async function botShareRoutes(app: FastifyInstance) {
         });
 
         let code: string;
-        let joinUrl: string;
 
         if (existing && (!existing.expiresAt || existing.expiresAt > new Date())) {
           code = existing.code;
-          joinUrl = `${BASE_URL}/join/${code}`;
         } else {
-          // Generate new share link using user's clerkId (what generateShareLink expects)
           const shareLink = await generateShareLink(botId, user.clerkId);
           code = shareLink.code;
-          joinUrl = `${BASE_URL}/join/${code}`;
         }
 
-        const qrCodeBase64 = await QRCode.toDataURL(joinUrl, {
+        // Build platform-specific deep-links + web fallback
+        const webUrl = `${BASE_URL}/join/${code}`;
+        const botUsername = process.env.TELEGRAM_BOT_USERNAME ?? "Jarvis12Brain_bot";
+        const telegramUrl = `https://t.me/${botUsername}?start=${code}`;
+        const whatsappText = encodeURIComponent(
+          `Experimenta o Jarvis, meu assistente pessoal! ${webUrl}`
+        );
+        const whatsappUrl = `https://wa.me/?text=${whatsappText}`;
+
+        const targetPlatform = (platform ?? "telegram").toLowerCase();
+        const shareUrl = targetPlatform === "whatsapp" ? whatsappUrl : telegramUrl;
+
+        // QR encodes the platform-specific URL
+        const qrCodeBase64 = await QRCode.toDataURL(shareUrl, {
           width: 512,
           margin: 2,
           color: { dark: "#000000", light: "#FFFFFF" },
@@ -188,7 +197,15 @@ export async function botShareRoutes(app: FastifyInstance) {
 
         return {
           success: true,
-          data: { code, url: joinUrl, qrCodeBase64 },
+          data: {
+            code,
+            url: shareUrl,
+            webUrl,
+            telegramUrl,
+            whatsappUrl,
+            qrCodeBase64,
+            platform: targetPlatform,
+          },
         };
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to generate share link";
