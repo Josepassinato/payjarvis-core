@@ -148,16 +148,21 @@ export async function botShareRoutes(app: FastifyInstance) {
       }
 
       try {
-        // Find user by telegram ID
-        const user = await (await import("@payjarvis/database")).prisma.user.findFirst({
-          where: { telegramChatId: telegramId },
+        const { prisma } = await import("@payjarvis/database");
+
+        // Find the bot first, then get its owner
+        const bot = await prisma.bot.findUnique({
+          where: { id: botId },
+          include: { owner: true },
         });
-        if (!user) {
-          return reply.status(404).send({ success: false, error: "User not found for this telegramId" });
+        if (!bot) {
+          return reply.status(404).send({ success: false, error: "Bot not found" });
         }
 
+        const user = bot.owner;
+
         // Check for existing active share link for this bot+user
-        const existing = await (await import("@payjarvis/database")).prisma.botShareLink.findFirst({
+        const existing = await prisma.botShareLink.findFirst({
           where: { botId, createdByUserId: user.id, active: true },
           orderBy: { createdAt: "desc" },
         });
