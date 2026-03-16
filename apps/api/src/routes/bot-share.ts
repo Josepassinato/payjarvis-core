@@ -186,20 +186,22 @@ export async function botShareRoutes(app: FastifyInstance) {
         const whatsappUrl = `https://wa.me/?text=${whatsappText}`;
 
         const targetPlatform = (platform ?? "telegram").toLowerCase();
-        const shareUrl = targetPlatform === "whatsapp" ? whatsappUrl : telegramUrl;
 
-        // QR encodes the platform-specific URL
-        const qrCodeBase64 = await QRCode.toDataURL(shareUrl, {
+        // QR always encodes the web join page — for in-person scanning
+        const qrCodeBase64 = await QRCode.toDataURL(webUrl, {
           width: 512,
           margin: 2,
           color: { dark: "#000000", light: "#FFFFFF" },
         });
 
+        // shareLink is the one the user forwards via messaging app
+        const shareLink = targetPlatform === "whatsapp" ? whatsappUrl : telegramUrl;
+
         return {
           success: true,
           data: {
             code,
-            url: shareUrl,
+            url: shareLink,
             webUrl,
             telegramUrl,
             whatsappUrl,
