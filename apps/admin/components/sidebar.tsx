@@ -10,6 +10,9 @@ const navItems = [
   { label: "Users", icon: "👥", href: "/users" },
   { label: "Broadcast", icon: "📢", href: "/broadcast" },
   { label: "Revenue", icon: "💰", href: "/revenue" },
+  { label: "Finance", icon: "📈", href: "/finance" },
+  { label: "System Health", icon: "🛡️", href: "/system" },
+  { label: "Security", icon: "🔒", href: "/security" },
 ];
 
 export default function Sidebar() {

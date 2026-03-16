@@ -899,3 +899,137 @@ model OpenclawReminder {
   @@index([userId])
   @@map("openclaw_reminders")
 }
+
+// ─── CFO Agent ───
+
+model CfoSnapshot {
+  id                     String   @id @default(cuid())
+  date                   DateTime @unique
+  revenuePacksUsd        Float    @default(0)
+  revenueSubscriptionsUsd Float   @default(0)
+  revenueTotalUsd        Float    @default(0)
+  costLlmUsd             Float    @default(0)
+  costVpsUsd             Float    @default(0)
+  costStripeUsd          Float    @default(0)
+  costTwilioUsd          Float    @default(0)
+  costBrowserbaseUsd     Float    @default(0)
+  costTotalUsd           Float    @default(0)
+  marginUsd              Float    @default(0)
+  marginPercent          Float    @default(0)
+  mrr                    Float    @default(0)
+  arr                    Float    @default(0)
+  activeUsers            Int      @default(0)
+  newUsers               Int      @default(0)
+  churnedUsers           Int      @default(0)
+  messagesProcessed      Int      @default(0)
+  packsSold              Int      @default(0)
+  subscriptionsSold      Int      @default(0)
+  avgRevenuePerUser      Float    @default(0)
+  avgCostPerUser         Float    @default(0)
+  ltv                    Float    @default(0)
+  cac                    Float    @default(0)
+  viralCoefficient       Float    @default(0)
+  freeTrialUsers         Int      @default(0)
+  freeTrialConversions   Int      @default(0)
+  conversionRate         Float    @default(0)
+  projectedMrrNextMonth  Float    @default(0)
+  daysUntilVpsUpgrade    Int?
+  createdAt              DateTime @default(now())
+
+  @@index([date])
+  @@map("cfo_snapshots")
+}
+
+model CfoAlert {
+  id          String   @id @default(cuid())
+  type        String
+  severity    String
+  title       String
+  description String
+  value       Float?
+  threshold   Float?
+  userId      String?
+  status      String   @default("open")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([type])
+  @@index([status])
+  @@index([severity])
+  @@map("cfo_alerts")
+}
+
+model CostEntry {
+  id          String   @id @default(cuid())
+  category    String
+  description String
+  amountUsd   Float
+  userId      String?
+  reference   String?
+  date        DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  @@index([category])
+  @@index([date])
+  @@index([userId])
+  @@map("cost_entries")
+}
+
+// ─── Sentinel — DevOps Agent ───
+
+model SentinelLog {
+  id        String   @id @default(cuid())
+  type      String   // service_check | infra_check | fraud_check | action_taken
+  service   String?
+  status    String   // ok | warning | error | fixed
+  message   String
+  details   Json?
+  createdAt DateTime @default(now())
+
+  @@index([type])
+  @@index([status])
+  @@index([createdAt])
+  @@map("sentinel_logs")
+}
+
+model SentinelIncident {
+  id          String    @id @default(cuid())
+  title       String
+  description String
+  severity    String    // low | medium | high | critical
+  status      String    @default("open") // open | investigating | resolved | ignored
+  service     String?
+  userId      String?
+  autoFixed   Boolean   @default(false)
+  fixDetails  String?
+  resolvedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([status])
+  @@index([severity])
+  @@index([createdAt])
+  @@map("sentinel_incidents")
+}
+
+model FraudAlert {
+  id            String    @id @default(cuid())
+  userId        String
+  type          String    // anomaly | fraud | inconsistency | chargeback
+  severity      String    // yellow | orange | red
+  description   String
+  expectedValue Float?
+  actualValue   Float?
+  deviation     Float?
+  status        String    @default("open") // open | investigating | blocked | resolved | false_positive
+  autoBlocked   Boolean   @default(false)
+  resolvedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([severity])
+  @@index([createdAt])
+  @@map("fraud_alerts")
+}

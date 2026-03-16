@@ -19,6 +19,9 @@ import {
 } from "../services/subscription.service.js";
 import Stripe from "stripe";
 
+const STRIPE_FEE_PERCENT = 0.029;
+const STRIPE_FEE_FIXED = 0.30;
+
 export async function stripeWebhookRoutes(app: FastifyInstance) {
   // Encapsulated plugin with raw body parser for Stripe signature verification
   app.register(async function stripeWebhookPlugin(fastify) {
@@ -121,7 +124,22 @@ export async function stripeWebhookRoutes(app: FastifyInstance) {
         }
 
         case "invoice.paid": {
-          await handleInvoicePaid(event.data.object as Stripe.Invoice);
+          const invoice = event.data.object as Stripe.Invoice;
+          await handleInvoicePaid(invoice);
+          // Record Stripe fee as CostEntry
+          const amountPaid = (invoice.amount_paid ?? 0) / 100;
+          if (amountPaid > 0) {
+            const stripeFee = amountPaid * STRIPE_FEE_PERCENT + STRIPE_FEE_FIXED;
+            await prisma.costEntry.create({
+              data: {
+                category: "stripe",
+                description: `Stripe fee on invoice ${invoice.id} — $${amountPaid.toFixed(2)}`,
+                amountUsd: parseFloat(stripeFee.toFixed(4)),
+                userId: undefined,
+                reference: invoice.id ?? undefined,
+              },
+            }).catch((e: unknown) => console.error("[Stripe Webhook] CostEntry error:", e));
+          }
           break;
         }
 

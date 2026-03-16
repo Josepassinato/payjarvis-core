@@ -129,15 +129,25 @@ export async function consumeMessage(
 
   if (user?.planType === "premium" && user.subscriptionStatus === "active") {
     const totalTokens = inputTokens + outputTokens;
-    await prisma.llmUsageLog.create({
+    const costReal = totalTokens * COST_PER_MSG_REAL / 1000;
+    const usageLog = await prisma.llmUsageLog.create({
       data: {
         userId, platform, model: "gemini-2.5-flash",
         inputTokens, outputTokens, totalTokens,
-        costReal: totalTokens * COST_PER_MSG_REAL / 1000,
+        costReal,
         costCharged: 0,
         messagesCharged: 0,
       },
     });
+    await prisma.costEntry.create({
+      data: {
+        category: "llm",
+        description: `gemini-2.5-flash — ${totalTokens} tokens`,
+        amountUsd: costReal,
+        userId,
+        reference: usageLog.id,
+      },
+    }).catch((e: unknown) => console.error("[Credit] CostEntry error:", e));
     return { allowed: true, remaining: -1, alert: null };
   }
 
@@ -153,15 +163,25 @@ export async function consumeMessage(
   if (credit.freeTrialActive && credit.freeTrialEndsAt && credit.freeTrialEndsAt > new Date()) {
     // Log usage but don't deduct
     const totalTokens = inputTokens + outputTokens;
-    await prisma.llmUsageLog.create({
+    const costReal = totalTokens * COST_PER_MSG_REAL / 1000;
+    const usageLog = await prisma.llmUsageLog.create({
       data: {
         userId, platform, model: "gemini-2.5-flash",
         inputTokens, outputTokens, totalTokens,
-        costReal: totalTokens * COST_PER_MSG_REAL / 1000,
+        costReal,
         costCharged: 0,
         messagesCharged: 0,
       },
     });
+    await prisma.costEntry.create({
+      data: {
+        category: "llm",
+        description: `gemini-2.5-flash — ${totalTokens} tokens`,
+        amountUsd: costReal,
+        userId,
+        reference: usageLog.id,
+      },
+    }).catch((e: unknown) => console.error("[Credit] CostEntry error:", e));
     // Update usage counter for stats (but don't deduct remaining)
     await prisma.llmCredit.update({
       where: { userId },
@@ -189,15 +209,25 @@ export async function consumeMessage(
 
   // Consume 1 message
   const totalTokens = inputTokens + outputTokens;
-  await prisma.llmUsageLog.create({
+  const costReal = totalTokens * COST_PER_MSG_REAL / 1000;
+  const usageLog = await prisma.llmUsageLog.create({
     data: {
       userId, platform, model: "gemini-2.5-flash",
       inputTokens, outputTokens, totalTokens,
-      costReal: totalTokens * COST_PER_MSG_REAL / 1000,
+      costReal,
       costCharged: COST_PER_MSG_CHARGED,
       messagesCharged: 1,
     },
   });
+  await prisma.costEntry.create({
+    data: {
+      category: "llm",
+      description: `gemini-2.5-flash — ${totalTokens} tokens`,
+      amountUsd: costReal,
+      userId,
+      reference: usageLog.id,
+    },
+  }).catch((e: unknown) => console.error("[Credit] CostEntry error:", e));
 
   const updated = await prisma.llmCredit.update({
     where: { userId },

@@ -44,6 +44,8 @@ import { adminOverviewRoutes } from "./routes/admin/admin-overview.js";
 import { adminUsersRoutes } from "./routes/admin/admin-users.js";
 import { adminBroadcastRoutes } from "./routes/admin/admin-broadcast.js";
 import { adminRevenueRoutes } from "./routes/admin/admin-revenue.js";
+import { adminSentinelRoutes } from "./routes/admin/admin-sentinel.js";
+import { adminCfoRoutes } from "./routes/admin/admin-cfo.js";
 import { mastercardRoutes } from "./routes/mastercard.routes.js";
 
 // Cron jobs
@@ -139,6 +141,8 @@ await app.register(adminOverviewRoutes);
 await app.register(adminUsersRoutes);
 await app.register(adminBroadcastRoutes);
 await app.register(adminRevenueRoutes);
+await app.register(adminSentinelRoutes);
+await app.register(adminCfoRoutes);
 
 // Static files — banners, public assets
 const publicDir = join(process.cwd(), "public");
