@@ -180,10 +180,7 @@ export async function botShareRoutes(app: FastifyInstance) {
         const webUrl = `${BASE_URL}/join/${code}`;
         const botUsername = process.env.TELEGRAM_BOT_USERNAME ?? "Jarvis12Brain_bot";
         const telegramUrl = `https://t.me/${botUsername}?start=${code}`;
-        const whatsappText = encodeURIComponent(
-          `Experimenta o Jarvis, meu assistente pessoal! ${webUrl}`
-        );
-        const whatsappUrl = `https://wa.me/?text=${whatsappText}`;
+        const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(`Experimenta o Jarvis, meu assistente pessoal! ${webUrl}`)}`;
 
         const targetPlatform = (platform ?? "telegram").toLowerCase();
 
