@@ -44,6 +44,7 @@ import { adminOverviewRoutes } from "./routes/admin/admin-overview.js";
 import { adminUsersRoutes } from "./routes/admin/admin-users.js";
 import { adminBroadcastRoutes } from "./routes/admin/admin-broadcast.js";
 import { adminRevenueRoutes } from "./routes/admin/admin-revenue.js";
+import { mastercardRoutes } from "./routes/mastercard.routes.js";
 
 // Cron jobs
 import "./jobs/sequence-cron.js";
@@ -128,6 +129,9 @@ await app.register(sequenceRoutes);
 
 // Subscription — Jarvis Premium $20/month
 await app.register(subscriptionRoutes);
+
+// Mastercard — Buyer Payment Agent + MDES Token Requestor
+await app.register(mastercardRoutes);
 
 // Admin Dashboard — separate auth, overview, users, broadcast, revenue
 await app.register(adminAuthRoutes);
