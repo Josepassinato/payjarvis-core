@@ -39,6 +39,11 @@ import { creditRoutes } from "./routes/credits.js";
 import { sequenceRoutes } from "./routes/sequence.js";
 import { subscriptionRoutes } from "./routes/subscription.js";
 import { startTimeoutChecker } from "./core/approval-manager.js";
+import { adminAuthRoutes } from "./routes/admin/admin-auth.js";
+import { adminOverviewRoutes } from "./routes/admin/admin-overview.js";
+import { adminUsersRoutes } from "./routes/admin/admin-users.js";
+import { adminBroadcastRoutes } from "./routes/admin/admin-broadcast.js";
+import { adminRevenueRoutes } from "./routes/admin/admin-revenue.js";
 
 // Cron jobs
 import "./jobs/sequence-cron.js";
@@ -123,6 +128,13 @@ await app.register(sequenceRoutes);
 
 // Subscription — Jarvis Premium $20/month
 await app.register(subscriptionRoutes);
+
+// Admin Dashboard — separate auth, overview, users, broadcast, revenue
+await app.register(adminAuthRoutes);
+await app.register(adminOverviewRoutes);
+await app.register(adminUsersRoutes);
+await app.register(adminBroadcastRoutes);
+await app.register(adminRevenueRoutes);
 
 // Static files — banners, public assets
 const publicDir = join(process.cwd(), "public");

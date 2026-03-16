@@ -786,3 +786,116 @@ model BotClone {
   @@index([referredByUserId])
   @@map("bot_clones")
 }
+
+// ─── Admin Dashboard ───
+
+model AdminUser {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  name         String
+  role         String    @default("admin")
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  sessions AdminSession[]
+
+  @@map("admin_users")
+}
+
+model AdminSession {
+  id        String   @id @default(cuid())
+  adminId   String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  admin AdminUser @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@map("admin_sessions")
+}
+
+model Broadcast {
+  id              String    @id @default(cuid())
+  title           String
+  message         String
+  imageUrl        String?
+  audience        String    @default("all")
+  status          String    @default("draft")
+  scheduledAt     DateTime?
+  sentAt          DateTime?
+  totalRecipients Int       @default(0)
+  delivered       Int       @default(0)
+  failed          Int       @default(0)
+  replied         Int       @default(0)
+  createdBy       String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  logs BroadcastLog[]
+
+  @@index([status])
+  @@index([scheduledAt])
+  @@map("broadcasts")
+}
+
+model BroadcastLog {
+  id          String   @id @default(cuid())
+  broadcastId String
+  userId      String
+  platform    String
+  chatId      String
+  status      String
+  sentAt      DateTime @default(now())
+
+  broadcast Broadcast @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+
+  @@index([broadcastId])
+  @@index([userId])
+  @@map("broadcast_logs")
+}
+
+// ─── OpenClaw (tabelas gerenciadas fora do Prisma — NÃO REMOVER) ───
+
+model OpenclawConversation {
+  id        Int      @id @default(autoincrement())
+  userId    String   @map("user_id")
+  role      String
+  content   String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("openclaw_conversations")
+}
+
+model OpenclawUserFact {
+  id        Int      @id @default(autoincrement())
+  userId    String   @map("user_id")
+  factKey   String   @map("fact_key")
+  factValue String   @map("fact_value")
+  category  String?  @default("general")
+  source    String?  @default("conversation")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @map("updated_at")
+
+  @@unique([userId, factKey])
+  @@index([userId])
+  @@map("openclaw_user_facts")
+}
+
+model OpenclawReminder {
+  id           Int      @id @default(autoincrement())
+  userId       String   @map("user_id")
+  reminderText String   @map("reminder_text")
+  remindAt     DateTime @map("remind_at")
+  category     String?  @default("general")
+  recurring    String?
+  completed    Boolean  @default(false)
+  sent         Boolean  @default(false)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("openclaw_reminders")
+}
