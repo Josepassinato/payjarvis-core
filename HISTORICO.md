@@ -1,5 +1,33 @@
 # HISTORICO.md — PayJarvis
 
+## 2026-03-16 — Fix onboarding: step 'name' antes do email
+
+### Bug
+Bot (OpenClaw) perguntava "Qual é o seu nome?" mas API criava sessão com step="email". Quando usuário digitava o nome, API rejeitava como email inválido.
+
+### O que foi feito
+1. Schema Prisma: +`fullName String?` em `OnboardingSession`
+2. Migration: `20260316100000_add_onboarding_fullname`
+3. State machine: `name → email → email_confirm → limits → payment → complete`
+4. Nova função `handleNameStep()` — valida nome (2-100 chars), salva `fullName`, avança para email
+5. `startOnboarding()` agora cria sessão com `step: "name"` e greeting pergunta nome
+6. `createUserAndBot()` usa `session.fullName` como nome do User
+7. `notifyReferrer()` usa `fullName` ao invés de email
+8. `getStepMessage()` inclui case `"name"` para sessões resumidas
+
+### Testes realizados
+- Start → step="name", greeting "Qual é o seu nome?" OK
+- Nome "Arilson" → "Prazer, Arilson! Qual é o seu email?" OK
+- Nome "Maria" → email "maria@gmail.com" → código enviado OK
+- Nome curto "A" → rejeita com "Nome muito curto" OK
+- Zero erros nos logs pós-deploy
+
+### Estado atual
+- payjarvis-api: ONLINE, onboarding corrigido
+- Fluxo: nome → email → código → limites → pagamento → completo
+
+---
+
 ## 2026-03-15 — Subscription $20/mês + Sistema Completo de Billing
 
 ### O que foi feito

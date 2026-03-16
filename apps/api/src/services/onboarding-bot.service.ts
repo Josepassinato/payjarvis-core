@@ -2,7 +2,7 @@
  * Onboarding Bot Service — Conversational onboarding via Telegram/WhatsApp
  *
  * Manages the state machine for zero-friction onboarding:
- * start → email → email_confirm → limits → payment → complete
+ * start → name → email → email_confirm → limits → payment → complete
  */
 
 import { prisma } from "@payjarvis/database";
@@ -74,14 +74,14 @@ export async function startOnboarding(
       telegramChatId: platform === "telegram" ? chatId : null,
       whatsappPhone: platform === "whatsapp" ? chatId : null,
       shareCode: shareCode ?? null,
-      step: "email",
+      step: "name",
       expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24h
     },
   });
 
   const greeting = sharedByName
-    ? `Oi! 👋 ${sharedByName} me compartilhou com você.\n\nSou o Jarvis, seu assistente de compras inteligente. Vou te configurar em menos de 2 minutos!\n\nPrimeiro, qual é o seu email?`
-    : `Oi! 👋 Sou o Jarvis, seu assistente de compras inteligente.\n\nVou te configurar em menos de 2 minutos!\n\nPrimeiro, qual é o seu email?`;
+    ? `Oi! 👋 ${sharedByName} me compartilhou com você.\n\nSou o Jarvis, seu assistente de compras inteligente. Vou te configurar em menos de 2 minutos!\n\nQual é o seu nome?`
+    : `Oi! 👋 Sou o Jarvis, seu assistente de compras inteligente.\n\nVou te configurar em menos de 2 minutos!\n\nQual é o seu nome?`;
 
   return { sessionId: session.id, message: greeting };
 }
@@ -108,6 +108,8 @@ export async function processStep(
   }
 
   switch (session.step) {
+    case "name":
+      return handleNameStep(session.id, userInput);
     case "email":
       return handleEmailStep(session.id, userInput);
     case "email_confirm":
@@ -119,6 +121,40 @@ export async function processStep(
     default:
       return { message: "Estado inesperado. Tente /start novamente.", step: session.step, complete: false };
   }
+}
+
+/**
+ * Step: name — collect user's name.
+ */
+async function handleNameStep(sessionId: string, input: string): Promise<BotResponse> {
+  const name = input.trim();
+
+  if (name.length < 2) {
+    return {
+      message: "Nome muito curto. Qual é o seu nome?",
+      step: "name",
+      complete: false,
+    };
+  }
+
+  if (name.length > 100) {
+    return {
+      message: "Nome muito longo. Qual é o seu nome?",
+      step: "name",
+      complete: false,
+    };
+  }
+
+  await prisma.onboardingSession.update({
+    where: { id: sessionId },
+    data: { fullName: name, step: "email" },
+  });
+
+  return {
+    message: `Prazer, ${name}! 😊\n\nQual é o seu email?`,
+    step: "email",
+    complete: false,
+  };
 }
 
 /**
@@ -325,7 +361,7 @@ export async function completeOnboarding(sessionId: string): Promise<BotResponse
 
   // Notify referrer
   if (session.shareCode) {
-    notifyReferrer(session.shareCode, session.email ?? "Alguém").catch(() => {});
+    notifyReferrer(session.shareCode, session.fullName ?? session.email ?? "Alguém").catch(() => {});
   }
 
   const paymentNote = session.paymentSetup
@@ -401,6 +437,7 @@ export async function hasActiveSession(chatId: string, platform: string): Promis
 async function createUserAndBot(session: {
   id: string;
   email: string | null;
+  fullName: string | null;
   shareCode: string | null;
   telegramChatId: string | null;
   whatsappPhone: string | null;
@@ -417,7 +454,7 @@ async function createUserAndBot(session: {
       data: {
         clerkId,
         email: session.email,
-        fullName: session.email.split("@")[0],
+        fullName: session.fullName || session.email.split("@")[0],
         kycLevel: "NONE",
         status: "PENDING_KYC",
         onboardingStep: 2,
@@ -540,6 +577,8 @@ async function createDefaultBot(userId: string): Promise<string> {
  */
 async function getStepMessage(step: string, session: { email?: string | null }): Promise<string> {
   switch (step) {
+    case "name":
+      return "Parece que você já começou o cadastro! Qual é o seu nome?";
     case "email":
       return "Parece que você já começou o cadastro! Qual é o seu email?";
     case "email_confirm":
@@ -549,7 +588,7 @@ async function getStepMessage(step: string, session: { email?: string | null }):
     case "payment":
       return "Falta só adicionar seu cartão. Clica no link que enviei ou digita \"pular\" para fazer depois.";
     default:
-      return "Qual é o seu email para começarmos?";
+      return "Qual é o seu nome para começarmos?";
   }
 }
 

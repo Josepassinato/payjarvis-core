@@ -646,7 +646,8 @@ model OnboardingSession {
   telegramChatId     String?   @unique
   whatsappPhone      String?   @unique
   shareCode          String?
-  step               String    @default("start") // start | email | email_confirm | limits | payment | complete
+  step               String    @default("start") // start | name | email | email_confirm | limits | payment | complete
+  fullName           String?
   email              String?
   emailToken         String?
   userId             String?
