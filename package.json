@@ -31,6 +31,7 @@
     "bcryptjs": "^3.0.3",
     "composio-core": "^0.5.39",
     "jsonwebtoken": "^9.0.3",
-    "playwright-core": "^1.58.2"
+    "playwright-core": "^1.58.2",
+    "resend": "^6.9.4"
   }
 }

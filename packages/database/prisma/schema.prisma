@@ -148,6 +148,7 @@ model User {
   storeContexts      StoreContext[]
   shareLinks         BotShareLink[]
   botClones          BotClone[]        // bots que este user clonou
+  llmCredits         LlmCredit?        @relation("UserCredits")
 
   @@map("users")
 }
@@ -685,7 +686,8 @@ model LlmCredit {
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
-  @@index([userId])
+  user User @relation("UserCredits", fields: [userId], references: [id], onDelete: Cascade)
+
   @@index([freeTrialEndsAt])
   @@map("llm_credits")
 }

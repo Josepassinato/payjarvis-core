@@ -1,43 +1,32 @@
 /**
- * Email Service — SMTP via Zoho Mail
+ * Email Service — Resend API
  *
- * Sends transactional emails from jarvis@payjarvis.com (or fallback).
- * Uses nodemailer with Zoho SMTP (smtp.zoho.com:587 STARTTLS).
+ * Sends transactional emails from jarvis@payjarvis.com via Resend.
+ * Fallback: logs warning if RESEND_API_KEY not configured.
  */
 
-import nodemailer from "nodemailer";
-import type { Transporter } from "nodemailer";
+import { Resend } from "resend";
 
-// ─── Singleton Transport ─────────────────────────────
+// ─── Singleton Client ─────────────────────────────────
 
-let _transporter: Transporter | null = null;
+let _resend: Resend | null = null;
 
-function getTransporter(): Transporter {
-  if (!_transporter) {
-    const user = process.env.ZOHO_EMAIL;
-    const pass = process.env.ZOHO_PASSWORD;
-    const host = process.env.ZOHO_SMTP || "smtp.zoho.com";
-    const port = parseInt(process.env.ZOHO_PORT || "587", 10);
-
-    if (!user || !pass) {
-      throw new Error("ZOHO_EMAIL or ZOHO_PASSWORD not configured");
-    }
-
-    _transporter = nodemailer.createTransport({
-      host,
-      port,
-      secure: false, // STARTTLS
-      auth: { user, pass },
-    });
+function getResend(): Resend {
+  if (!_resend) {
+    const apiKey = process.env.RESEND_API_KEY;
+    if (!apiKey) throw new Error("RESEND_API_KEY not configured");
+    _resend = new Resend(apiKey);
   }
-  return _transporter;
+  return _resend;
 }
+
+const EMAIL_FROM = process.env.EMAIL_FROM || "PayJarvis <jarvis@payjarvis.com>";
 
 /**
  * Check if email service is configured.
  */
 export function isEmailConfigured(): boolean {
-  return !!(process.env.ZOHO_EMAIL && process.env.ZOHO_PASSWORD);
+  return !!process.env.RESEND_API_KEY;
 }
 
 // ─── Send Email ──────────────────────────────────────
@@ -52,16 +41,15 @@ export interface SendEmailOptions {
 
 export async function sendEmail(options: SendEmailOptions): Promise<{ success: boolean; messageId?: string; error?: string }> {
   if (!isEmailConfigured()) {
-    console.warn("[Email] Not configured — skipping send");
+    console.warn("[Email] RESEND_API_KEY not configured — skipping send");
     return { success: false, error: "Email not configured" };
   }
 
   try {
-    const transporter = getTransporter();
-    const from = `PayJarvis <${process.env.ZOHO_EMAIL}>`;
+    const resend = getResend();
 
-    const result = await transporter.sendMail({
-      from,
+    const { data, error } = await resend.emails.send({
+      from: EMAIL_FROM,
       to: options.to,
       subject: options.subject,
       html: options.html,
@@ -69,8 +57,13 @@ export async function sendEmail(options: SendEmailOptions): Promise<{ success: b
       replyTo: options.replyTo,
     });
 
-    console.log(`[Email] Sent to ${options.to}: ${result.messageId}`);
-    return { success: true, messageId: result.messageId };
+    if (error) {
+      console.error(`[Email] Resend error to ${options.to}:`, error.message);
+      return { success: false, error: error.message };
+    }
+
+    console.log(`[Email] Sent to ${options.to}: ${data?.id}`);
+    return { success: true, messageId: data?.id };
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown email error";
     console.error("[Email] Send failed:", msg);
