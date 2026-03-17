@@ -75,7 +75,7 @@ export async function startOnboarding(
       whatsappPhone: platform === "whatsapp" ? chatId : null,
       shareCode: shareCode ?? null,
       step: "name",
-      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24h
+      expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000), // 72h
     },
   });
 
@@ -192,7 +192,7 @@ async function handleEmailStep(sessionId: string, input: string): Promise<BotRes
 }
 
 /**
- * Step: email_confirm — verify 6-digit code.
+ * Step: email_confirm — verify 6-digit code (max 5 attempts).
  */
 async function handleEmailConfirmStep(sessionId: string, input: string): Promise<BotResponse> {
   const code = input.trim();
@@ -200,8 +200,39 @@ async function handleEmailConfirmStep(sessionId: string, input: string): Promise
   if (!session) return { message: "Sessão não encontrada.", step: "error", complete: false };
 
   if (code !== session.emailToken) {
+    const attempts = (session.emailAttempts ?? 0) + 1;
+    const MAX_ATTEMPTS = 5;
+
+    if (attempts >= MAX_ATTEMPTS) {
+      // Invalidate code and generate new one
+      const newCode = generateEmailCode();
+      await prisma.onboardingSession.update({
+        where: { id: sessionId },
+        data: { emailToken: newCode, emailAttempts: 0 },
+      });
+
+      // Re-send confirmation email
+      if (session.email) {
+        sendOnboardingConfirmation(session.email, newCode).catch((err: unknown) => {
+          console.error("[Onboarding] Failed to resend confirmation email:", err);
+        });
+      }
+
+      return {
+        message: "Muitas tentativas incorretas. Enviei um novo código para seu email.\n\nDigita o novo código de 6 dígitos:",
+        step: "email_confirm",
+        complete: false,
+      };
+    }
+
+    await prisma.onboardingSession.update({
+      where: { id: sessionId },
+      data: { emailAttempts: attempts },
+    });
+
+    const remaining = MAX_ATTEMPTS - attempts;
     return {
-      message: "Código incorreto. Verifica seu email e tenta de novo.\n\nDigita o código de 6 dígitos:",
+      message: `Código incorreto. ${remaining} tentativa${remaining === 1 ? "" : "s"} restante${remaining === 1 ? "" : "s"}.\n\nDigita o código de 6 dígitos:`,
       step: "email_confirm",
       complete: false,
     };
@@ -323,43 +354,91 @@ async function handlePaymentStep(sessionId: string, input: string): Promise<BotR
 }
 
 /**
+ * Retry an async operation with exponential backoff.
+ */
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  label: string,
+  maxRetries = 3,
+): Promise<T> {
+  const delays = [1000, 2000, 4000];
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (attempt === maxRetries) {
+        console.error(`[Onboarding] CRITICAL: ${label} failed after ${maxRetries + 1} attempts:`, (err as Error).message);
+        throw err;
+      }
+      const delay = delays[attempt] ?? 4000;
+      console.warn(`[Onboarding] ${label} attempt ${attempt + 1} failed, retrying in ${delay}ms...`);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  throw new Error("unreachable");
+}
+
+/**
  * Complete the onboarding session.
+ * Uses a transaction to ensure atomicity of session + user + credits.
  */
 export async function completeOnboarding(sessionId: string): Promise<BotResponse> {
   const session = await prisma.onboardingSession.findUnique({ where: { id: sessionId } });
   if (!session) return { message: "Sessão não encontrada.", step: "error", complete: false };
 
-  await prisma.onboardingSession.update({
-    where: { id: sessionId },
-    data: { step: "complete" },
-  });
-
-  // Mark user onboarding as completed
   if (session.userId) {
-    await prisma.user.update({
-      where: { id: session.userId },
-      data: { onboardingCompleted: true, onboardingStep: 5 },
+    // Transaction: mark complete + update user + init credits — all or nothing
+    await prisma.$transaction(async (tx) => {
+      await tx.onboardingSession.update({
+        where: { id: sessionId },
+        data: { step: "complete" },
+      });
+
+      await tx.user.update({
+        where: { id: session.userId! },
+        data: { onboardingCompleted: true, onboardingStep: 5 },
+      });
+
+      // Init credits inside transaction so it rolls back if anything fails
+      const existingCredit = await tx.llmCredit.findUnique({ where: { userId: session.userId! } });
+      if (!existingCredit) {
+        const hasReferral = !!session.shareCode;
+        await tx.llmCredit.create({
+          data: {
+            userId: session.userId!,
+            messagesTotal: 5000,
+            messagesUsed: 0,
+            messagesRemaining: 5000,
+            freeTrialActive: hasReferral,
+            freeTrialEndsAt: hasReferral ? new Date(Date.now() + 60 * 86400000) : null,
+          },
+        });
+        console.log(`[Credit] Initialized for ${session.userId}${hasReferral ? " (60-day trial)" : ""} [via transaction]`);
+      }
     });
-  }
 
-  // Initialize credits + onboarding sequence
-  if (session.userId) {
+    // Sequence init with retry (outside transaction — non-critical, can retry independently)
     const platform = session.telegramChatId ? "telegram" : "whatsapp";
     const chatId = session.telegramChatId ?? session.whatsappPhone ?? "";
     const referrerName = session.shareCode ? await getSharedByName(session.shareCode) : null;
 
-    initCredits(session.userId, session.shareCode ?? undefined).catch((err) => {
-      console.error("[Onboarding] initCredits error:", (err as Error).message);
-    });
-
     if (chatId) {
-      initSequence(session.userId, platform, chatId, referrerName ?? undefined).catch((err) => {
-        console.error("[Onboarding] initSequence error:", (err as Error).message);
+      withRetry(
+        () => initSequence(session.userId!, platform, chatId, referrerName ?? undefined),
+        `initSequence(${session.userId})`,
+      ).catch((err) => {
+        console.error(`[Onboarding] CRITICAL: initSequence permanently failed for ${session.userId}:`, (err as Error).message);
       });
     }
+  } else {
+    // No userId — just mark complete (shouldn't happen, but be safe)
+    await prisma.onboardingSession.update({
+      where: { id: sessionId },
+      data: { step: "complete" },
+    });
   }
 
-  // Notify referrer
+  // Notify referrer (non-critical, fire-and-forget)
   if (session.shareCode) {
     notifyReferrer(session.shareCode, session.fullName ?? session.email ?? "Alguém").catch(() => {});
   }
@@ -459,7 +538,8 @@ async function createUserAndBot(session: {
         status: "PENDING_KYC",
         onboardingStep: 2,
         telegramChatId: session.telegramChatId ?? undefined,
-        notificationChannel: session.telegramChatId ? "telegram" : "none",
+        phone: session.whatsappPhone?.replace("whatsapp:", "") ?? undefined,
+        notificationChannel: session.telegramChatId ? "telegram" : session.whatsappPhone ? "whatsapp" : "none",
       },
     });
   } else {

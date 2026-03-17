@@ -217,15 +217,15 @@ export async function coreRoutes(app: FastifyInstance) {
         transactionId?: string;
       };
 
-      // Ensure session exists
-      let session = await getSession(botId);
+      // Ensure session exists (keyed by botId + userId for multi-tenant isolation)
+      let session = await getSession(botId, userId);
       if (!session) {
         await createSession(botId, userId);
-        session = await getSession(botId);
+        session = await getSession(botId, userId);
       }
 
       // Update session intent
-      await updateSession(botId, { currentIntent: body.intent });
+      await updateSession(botId, { currentIntent: body.intent }, userId);
 
       // Execute through the action executor
       const result = await execute({

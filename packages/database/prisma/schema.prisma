@@ -112,7 +112,7 @@ model User {
   clerkId             String     @unique
   email               String     @unique
   fullName            String
-  phone               String?
+  phone               String?    @unique
   dateOfBirth         DateTime?
   documentNumber      String?
   country             String?
@@ -123,7 +123,7 @@ model User {
   status              UserStatus @default(PENDING_KYC)
   onboardingStep      Int        @default(0)
   termsAcceptedAt     DateTime?
-  telegramChatId      String?
+  telegramChatId      String?    @unique
   approvalThreshold   Float      @default(50.0)
   onboardingCompleted Boolean    @default(false)
   botActivatedAt      DateTime?
@@ -650,6 +650,7 @@ model OnboardingSession {
   fullName           String?
   email              String?
   emailToken         String?
+  emailAttempts      Int       @default(0)
   userId             String?
   botId              String?
   limitsSet          Boolean   @default(false)
@@ -660,7 +661,6 @@ model OnboardingSession {
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
-  @@index([telegramChatId])
   @@index([shareCode])
   @@index([userId])
   @@map("onboarding_sessions")

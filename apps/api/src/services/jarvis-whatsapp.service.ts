@@ -12,9 +12,13 @@
 
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 import { prisma } from "@payjarvis/database";
+import QRCode from "qrcode";
+import { writeFile } from "fs/promises";
+import { join } from "path";
 import {
   hasActiveSession,
   processStep,
+  startOnboarding,
 } from "./onboarding-bot.service.js";
 import { consumeMessage } from "./credit.service.js";
 import { markActive as markSequenceActive } from "./sequence.service.js";
@@ -193,6 +197,12 @@ TOOLS
 - search_transit, compare_transit, train_status, search_rental_cars
 - find_home_service, find_mechanic
 - request_payment, get_transactions, set_reminder, get_reminders, save_user_fact
+- share_jarvis — gera link de indicação + QR Code para o usuário convidar amigos
+
+COMPARTILHAMENTO
+Quando o usuário quiser compartilhar, indicar, convidar amigos, pedir QR code ou link:
+→ Use share_jarvis IMEDIATAMENTE. Ele gera o link e envia o QR Code automaticamente.
+→ Depois diga que o link e QR foram enviados. O amigo ganha 60 dias grátis.
 
 EXECUÇÃO
 1. Usuário pede → USA A TOOL IMEDIATAMENTE
@@ -352,6 +362,15 @@ const tools: any[] = [
             category: { type: SchemaType.STRING, description: "shopping, travel, food, personal, health, finance, general" },
           },
           required: ["key", "value", "category"],
+        },
+      },
+      {
+        name: "share_jarvis",
+        description: "Generate a referral link and QR Code so the user can invite friends to Jarvis. Use when user wants to share, invite, refer a friend, or asks for QR code/link. The friend gets 60 free days.",
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {},
+          required: [],
         },
       },
     ],
@@ -535,9 +554,134 @@ async function handleTool(userId: string, name: string, args: Record<string, unk
       }
     }
 
+    case "share_jarvis": {
+      try {
+        return await generateShareForWhatsApp(userId);
+      } catch (err) {
+        return { error: `Failed to generate share link: ${(err as Error).message}` };
+      }
+    }
+
     default:
       return { error: `Unknown tool: ${name}` };
   }
+}
+
+// ─── Share / Referral for WhatsApp ──────────────────────
+
+const WA_NUMBER = "17547145921";
+const PUBLIC_BASE = process.env.WEB_URL || "https://www.payjarvis.com";
+
+async function generateShareForWhatsApp(userId: string): Promise<Record<string, unknown>> {
+  const phone = userId.replace("whatsapp:", "");
+
+  // Try to find formal user account
+  const user = await prisma.user.findFirst({
+    where: { OR: [{ telegramChatId: userId }, { phone }, { phone: phone.replace("+", "") }] },
+    select: { id: true, clerkId: true, fullName: true },
+  });
+
+  let code: string;
+  let firstName = "você";
+
+  if (user) {
+    firstName = user.fullName?.split(" ")[0] || "você";
+
+    // Find user's bot for proper share link
+    const bot = await prisma.bot.findFirst({
+      where: { ownerId: user.id },
+      select: { id: true },
+    });
+
+    if (bot) {
+      const existing = await prisma.botShareLink.findFirst({
+        where: { botId: bot.id, createdByUserId: user.id, active: true },
+        orderBy: { createdAt: "desc" },
+      });
+
+      if (existing && (!existing.expiresAt || existing.expiresAt > new Date())) {
+        code = existing.code;
+      } else {
+        const { generateShareLink } = await import("./bot-share.service.js");
+        const shareLink = await generateShareLink(bot.id, user.clerkId);
+        code = shareLink.code;
+      }
+    } else {
+      // User exists but no bot — generate anonymous code
+      code = generateAnonCode(phone);
+    }
+  } else {
+    // No formal account — get name from user facts
+    const nameFact = await prisma.$queryRaw<{ fact_value: string }[]>`
+      SELECT fact_value FROM openclaw_user_facts
+      WHERE user_id = ${userId} AND fact_key IN ('name', 'first_name')
+      LIMIT 1
+    `;
+    if (nameFact.length > 0) firstName = nameFact[0].fact_value;
+
+    // Generate anonymous referral code based on phone
+    code = generateAnonCode(phone);
+  }
+
+  const whatsappLink = `https://wa.me/${WA_NUMBER}?text=${encodeURIComponent(`START ${code}`)}`;
+  const webLink = `${PUBLIC_BASE}/join/${code}`;
+
+  // Generate QR Code PNG and save to public dir
+  const qrFileName = `qr_${code}.png`;
+  const qrDir = join(process.cwd(), "public", "qr");
+  const qrFilePath = join(qrDir, qrFileName);
+  const qrPublicUrl = `${PUBLIC_BASE}/public/qr/${qrFileName}`;
+
+  // Ensure qr directory exists
+  const { mkdir } = await import("fs/promises");
+  await mkdir(qrDir, { recursive: true });
+
+  await QRCode.toFile(qrFilePath, whatsappLink, {
+    width: 512,
+    margin: 2,
+    color: { dark: "#000000", light: "#FFFFFF" },
+  });
+
+  // Send QR Code image via Twilio MMS (MediaUrl)
+  const twilioMod = await import("twilio");
+  const Twilio = twilioMod.default;
+  const client = Twilio(
+    process.env.TWILIO_ACCOUNT_SID || "",
+    process.env.TWILIO_AUTH_TOKEN || ""
+  );
+
+  const fromNumber = process.env.TWILIO_WHATSAPP_NUMBER || `whatsapp:+${WA_NUMBER}`;
+  const toNumber = userId.startsWith("whatsapp:") ? userId : `whatsapp:${userId}`;
+
+  await client.messages.create({
+    from: fromNumber,
+    to: toNumber,
+    body: `📲 *Seu link de indicação:*\n\n${whatsappLink}\n\nSeu amigo ganha 60 dias grátis!\nOu escaneie o QR Code acima.`,
+    mediaUrl: [qrPublicUrl],
+  });
+
+  console.log(`[WA SHARE] Generated referral for ${userId}: ${code} → ${whatsappLink}`);
+
+  return {
+    success: true,
+    code,
+    whatsappLink,
+    webLink,
+    qrCodeSent: true,
+    message: `Link de indicação gerado e enviado para ${firstName}. O amigo ganha 60 dias grátis do Jarvis.`,
+  };
+}
+
+// Generate a deterministic referral code for WhatsApp users without formal accounts
+function generateAnonCode(phone: string): string {
+  const SAFE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  // Use last 6 digits of phone + random suffix for uniqueness
+  const suffix = phone.replace(/\D/g, "").slice(-4);
+  let code = "WA";
+  for (let i = 0; i < 4; i++) {
+    code += SAFE_CHARS[Math.floor(Math.random() * SAFE_CHARS.length)];
+  }
+  return code + suffix;
 }
 
 // ─── Gemini Chat ───────────────────────────────────────
@@ -662,11 +806,44 @@ export async function processWhatsAppMessage(from: string, text: string): Promis
 
   console.log(`[WhatsApp] ${userId}: ${text.substring(0, 80)}`);
 
+  // 0a. Handle START command (referral deep-link from wa.me/17547145921?text=START+CODE)
+  const startMatch = text.match(/^START\s+(\S+)$/i);
+  if (startMatch) {
+    try {
+      const result = await startOnboarding(userId, "whatsapp", startMatch[1]);
+      return result.message;
+    } catch (err) {
+      console.error("[WA START] Error:", (err as Error).message);
+      return "Erro ao iniciar. Tente novamente.";
+    }
+  }
+
+  // 0b. Handle share/referral intent — detect before sending to Gemini
+  const shareIntent = /\b(compartilh|indicar|indic[aá]|convidar|convid[aá]|share|invite|refer|qr\s*code|link.*(indic|refer|convit|compart)|amigo.*jarvis|jarvis.*amigo)\b/i;
+  if (shareIntent.test(text)) {
+    try {
+      const result = await generateShareForWhatsApp(userId);
+      if (result.success) {
+        // QR + link already sent by generateShareForWhatsApp
+        // Save conversation
+        await saveMessage(userId, "user", text);
+        await saveMessage(userId, "model", `Link de indicação enviado: ${result.whatsappLink}`);
+        return `Seu link de indicação e QR Code foram enviados! 📲\n\nSeu amigo ganha 60 dias grátis do Jarvis.`;
+      }
+      // If error (no account, no bot), fall through to normal Gemini flow
+      console.log(`[WA SHARE] Not eligible: ${result.error}`);
+    } catch (err) {
+      console.error("[WA SHARE] Error:", (err as Error).message);
+      // Fall through to Gemini
+    }
+  }
+
   // 0. Mark sequence active + resolve user for credits
   let resolvedUserId: string | null = null;
   try {
-    const user = await prisma.user.findFirst({
-      where: { OR: [{ telegramChatId: userId }, { phone: userId.replace("whatsapp:", "") }] },
+    const cleanPhone = userId.replace("whatsapp:", "");
+    const user = await prisma.user.findUnique({
+      where: { phone: cleanPhone },
       select: { id: true },
     });
     if (user) {

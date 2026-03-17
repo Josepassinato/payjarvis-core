@@ -22,7 +22,8 @@ export interface PendingAction {
 
 const SESSION_TTL = 30 * 60; // 30 minutes in seconds
 
-function sessionKey(botId: string): string {
+function sessionKey(botId: string, userId?: string): string {
+  if (userId) return `session:bot:${botId}:user:${userId}`;
   return `session:bot:${botId}`;
 }
 
@@ -44,15 +45,15 @@ export async function createSession(botId: string, userId: string): Promise<stri
     context: {},
   };
 
-  await redisSet(sessionKey(botId), JSON.stringify(session), SESSION_TTL);
+  await redisSet(sessionKey(botId, userId), JSON.stringify(session), SESSION_TTL);
   return sessionId;
 }
 
 /**
  * Get the current session for a bot, or null if none/expired.
  */
-export async function getSession(botId: string): Promise<BotSession | null> {
-  const raw = await redisGet(sessionKey(botId));
+export async function getSession(botId: string, userId?: string): Promise<BotSession | null> {
+  const raw = await redisGet(sessionKey(botId, userId));
   if (!raw) return null;
 
   try {
@@ -67,9 +68,10 @@ export async function getSession(botId: string): Promise<BotSession | null> {
  */
 export async function updateSession(
   botId: string,
-  updates: Partial<Pick<BotSession, "currentIntent" | "pendingActions" | "context">>
+  updates: Partial<Pick<BotSession, "currentIntent" | "pendingActions" | "context">>,
+  userId?: string
 ): Promise<BotSession | null> {
-  const session = await getSession(botId);
+  const session = await getSession(botId, userId);
   if (!session) return null;
 
   const updated: BotSession = {
@@ -78,13 +80,13 @@ export async function updateSession(
     lastActivityAt: new Date().toISOString(),
   };
 
-  await redisSet(sessionKey(botId), JSON.stringify(updated), SESSION_TTL);
+  await redisSet(sessionKey(botId, userId ?? session.userId), JSON.stringify(updated), SESSION_TTL);
   return updated;
 }
 
 /**
  * End (delete) a bot's session.
  */
-export async function endSession(botId: string): Promise<void> {
-  await redisDel(sessionKey(botId));
+export async function endSession(botId: string, userId?: string): Promise<void> {
+  await redisDel(sessionKey(botId, userId));
 }
