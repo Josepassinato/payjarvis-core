@@ -477,7 +477,7 @@ export async function spawnInstance(options?: {
       `TELEGRAM_TOKEN=PLACEHOLDER_SET_TOKEN_FOR_${name.toUpperCase().replace("-", "_")}`,
       ``,
       `GEMINI_API_KEY=${process.env.GEMINI_API_KEY || ""}`,
-      `DATABASE_URL=${process.env.DATABASE_URL || "postgresql://payjarvis:payjarvis123@localhost:5432/payjarvis"}`,
+      `DATABASE_URL=${process.env.DATABASE_URL || ""}`,
       `PAYJARVIS_API_KEY=${process.env.PAYJARVIS_API_KEY || ""}`,
       `PAYJARVIS_BOT_ID=${process.env.PAYJARVIS_BOT_ID || ""}`,
       `PAYJARVIS_URL=${process.env.PAYJARVIS_URL || "https://www.payjarvis.com"}`,

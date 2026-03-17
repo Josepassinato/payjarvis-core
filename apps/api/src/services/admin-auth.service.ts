@@ -80,13 +80,6 @@ export async function logout(token: string) {
 export async function requireAdmin(request: FastifyRequest, reply: FastifyReply) {
   const authHeader = request.headers.authorization;
 
-  // BYPASS temporário — remover depois de estabilizar login
-  if (authHeader === "Bearer bypass") {
-    (request as any).admin = { id: "bypass", email: "bypass@admin", name: "Bypass", role: "superadmin" };
-    (request as any).adminToken = "bypass";
-    return;
-  }
-
   if (!authHeader?.startsWith("Bearer ")) {
     return reply.status(401).send({ success: false, error: "No token provided" });
   }
