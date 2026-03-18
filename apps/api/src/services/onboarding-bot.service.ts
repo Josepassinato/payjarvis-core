@@ -1,8 +1,8 @@
 /**
  * Onboarding Bot Service — Conversational onboarding via Telegram/WhatsApp
  *
- * Manages the state machine for zero-friction onboarding:
- * start → name → email → email_confirm → limits → payment → complete
+ * Flow (100% in chat, English by default):
+ * name → bot_nickname → email_password → email_confirm → beta_choice → limits → stores → shipping_address → payment → complete
  */
 
 import { prisma } from "@payjarvis/database";
@@ -19,17 +19,13 @@ export interface BotResponse {
   complete: boolean;
 }
 
-/**
- * Generate a 6-digit numeric code for email confirmation.
- */
+// ─── Helpers ─────────────────────────────────────────────
+
 function generateEmailCode(): string {
   const num = Math.floor(100000 + Math.random() * 900000);
   return num.toString();
 }
 
-/**
- * Get the sharedBy name from a share code.
- */
 async function getSharedByName(shareCode: string): Promise<string | null> {
   const link = await prisma.botShareLink.findUnique({
     where: { code: shareCode },
@@ -40,322 +36,6 @@ async function getSharedByName(shareCode: string): Promise<string | null> {
   return (config.sharedByName as string) ?? null;
 }
 
-/**
- * Start a new onboarding session.
- */
-export async function startOnboarding(
-  chatId: string,
-  platform: "telegram" | "whatsapp",
-  shareCode?: string
-): Promise<{ sessionId: string; message: string }> {
-  // Check for existing active session
-  const existing = platform === "telegram"
-    ? await prisma.onboardingSession.findUnique({ where: { telegramChatId: chatId } })
-    : await prisma.onboardingSession.findUnique({ where: { whatsappPhone: chatId } });
-
-  if (existing && existing.step !== "complete" && existing.expiresAt > new Date()) {
-    // Resume existing session
-    const response = await getStepMessage(existing.step, existing);
-    return { sessionId: existing.id, message: response };
-  }
-
-  // Delete expired session if exists
-  if (existing) {
-    await prisma.onboardingSession.delete({ where: { id: existing.id } });
-  }
-
-  let sharedByName: string | null = null;
-  if (shareCode) {
-    sharedByName = await getSharedByName(shareCode);
-  }
-
-  const session = await prisma.onboardingSession.create({
-    data: {
-      telegramChatId: platform === "telegram" ? chatId : null,
-      whatsappPhone: platform === "whatsapp" ? chatId : null,
-      shareCode: shareCode ?? null,
-      step: "name",
-      expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000), // 72h
-    },
-  });
-
-  const greeting = sharedByName
-    ? `Oi! 👋 ${sharedByName} me compartilhou com você.\n\nSou o Jarvis, seu assistente de compras inteligente. Vou te configurar em menos de 2 minutos!\n\nQual é o seu nome?`
-    : `Oi! 👋 Sou o Jarvis, seu assistente de compras inteligente.\n\nVou te configurar em menos de 2 minutos!\n\nQual é o seu nome?`;
-
-  return { sessionId: session.id, message: greeting };
-}
-
-/**
- * Process user input at the current step.
- */
-export async function processStep(
-  chatId: string,
-  platform: string,
-  userInput: string
-): Promise<BotResponse> {
-  const session = platform === "telegram"
-    ? await prisma.onboardingSession.findUnique({ where: { telegramChatId: chatId } })
-    : await prisma.onboardingSession.findUnique({ where: { whatsappPhone: chatId } });
-
-  if (!session || session.step === "complete") {
-    return { message: "Nenhuma sessão de onboarding ativa.", step: "none", complete: false };
-  }
-
-  if (session.expiresAt < new Date()) {
-    await prisma.onboardingSession.delete({ where: { id: session.id } });
-    return { message: "Sessão expirada. Inicie novamente com /start.", step: "expired", complete: false };
-  }
-
-  switch (session.step) {
-    case "name":
-      return handleNameStep(session.id, userInput);
-    case "email":
-      return handleEmailStep(session.id, userInput);
-    case "email_confirm":
-      return handleEmailConfirmStep(session.id, userInput);
-    case "limits":
-      return handleLimitsStep(session.id, userInput);
-    case "payment":
-      return handlePaymentStep(session.id, userInput);
-    default:
-      return { message: "Estado inesperado. Tente /start novamente.", step: session.step, complete: false };
-  }
-}
-
-/**
- * Step: name — collect user's name.
- */
-async function handleNameStep(sessionId: string, input: string): Promise<BotResponse> {
-  const name = input.trim();
-
-  if (name.length < 2) {
-    return {
-      message: "Nome muito curto. Qual é o seu nome?",
-      step: "name",
-      complete: false,
-    };
-  }
-
-  if (name.length > 100) {
-    return {
-      message: "Nome muito longo. Qual é o seu nome?",
-      step: "name",
-      complete: false,
-    };
-  }
-
-  await prisma.onboardingSession.update({
-    where: { id: sessionId },
-    data: { fullName: name, step: "email" },
-  });
-
-  return {
-    message: `Prazer, ${name}! 😊\n\nQual é o seu email?`,
-    step: "email",
-    complete: false,
-  };
-}
-
-/**
- * Step: email — validate and send confirmation code.
- */
-async function handleEmailStep(sessionId: string, input: string): Promise<BotResponse> {
-  const email = input.trim().toLowerCase();
-
-  // Basic email validation
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return {
-      message: "Hmm, esse email não parece válido. Tenta de novo:\n\nExemplo: maria@gmail.com",
-      step: "email",
-      complete: false,
-    };
-  }
-
-  const code = generateEmailCode();
-
-  await prisma.onboardingSession.update({
-    where: { id: sessionId },
-    data: { email, emailToken: code, step: "email_confirm" },
-  });
-
-  // Send confirmation email (fire-and-forget logging)
-  sendOnboardingConfirmation(email, code).catch((err: unknown) => {
-    console.error("[Onboarding] Failed to send confirmation email:", err);
-  });
-
-  return {
-    message: `Perfeito! Enviei um código de 6 dígitos para ${email}.\n\nDigita o código aqui:`,
-    step: "email_confirm",
-    complete: false,
-  };
-}
-
-/**
- * Step: email_confirm — verify 6-digit code (max 5 attempts).
- */
-async function handleEmailConfirmStep(sessionId: string, input: string): Promise<BotResponse> {
-  const code = input.trim();
-  const session = await prisma.onboardingSession.findUnique({ where: { id: sessionId } });
-  if (!session) return { message: "Sessão não encontrada.", step: "error", complete: false };
-
-  if (code !== session.emailToken) {
-    const attempts = (session.emailAttempts ?? 0) + 1;
-    const MAX_ATTEMPTS = 5;
-
-    if (attempts >= MAX_ATTEMPTS) {
-      // Invalidate code and generate new one
-      const newCode = generateEmailCode();
-      await prisma.onboardingSession.update({
-        where: { id: sessionId },
-        data: { emailToken: newCode, emailAttempts: 0 },
-      });
-
-      // Re-send confirmation email
-      if (session.email) {
-        sendOnboardingConfirmation(session.email, newCode).catch((err: unknown) => {
-          console.error("[Onboarding] Failed to resend confirmation email:", err);
-        });
-      }
-
-      return {
-        message: "Muitas tentativas incorretas. Enviei um novo código para seu email.\n\nDigita o novo código de 6 dígitos:",
-        step: "email_confirm",
-        complete: false,
-      };
-    }
-
-    await prisma.onboardingSession.update({
-      where: { id: sessionId },
-      data: { emailAttempts: attempts },
-    });
-
-    const remaining = MAX_ATTEMPTS - attempts;
-    return {
-      message: `Código incorreto. ${remaining} tentativa${remaining === 1 ? "" : "s"} restante${remaining === 1 ? "" : "s"}.\n\nDigita o código de 6 dígitos:`,
-      step: "email_confirm",
-      complete: false,
-    };
-  }
-
-  // Create user + bot + policy
-  const { userId, botId } = await createUserAndBot(session);
-
-  await prisma.onboardingSession.update({
-    where: { id: sessionId },
-    data: { step: "limits", userId, botId },
-  });
-
-  return {
-    message: "✅ Email confirmado!\n\nAgora vamos definir seus limites de compra.\n\nQual o valor máximo por compra?\n\n💰 $20\n💰 $50\n💰 $100\n✏️ Outro valor (digita o número)",
-    step: "limits",
-    complete: false,
-  };
-}
-
-/**
- * Step: limits — set spending limit.
- */
-async function handleLimitsStep(sessionId: string, input: string): Promise<BotResponse> {
-  const cleaned = input.replace(/[^0-9.]/g, "");
-  const value = parseFloat(cleaned);
-
-  if (isNaN(value) || value <= 0 || value > 10000) {
-    return {
-      message: "Valor inválido. Escolhe um número entre 1 e 10000:\n\n💰 $20\n💰 $50\n💰 $100\n✏️ Ou digita o valor",
-      step: "limits",
-      complete: false,
-    };
-  }
-
-  const session = await prisma.onboardingSession.findUnique({ where: { id: sessionId } });
-  if (!session?.botId) return { message: "Erro interno.", step: "error", complete: false };
-
-  // Update policy
-  const autoApprove = Math.floor(value * 0.5);
-  await prisma.policy.updateMany({
-    where: { botId: session.botId },
-    data: {
-      maxPerTransaction: value,
-      autoApproveLimit: autoApprove,
-    },
-  });
-
-  // Generate Stripe payment link
-  let paymentMessage = "";
-  try {
-    const link = await generateStripeSetupLink(session.userId!, sessionId);
-    paymentMessage = `\n\nÚltimo passo — adicionar sua forma de pagamento.\n\nClica no link abaixo para adicionar seu cartão (leva 30 segundos):\n\n👉 ${link}\n\nMe avisa quando terminar ou digita "pronto"`;
-  } catch {
-    paymentMessage = "\n\nÚltimo passo — adicionar forma de pagamento.\n\nVocê pode configurar isso depois no dashboard.\n\nDigita \"pular\" para finalizar ou \"pronto\" quando adicionar.";
-  }
-
-  await prisma.onboardingSession.update({
-    where: { id: sessionId },
-    data: { limitsSet: true, step: "payment" },
-  });
-
-  return {
-    message: `Ótimo! Limite de $${value.toFixed(0)} por compra definido.${paymentMessage}`,
-    step: "payment",
-    complete: false,
-  };
-}
-
-/**
- * Step: payment — wait for Stripe confirmation or skip.
- */
-async function handlePaymentStep(sessionId: string, input: string): Promise<BotResponse> {
-  const lower = input.trim().toLowerCase();
-
-  if (lower === "pular" || lower === "skip") {
-    return completeOnboarding(sessionId);
-  }
-
-  // Check if Stripe payment was already set up via webhook
-  const session = await prisma.onboardingSession.findUnique({ where: { id: sessionId } });
-  if (!session) return { message: "Sessão não encontrada.", step: "error", complete: false };
-
-  if (session.paymentSetup) {
-    return completeOnboarding(sessionId);
-  }
-
-  // User said "pronto" or similar
-  if (lower === "pronto" || lower === "done" || lower === "ok" || lower === "✅") {
-    // Check Stripe setup intent status
-    if (session.stripeSetupIntent) {
-      try {
-        const provider = getPaymentProvider("stripe") as StripeProvider;
-        const { paymentMethodId } = await provider.getSetupIntentPaymentMethod(session.stripeSetupIntent);
-        if (paymentMethodId) {
-          await prisma.onboardingSession.update({
-            where: { id: sessionId },
-            data: { paymentSetup: true },
-          });
-          return completeOnboarding(sessionId);
-        }
-      } catch {
-        // Setup intent not completed yet
-      }
-    }
-
-    return {
-      message: "Ainda não detectei o pagamento. Tenta clicar no link acima e adicionar o cartão.\n\nOu digita \"pular\" para configurar depois.",
-      step: "payment",
-      complete: false,
-    };
-  }
-
-  return {
-    message: "Clica no link acima para adicionar seu cartão.\n\nDigita \"pronto\" quando terminar ou \"pular\" para fazer depois.",
-    step: "payment",
-    complete: false,
-  };
-}
-
-/**
- * Retry an async operation with exponential backoff.
- */
 async function withRetry<T>(
   fn: () => Promise<T>,
   label: string,
@@ -378,16 +58,595 @@ async function withRetry<T>(
   throw new Error("unreachable");
 }
 
-/**
- * Complete the onboarding session.
- * Uses a transaction to ensure atomicity of session + user + credits.
- */
+// ─── Start ───────────────────────────────────────────────
+
+export async function startOnboarding(
+  chatId: string,
+  platform: "telegram" | "whatsapp",
+  shareCode?: string
+): Promise<{ sessionId: string; message: string }> {
+  const existing = platform === "telegram"
+    ? await prisma.onboardingSession.findUnique({ where: { telegramChatId: chatId } })
+    : await prisma.onboardingSession.findUnique({ where: { whatsappPhone: chatId } });
+
+  if (existing && existing.step !== "complete" && existing.expiresAt > new Date()) {
+    const response = await getStepMessage(existing.step, existing);
+    return { sessionId: existing.id, message: response };
+  }
+
+  if (existing) {
+    await prisma.onboardingSession.delete({ where: { id: existing.id } });
+  }
+
+  let sharedByName: string | null = null;
+  if (shareCode) {
+    sharedByName = await getSharedByName(shareCode);
+  }
+
+  const session = await prisma.onboardingSession.create({
+    data: {
+      telegramChatId: platform === "telegram" ? chatId : null,
+      whatsappPhone: platform === "whatsapp" ? chatId : null,
+      shareCode: shareCode ?? null,
+      step: "name",
+      expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000), // 72h
+    },
+  });
+
+  const referralIntro = sharedByName
+    ? `Your friend ${sharedByName} invited you to try PayJarvis!\n\n`
+    : "";
+
+  const greeting = `${referralIntro}Hi! 👋 I'm PayJarvis, your personal shopping and research assistant.\n\nI can help you with:\n🛒 Shop online for you\n🔍 Search and compare products\n💰 Control your spending automatically\n📋 Organize your personal tasks\n\nWhat's your name?`;
+
+  return { sessionId: session.id, message: greeting };
+}
+
+// ─── Process Step ────────────────────────────────────────
+
+export async function processStep(
+  chatId: string,
+  platform: string,
+  userInput: string
+): Promise<BotResponse> {
+  const session = platform === "telegram"
+    ? await prisma.onboardingSession.findUnique({ where: { telegramChatId: chatId } })
+    : await prisma.onboardingSession.findUnique({ where: { whatsappPhone: chatId } });
+
+  if (!session || session.step === "complete") {
+    return { message: "No active onboarding session.", step: "none", complete: false };
+  }
+
+  if (session.expiresAt < new Date()) {
+    await prisma.onboardingSession.delete({ where: { id: session.id } });
+    return { message: "Session expired. Start again with /start.", step: "expired", complete: false };
+  }
+
+  switch (session.step) {
+    case "name":
+      return handleNameStep(session.id, userInput);
+    case "bot_nickname":
+      return handleBotNicknameStep(session.id, userInput);
+    case "email_password":
+      return handleEmailPasswordStep(session.id, userInput);
+    case "email_confirm":
+      return handleEmailConfirmStep(session.id, userInput);
+    case "beta_choice":
+      return handleBetaChoiceStep(session.id, userInput);
+    case "limits":
+      return handleLimitsStep(session.id, userInput);
+    case "stores":
+      return handleStoresStep(session.id, userInput);
+    case "shipping_address":
+      return handleShippingAddressStep(session.id, userInput);
+    case "payment":
+      return handlePaymentStep(session.id, userInput);
+    default:
+      return { message: "Unexpected state. Try /start again.", step: session.step, complete: false };
+  }
+}
+
+// ─── Step: name ──────────────────────────────────────────
+
+async function handleNameStep(sessionId: string, input: string): Promise<BotResponse> {
+  const name = input.trim();
+
+  if (name.length < 2) {
+    return { message: "Name too short. What's your name?", step: "name", complete: false };
+  }
+  if (name.length > 100) {
+    return { message: "Name too long. What's your name?", step: "name", complete: false };
+  }
+
+  await prisma.onboardingSession.update({
+    where: { id: sessionId },
+    data: { fullName: name, step: "bot_nickname" },
+  });
+
+  return {
+    message: `Nice to meet you, ${name}! 😊\n\nWould you like to give me a special name or keep calling me Jarvis?`,
+    step: "bot_nickname",
+    complete: false,
+  };
+}
+
+// ─── Step: bot_nickname ──────────────────────────────────
+
+async function handleBotNicknameStep(sessionId: string, input: string): Promise<BotResponse> {
+  const lower = input.trim().toLowerCase();
+  const keepDefault = ["no", "nah", "jarvis", "keep", "that's fine", "fine", "n", "não", "nao", "pode ser"];
+  const notAName = ["falar", "português", "portugues", "english", "spanish", "please", "can you", "speak", "language", "idioma", "sim", "yes", "como", "what", "help", "ajuda", "quero", "want", "could", "would"];
+
+  let nickname: string;
+  let response: string;
+
+  if (keepDefault.some((k) => lower === k || lower.startsWith(k))) {
+    nickname = "Jarvis";
+    response = "Alright, just call me Jarvis! 😄";
+  } else if (input.trim().length > 20 || notAName.some((w) => lower.includes(w))) {
+    // Not a valid bot name — likely a sentence or language request
+    return {
+      message: "Just type a short name like Luna, Max, or say 'Jarvis is fine' 😊",
+      step: "bot_nickname",
+      complete: false,
+    };
+  } else {
+    nickname = input.trim().slice(0, 50);
+    response = `Love it! From now on, call me ${nickname}! 🎉`;
+  }
+
+  await prisma.onboardingSession.update({
+    where: { id: sessionId },
+    data: { botNickname: nickname, step: "email_password" },
+  });
+
+  return {
+    message: `${response}\n\nNow I need to register you. Send me your email and create a password:\n\n📧 Email:\n🔒 Password:\n\n(You can send both in one message, e.g.: myemail@gmail.com MyPassword123)`,
+    step: "email_password",
+    complete: false,
+  };
+}
+
+// ─── Step: email_password ────────────────────────────────
+
+async function handleEmailPasswordStep(sessionId: string, input: string): Promise<BotResponse> {
+  const trimmed = input.trim();
+
+  // Detect if user sent a question/sentence instead of email+password
+  if (!trimmed.includes("@")) {
+    return {
+      message: "No worries! When you're ready, send your email and a password together.\n\nExample: john@gmail.com MyPassword123",
+      step: "email_password",
+      complete: false,
+    };
+  }
+
+  const parts = trimmed.split(/\s+/);
+
+  let email: string | null = null;
+  let password: string | null = null;
+
+  for (const part of parts) {
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(part)) {
+      email = part.toLowerCase();
+    } else if (!password && part.length >= 6) {
+      password = part;
+    }
+  }
+
+  if (!email) {
+    return {
+      message: "Hmm, that doesn't look like a valid email. Send your email and password together:\n\nExample: john@gmail.com MyPassword123",
+      step: "email_password",
+      complete: false,
+    };
+  }
+
+  if (!password) {
+    return {
+      message: "I also need a password (minimum 6 characters). Send email and password:\n\nExample: john@gmail.com MyPassword123",
+      step: "email_password",
+      complete: false,
+    };
+  }
+
+  if (password.length < 6) {
+    return {
+      message: "Password must be at least 6 characters. Try again:\n\nExample: john@gmail.com MyPassword123",
+      step: "email_password",
+      complete: false,
+    };
+  }
+
+  const code = generateEmailCode();
+
+  await prisma.onboardingSession.update({
+    where: { id: sessionId },
+    data: { email, password, emailToken: code, step: "email_confirm" },
+  });
+
+  sendOnboardingConfirmation(email, code).catch((err: unknown) => {
+    console.error("[Onboarding] Failed to send confirmation email:", err);
+  });
+
+  return {
+    message: `I sent a 6-digit code to your email. What is it?\n\n💡 If you can't find it in your inbox, check your Spam folder!`,
+    step: "email_confirm",
+    complete: false,
+  };
+}
+
+// ─── Step: email_confirm ─────────────────────────────────
+
+async function handleEmailConfirmStep(sessionId: string, input: string): Promise<BotResponse> {
+  const code = input.trim();
+  const session = await prisma.onboardingSession.findUnique({ where: { id: sessionId } });
+  if (!session) return { message: "Session not found.", step: "error", complete: false };
+
+  if (code !== session.emailToken) {
+    const attempts = (session.emailAttempts ?? 0) + 1;
+    const MAX_ATTEMPTS = 5;
+
+    if (attempts >= MAX_ATTEMPTS) {
+      const newCode = generateEmailCode();
+      await prisma.onboardingSession.update({
+        where: { id: sessionId },
+        data: { emailToken: newCode, emailAttempts: 0 },
+      });
+
+      if (session.email) {
+        sendOnboardingConfirmation(session.email, newCode).catch((err: unknown) => {
+          console.error("[Onboarding] Failed to resend confirmation email:", err);
+        });
+      }
+
+      return {
+        message: "Too many incorrect attempts. I sent a new code to your email.\n\nEnter the new 6-digit code:",
+        step: "email_confirm",
+        complete: false,
+      };
+    }
+
+    await prisma.onboardingSession.update({
+      where: { id: sessionId },
+      data: { emailAttempts: attempts },
+    });
+
+    const remaining = MAX_ATTEMPTS - attempts;
+    return {
+      message: `Incorrect code. ${remaining} attempt${remaining === 1 ? "" : "s"} remaining.\n\nEnter the 6-digit code:`,
+      step: "email_confirm",
+      complete: false,
+    };
+  }
+
+  // Create user + bot + policy
+  const { userId, botId } = await createUserAndBot(session);
+
+  await prisma.onboardingSession.update({
+    where: { id: sessionId },
+    data: { step: "beta_choice", userId, botId, password: null },
+  });
+
+  return {
+    message: `Account created! 🎉\n\nYou arrived at the right time! We're in Beta and access is completely free. Try me out with no commitment!\n\nWant to set up your shopping system now or explore first?\n\n1️⃣ Set up now\n2️⃣ Explore first — I'll set up later`,
+    step: "beta_choice",
+    complete: false,
+  };
+}
+
+// ─── Step: beta_choice ───────────────────────────────────
+
+async function handleBetaChoiceStep(sessionId: string, input: string): Promise<BotResponse> {
+  const lower = input.trim().toLowerCase();
+
+  if (lower === "2" || lower.includes("later") || lower.includes("explore") || lower.includes("depois")) {
+    return completeOnboarding(sessionId);
+  }
+
+  await prisma.onboardingSession.update({
+    where: { id: sessionId },
+    data: { step: "limits" },
+  });
+
+  return {
+    message: "What spending limit per purchase would you like? (e.g.: $50, $100, $200)",
+    step: "limits",
+    complete: false,
+  };
+}
+
+// ─── Step: limits ────────────────────────────────────────
+
+async function handleLimitsStep(sessionId: string, input: string): Promise<BotResponse> {
+  const cleaned = input.replace(/[^0-9.]/g, "");
+  const value = parseFloat(cleaned);
+
+  if (isNaN(value) || value <= 0 || value > 10000) {
+    return {
+      message: "Invalid amount. Choose a number between 1 and 10,000:\n\nExample: $50, $100, $200",
+      step: "limits",
+      complete: false,
+    };
+  }
+
+  const session = await prisma.onboardingSession.findUnique({ where: { id: sessionId } });
+  if (!session?.botId) return { message: "Internal error.", step: "error", complete: false };
+
+  const autoApprove = Math.floor(value * 0.5);
+  await prisma.policy.updateMany({
+    where: { botId: session.botId },
+    data: {
+      maxPerTransaction: value,
+      autoApproveLimit: autoApprove,
+    },
+  });
+
+  await prisma.onboardingSession.update({
+    where: { id: sessionId },
+    data: { limitsSet: true, step: "stores" },
+  });
+
+  return {
+    message: `Great! $${value.toFixed(0)} per purchase limit set.\n\nRight now I can shop on Amazon for you! More stores coming soon.\n\nWant to connect your Amazon account now?\n\n1️⃣ Yes — let's set it up\n2️⃣ Later — I'll explore first`,
+    step: "stores",
+    complete: false,
+  };
+}
+
+// ─── Step: stores ────────────────────────────────────────
+
+async function handleStoresStep(sessionId: string, input: string): Promise<BotResponse> {
+  const lower = input.trim().toLowerCase();
+  const session = await prisma.onboardingSession.findUnique({ where: { id: sessionId } });
+  if (!session?.userId) return { message: "Internal error.", step: "error", complete: false };
+
+  // "Later" / Skip / 2
+  if (lower === "2" || lower === "later" || lower === "skip" || lower === "done" || lower === "pular" || lower === "pronto" || lower === "depois") {
+    return moveToShippingStep(sessionId, "No problem! You can connect Amazon anytime from Settings.\n\n");
+  }
+
+  // "Yes" / 1 / Amazon
+  if (lower === "1" || lower === "yes" || lower === "sim" || lower === "amazon" || lower.includes("yes") || lower.includes("amazon") || lower.includes("set")) {
+    await connectStore(session.userId, "amazon", "https://www.amazon.com", "Amazon", true);
+
+    await prisma.onboardingSession.update({
+      where: { id: sessionId },
+      data: { storesConfigured: true },
+    });
+
+    return moveToShippingStep(sessionId, "Amazon connected! ✅ I can now shop for you anytime.\n\n");
+  }
+
+  // Coming soon stores
+  const comingSoon = ["ebay", "walmart", "target", "best buy", "bestbuy", "nike", "zara"];
+  if (comingSoon.some((s) => lower.includes(s))) {
+    return {
+      message: "That store is coming soon! Right now I can shop on Amazon.\n\nWant to connect Amazon?\n\n1️⃣ Yes\n2️⃣ Later",
+      step: "stores",
+      complete: false,
+    };
+  }
+
+  return {
+    message: "Right now I can shop on Amazon. Want to connect it?\n\n1️⃣ Yes — let's set it up\n2️⃣ Later — I'll explore first",
+    step: "stores",
+    complete: false,
+  };
+}
+
+async function checkStoreCapabilities(
+  userId: string,
+  storeName: string,
+  storeUrl: string,
+  storeLabel: string,
+): Promise<void> {
+  const BROWSER_AGENT_URL = process.env.BROWSER_AGENT_URL || "http://localhost:3003";
+  const BROWSER_AGENT_KEY = process.env.BROWSER_AGENT_API_KEY || "";
+
+  try {
+    const res = await fetch(`${BROWSER_AGENT_URL}/tasks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": BROWSER_AGENT_KEY },
+      body: JSON.stringify({
+        site: storeUrl,
+        action: `Navigate to ${storeUrl}. Check if the site has a login/account system and if it supports guest checkout. Return JSON: { requiresAuth: boolean, hasGuestCheckout: boolean }`,
+        priority: 3,
+      }),
+      signal: AbortSignal.timeout(30000),
+    });
+
+    if (!res.ok) {
+      console.warn(`[STORE CHECK] Browser agent returned ${res.status} for ${storeUrl}`);
+      return;
+    }
+
+    const data = (await res.json()) as Record<string, unknown>;
+    const taskId = data.task_id as string;
+    if (!taskId) return;
+
+    // Poll for result (max 60s)
+    for (let i = 0; i < 12; i++) {
+      await new Promise((r) => setTimeout(r, 5000));
+      const check = await fetch(`${BROWSER_AGENT_URL}/tasks/${taskId}`, {
+        headers: { "x-api-key": BROWSER_AGENT_KEY },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!check.ok) continue;
+      const task = (await check.json()) as Record<string, unknown>;
+      if (task.status === "completed") {
+        const result = task.result as Record<string, unknown> | undefined;
+        const requiresAuth = !!(result?.requiresAuth);
+        const hasGuestCheckout = !!(result?.hasGuestCheckout);
+
+        // Save to store_connections
+        await prisma.$executeRaw`
+          INSERT INTO store_connections (id, user_id, store_url, store_name, requires_auth, has_guest_checkout, last_checked_at, status)
+          VALUES (gen_random_uuid()::text, ${userId}, ${storeUrl}, ${storeLabel}, ${requiresAuth}, ${hasGuestCheckout}, NOW(), 'checked')
+          ON CONFLICT (id) DO NOTHING
+        `;
+
+        console.log(`[STORE CHECK] ${storeLabel}: requiresAuth=${requiresAuth}, guestCheckout=${hasGuestCheckout}`);
+        return;
+      }
+      if (task.status === "failed") {
+        console.warn(`[STORE CHECK] Browser agent failed for ${storeUrl}`);
+        return;
+      }
+    }
+  } catch (err) {
+    console.warn(`[STORE CHECK] Error checking ${storeUrl}:`, (err as Error).message);
+  }
+}
+
+async function connectStore(
+  userId: string,
+  store: string,
+  storeUrl: string,
+  storeLabel: string,
+  requiresAuth: boolean
+): Promise<void> {
+  const existing = await prisma.storeContext.findUnique({
+    where: { userId_store: { userId, store } },
+  });
+  if (existing) return;
+
+  await prisma.storeContext.create({
+    data: {
+      userId,
+      store,
+      storeUrl,
+      storeLabel,
+      status: "configured",
+    },
+  });
+}
+
+async function moveToShippingStep(
+  sessionId: string,
+  prefix = ""
+): Promise<BotResponse> {
+  await prisma.onboardingSession.update({
+    where: { id: sessionId },
+    data: { step: "shipping_address" },
+  });
+
+  return {
+    message: `${prefix}Where should I deliver your purchases? Send me your shipping address:\n\n📍 Street, City, State, ZIP code\n\n(Example: 1234 Main St, Miami, FL 33101)\n\nOr type "skip" to add later.`,
+    step: "shipping_address",
+    complete: false,
+  };
+}
+
+// ─── Step: shipping_address ─────────────────────────────
+
+async function handleShippingAddressStep(sessionId: string, input: string): Promise<BotResponse> {
+  const lower = input.trim().toLowerCase();
+  const session = await prisma.onboardingSession.findUnique({ where: { id: sessionId } });
+  if (!session?.userId) return { message: "Internal error.", step: "error", complete: false };
+
+  if (lower === "skip" || lower === "pular") {
+    return moveToPaymentStep(sessionId, session.userId);
+  }
+
+  const address = input.trim();
+  if (address.length < 10) {
+    return {
+      message: "That seems too short for an address. Please include street, city, state and ZIP code.\n\n(Example: 1234 Main St, Miami, FL 33101)\n\nOr type \"skip\" to add later.",
+      step: "shipping_address",
+      complete: false,
+    };
+  }
+
+  await prisma.user.update({
+    where: { id: session.userId },
+    data: { shippingAddress: address },
+  });
+
+  return moveToPaymentStep(sessionId, session.userId, `Got it! All purchases will be delivered to:\n📍 ${address}\n\nYou can change this anytime by saying "update my address".\n\n`);
+}
+
+async function moveToPaymentStep(
+  sessionId: string,
+  userId: string,
+  prefix = ""
+): Promise<BotResponse> {
+  let paymentMessage = "";
+  try {
+    const link = await generateStripeSetupLink(userId, sessionId);
+    paymentMessage = `Last step — add your card so I can shop for you.\n\nClick here to register securely (powered by Stripe): ${link}\n\nOr type "skip" to add later.`;
+  } catch {
+    paymentMessage = "Last step — add a payment method.\n\nYou can set this up later in the dashboard.\n\nType \"skip\" to finish.";
+  }
+
+  await prisma.onboardingSession.update({
+    where: { id: sessionId },
+    data: { step: "payment" },
+  });
+
+  return {
+    message: `${prefix}${paymentMessage}`,
+    step: "payment",
+    complete: false,
+  };
+}
+
+// ─── Step: payment ───────────────────────────────────────
+
+async function handlePaymentStep(sessionId: string, input: string): Promise<BotResponse> {
+  const lower = input.trim().toLowerCase();
+
+  if (lower === "skip" || lower === "pular") {
+    return completeOnboarding(sessionId);
+  }
+
+  const session = await prisma.onboardingSession.findUnique({ where: { id: sessionId } });
+  if (!session) return { message: "Session not found.", step: "error", complete: false };
+
+  if (session.paymentSetup) {
+    return completeOnboarding(sessionId);
+  }
+
+  if (lower === "done" || lower === "pronto" || lower === "ok" || lower === "✅") {
+    if (session.stripeSetupIntent) {
+      try {
+        const provider = getPaymentProvider("stripe") as StripeProvider;
+        const { paymentMethodId } = await provider.getSetupIntentPaymentMethod(session.stripeSetupIntent);
+        if (paymentMethodId) {
+          await prisma.onboardingSession.update({
+            where: { id: sessionId },
+            data: { paymentSetup: true },
+          });
+          return completeOnboarding(sessionId);
+        }
+      } catch {
+        // Setup intent not completed yet
+      }
+    }
+
+    return {
+      message: "I haven't detected the payment yet. Try clicking the link above to add your card.\n\nOr type \"skip\" to set up later.",
+      step: "payment",
+      complete: false,
+    };
+  }
+
+  return {
+    message: "Click the link above to add your card.\n\nType \"done\" when finished or \"skip\" to do it later.",
+    step: "payment",
+    complete: false,
+  };
+}
+
+// ─── Complete ────────────────────────────────────────────
+
 export async function completeOnboarding(sessionId: string): Promise<BotResponse> {
   const session = await prisma.onboardingSession.findUnique({ where: { id: sessionId } });
-  if (!session) return { message: "Sessão não encontrada.", step: "error", complete: false };
+  if (!session) return { message: "Session not found.", step: "error", complete: false };
+
+  const nickname = session.botNickname || "Jarvis";
 
   if (session.userId) {
-    // Transaction: mark complete + update user + init credits — all or nothing
     await prisma.$transaction(async (tx) => {
       await tx.onboardingSession.update({
         where: { id: sessionId },
@@ -396,28 +655,26 @@ export async function completeOnboarding(sessionId: string): Promise<BotResponse
 
       await tx.user.update({
         where: { id: session.userId! },
-        data: { onboardingCompleted: true, onboardingStep: 5 },
+        data: { onboardingCompleted: true, onboardingStep: 5, botNickname: nickname },
       });
 
-      // Init credits inside transaction so it rolls back if anything fails
       const existingCredit = await tx.llmCredit.findUnique({ where: { userId: session.userId! } });
       if (!existingCredit) {
-        const hasReferral = !!session.shareCode;
         await tx.llmCredit.create({
           data: {
             userId: session.userId!,
             messagesTotal: 5000,
             messagesUsed: 0,
             messagesRemaining: 5000,
-            freeTrialActive: hasReferral,
-            freeTrialEndsAt: hasReferral ? new Date(Date.now() + 60 * 86400000) : null,
+            freeTrialActive: false,
+            freeTrialEndsAt: null,
           },
         });
-        console.log(`[Credit] Initialized for ${session.userId}${hasReferral ? " (60-day trial)" : ""} [via transaction]`);
+        console.log(`[Credit] Initialized for ${session.userId} (beta user) [via transaction]`);
       }
     });
 
-    // Sequence init with retry (outside transaction — non-critical, can retry independently)
+    // Sequence init with retry
     const platform = session.telegramChatId ? "telegram" : "whatsapp";
     const chatId = session.telegramChatId ?? session.whatsappPhone ?? "";
     const referrerName = session.shareCode ? await getSharedByName(session.shareCode) : null;
@@ -431,32 +688,26 @@ export async function completeOnboarding(sessionId: string): Promise<BotResponse
       });
     }
   } else {
-    // No userId — just mark complete (shouldn't happen, but be safe)
     await prisma.onboardingSession.update({
       where: { id: sessionId },
       data: { step: "complete" },
     });
   }
 
-  // Notify referrer (non-critical, fire-and-forget)
+  // Notify referrer
   if (session.shareCode) {
-    notifyReferrer(session.shareCode, session.fullName ?? session.email ?? "Alguém").catch(() => {});
+    notifyReferrer(session.shareCode, session.fullName ?? session.email ?? "Someone").catch(() => {});
   }
 
-  const paymentNote = session.paymentSetup
-    ? ""
-    : "\n\n⚠️ Lembre-se de adicionar um cartão de pagamento no dashboard para fazer compras.";
-
   return {
-    message: `✅ Tudo configurado!\n\nAgora você pode me pedir qualquer compra:\n\n🛒 "Compra cabo USB até $20"\n🛒 "Encontra shampoo barato"\n🛒 "Quero tênis Nike tamanho 42"\n\nO que você quer comprar?${paymentNote}`,
+    message: `${nickname} is ready to help! 🚀\n\nYou arrived at the right time! We're in Beta — completely free, no commitment!\n\nAsk me anything — I'm here 24/7 for you!`,
     step: "complete",
     complete: true,
   };
 }
 
-/**
- * Generate Stripe Setup Intent link.
- */
+// ─── Stripe Setup ────────────────────────────────────────
+
 export async function generateStripeSetupLink(userId: string, sessionId: string): Promise<string> {
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) throw new Error("User not found");
@@ -498,9 +749,8 @@ export async function generateStripeSetupLink(userId: string, sessionId: string)
   return link;
 }
 
-/**
- * Check if a chatId has an active onboarding session.
- */
+// ─── Session check ───────────────────────────────────────
+
 export async function hasActiveSession(chatId: string, platform: string): Promise<boolean> {
   const session = platform === "telegram"
     ? await prisma.onboardingSession.findUnique({ where: { telegramChatId: chatId } })
@@ -510,24 +760,22 @@ export async function hasActiveSession(chatId: string, platform: string): Promis
   return session.step !== "complete" && session.expiresAt > new Date();
 }
 
-/**
- * Create user and bot during onboarding.
- */
+// ─── User + Bot creation ─────────────────────────────────
+
 async function createUserAndBot(session: {
   id: string;
   email: string | null;
   fullName: string | null;
+  botNickname: string | null;
   shareCode: string | null;
   telegramChatId: string | null;
   whatsappPhone: string | null;
 }): Promise<{ userId: string; botId: string }> {
   if (!session.email) throw new Error("Email is required");
 
-  // Check if user already exists with this email
   let user = await prisma.user.findUnique({ where: { email: session.email } });
 
   if (!user) {
-    // Create user with a synthetic clerkId (will be linked later if they sign into dashboard)
     const clerkId = `bot_onboard_${randomBytes(12).toString("hex")}`;
     user = await prisma.user.create({
       data: {
@@ -540,22 +788,25 @@ async function createUserAndBot(session: {
         telegramChatId: session.telegramChatId ?? undefined,
         phone: session.whatsappPhone?.replace("whatsapp:", "") ?? undefined,
         notificationChannel: session.telegramChatId ? "telegram" : session.whatsappPhone ? "whatsapp" : "none",
+        botNickname: session.botNickname ?? "Jarvis",
       },
     });
   } else {
-    // Update telegramChatId if not set
+    const updates: Record<string, unknown> = {};
     if (session.telegramChatId && !user.telegramChatId) {
-      await prisma.user.update({
-        where: { id: user.id },
-        data: {
-          telegramChatId: session.telegramChatId,
-          notificationChannel: "telegram",
-        },
-      });
+      updates.telegramChatId = session.telegramChatId;
+      updates.notificationChannel = "telegram";
+    }
+    if (session.botNickname) {
+      updates.botNickname = session.botNickname;
+    }
+    if (Object.keys(updates).length > 0) {
+      await prisma.user.update({ where: { id: user.id }, data: updates });
     }
   }
 
-  // Clone bot from shareCode or create default
+  const botName = session.botNickname || "Jarvis";
+
   let botId: string;
   if (session.shareCode) {
     const link = await prisma.botShareLink.findUnique({ where: { code: session.shareCode } });
@@ -567,13 +818,13 @@ async function createUserAndBot(session: {
       const bot = await prisma.bot.create({
         data: {
           ownerId: user.id,
-          name: (config.name as string) ?? "Jarvis",
+          name: botName,
           platform: (config.platform as any) ?? "TELEGRAM",
           apiKeyHash,
           systemPrompt: (config.systemPrompt as string) ?? null,
-          botDisplayName: (config.botDisplayName as string) ?? null,
+          botDisplayName: botName,
           capabilities: (config.capabilities as string[]) ?? [],
-          language: (config.language as string) ?? "pt-BR",
+          language: (config.language as string) ?? "en",
         },
       });
 
@@ -589,13 +840,11 @@ async function createUserAndBot(session: {
         },
       });
 
-      // Create agent
       const agentId = `ag_${randomBytes(12).toString("hex")}`;
       await prisma.agent.create({
-        data: { id: agentId, botId: bot.id, ownerId: user.id, name: `Agent for ${bot.name}` },
+        data: { id: agentId, botId: bot.id, ownerId: user.id, name: `Agent for ${botName}` },
       });
 
-      // Record clone
       await prisma.botShareLink.update({
         where: { code: session.shareCode },
         data: { useCount: { increment: 1 } },
@@ -611,27 +860,28 @@ async function createUserAndBot(session: {
 
       botId = bot.id;
     } else {
-      botId = await createDefaultBot(user.id);
+      botId = await createDefaultBot(user.id, botName);
     }
   } else {
-    botId = await createDefaultBot(user.id);
+    botId = await createDefaultBot(user.id, botName);
   }
 
   return { userId: user.id, botId };
 }
 
-async function createDefaultBot(userId: string): Promise<string> {
+async function createDefaultBot(userId: string, botName = "Jarvis"): Promise<string> {
   const rawKey = `pj_bot_${randomBytes(24).toString("hex")}`;
   const apiKeyHash = createHash("sha256").update(rawKey).digest("hex");
 
   const bot = await prisma.bot.create({
     data: {
       ownerId: userId,
-      name: "Jarvis",
+      name: botName,
       platform: "TELEGRAM",
       apiKeyHash,
+      botDisplayName: botName,
       capabilities: ["amazon", "walmart", "target"],
-      language: "pt-BR",
+      language: "en",
     },
   });
 
@@ -646,35 +896,41 @@ async function createDefaultBot(userId: string): Promise<string> {
 
   const agentId = `ag_${randomBytes(12).toString("hex")}`;
   await prisma.agent.create({
-    data: { id: agentId, botId: bot.id, ownerId: userId, name: "Agent for Jarvis" },
+    data: { id: agentId, botId: bot.id, ownerId: userId, name: `Agent for ${botName}` },
   });
 
   return bot.id;
 }
 
-/**
- * Get a message for the current step (for session resume).
- */
-async function getStepMessage(step: string, session: { email?: string | null }): Promise<string> {
+// ─── Step message (resume) ───────────────────────────────
+
+async function getStepMessage(step: string, session: { email?: string | null; fullName?: string | null }): Promise<string> {
   switch (step) {
     case "name":
-      return "Parece que você já começou o cadastro! Qual é o seu nome?";
-    case "email":
-      return "Parece que você já começou o cadastro! Qual é o seu email?";
+      return "Looks like you already started! What's your name?";
+    case "bot_nickname":
+      return `${session.fullName ?? "Hey"}! Would you like to give me a special name or keep calling me Jarvis?`;
+    case "email_password":
+      return "Send me your email and create a password:\n\n(e.g.: myemail@gmail.com MyPassword123)";
     case "email_confirm":
-      return `Já enviei o código para ${session.email ?? "seu email"}. Digita o código de 6 dígitos:`;
+      return `I already sent the code to ${session.email ?? "your email"}. Enter the 6-digit code:`;
+    case "beta_choice":
+      return "Want to set up your shopping system now or explore first?\n\n1️⃣ Set up now\n2️⃣ Explore first";
     case "limits":
-      return "Vamos definir seus limites de compra.\n\nQual o valor máximo por compra?\n\n💰 $20\n💰 $50\n💰 $100\n✏️ Outro valor";
+      return "What spending limit per purchase would you like? (e.g.: $50, $100, $200)";
+    case "stores":
+      return "Which stores can I shop for you?\n\n🟢 Amazon\n🔜 eBay, Walmart, Target, Best Buy — coming soon\n\nOr type a store website. Type \"done\" to continue.";
+    case "shipping_address":
+      return "Where should I deliver your purchases? Send your address (Street, City, State, ZIP).\n\nOr type \"skip\" to add later.";
     case "payment":
-      return "Falta só adicionar seu cartão. Clica no link que enviei ou digita \"pular\" para fazer depois.";
+      return "Just need to add your card. Click the link I sent or type \"skip\" to do it later.";
     default:
-      return "Qual é o seu nome para começarmos?";
+      return "What's your name so we can get started?";
   }
 }
 
-/**
- * Notify the referrer that someone completed onboarding.
- */
+// ─── Notify referrer ─────────────────────────────────────
+
 async function notifyReferrer(shareCode: string, newUserName: string): Promise<void> {
   const link = await prisma.botShareLink.findUnique({
     where: { code: shareCode },
@@ -688,10 +944,9 @@ async function notifyReferrer(shareCode: string, newUserName: string): Promise<v
   });
 
   if (referrer?.telegramChatId && referrer.notificationChannel === "telegram") {
-    // Send Telegram notification via the bot
     const botToken = process.env.TELEGRAM_BOT_TOKEN;
     if (botToken) {
-      const text = `🎉 ${newUserName} ativou o bot que você compartilhou!`;
+      const text = `🎉 ${newUserName} activated the bot you shared!`;
       try {
         await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
           method: "POST",
