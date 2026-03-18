@@ -1,36 +1,24 @@
 /**
- * BrowserBase Checkout Routes — Persistent session checkout actions
- * WITH human behavior simulation (anti-bot detection)
+ * BrowserBase Checkout Routes — Stagehand AI-powered checkout
  *
- * POST /bb/create-context   — Create a new BrowserBase Context
- * POST /bb/open-session     — Open session with context, navigate, check login
+ * Stagehand replaces raw Playwright selectors with AI-driven actions.
+ * Uses act(), extract(), observe() primitives for self-healing automation.
+ *
+ * POST /bb/create-context   — Create a persistent BrowserBase Context (cookies)
+ * POST /bb/open-session     — Open Stagehand session, navigate, check login
  * POST /bb/action           — Perform checkout action (add_to_cart, proceed_to_checkout, place_order)
  * POST /bb/close-session    — Release session
  */
 
 import type { FastifyInstance } from "fastify";
-import { chromium, type Browser, type Page } from "playwright-core";
-import {
-  createContext,
-  openSession as bbOpenSession,
-  closeSession as bbCloseSession,
-  checkLoginStatus,
-} from "../services/bb-context.service.js";
-import {
-  setupHumanBehavior,
-  humanClick,
-  humanNavigate,
-  humanScroll,
-  humanReadPage,
-  humanWait,
-  humanMouseMove,
-  preActionJitter,
-} from "../services/human-simulator.js";
+import { Stagehand } from "@browserbasehq/stagehand";
+import { z } from "zod";
+import { createContext, getLiveUrl } from "../services/bb-context.service.js";
 
-// Active Playwright connections (bbSessionId → { browser, page })
+// Active Stagehand sessions
 const activeSessions = new Map<
   string,
-  { browser: Browser; page: Page; openedAt: number }
+  { stagehand: Stagehand; openedAt: number }
 >();
 
 // Auto-cleanup sessions after 10 min
@@ -40,20 +28,31 @@ setInterval(() => {
   for (const [id, sess] of activeSessions) {
     if (now - sess.openedAt > SESSION_TTL) {
       console.log(`[bb-checkout] Auto-closing stale session ${id.slice(0, 8)}`);
-      try { sess.browser.close(); } catch { /* ignore */ }
+      try { sess.stagehand.close(); } catch { /* ignore */ }
       activeSessions.delete(id);
     }
   }
 }, 60_000);
 
+// ── Stagehand model config ──────────────────────────
+const STAGEHAND_MODEL = process.env.OPENAI_API_KEY
+  ? "openai/gpt-4o-mini"
+  : process.env.ANTHROPIC_API_KEY
+    ? "anthropic/claude-sonnet-4-5-20250929"
+    : "google/gemini-2.5-flash";
+
 export async function bbCheckoutRoutes(app: FastifyInstance) {
   // ── POST /bb/create-context ───────────────────────
   app.post("/bb/create-context", async (_request, reply) => {
     try {
+      const projectId = process.env.BROWSERBASE_PROJECT_ID ?? 'unknown';
+      console.log(`[BB-CHECKOUT] create-context: projectId=${projectId}`);
       const result = await createContext();
+      console.log(`[BB-CHECKOUT] create-context: contextId=${result.bbContextId}`);
       return { success: true, bbContextId: result.bbContextId };
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to create context";
+      console.error(`[BB-CHECKOUT] create-context: ERROR — ${message}`);
       app.log.error(err, "[bb-checkout] create-context error");
       return reply.status(500).send({ success: false, error: message });
     }
@@ -74,41 +73,72 @@ export async function bbCheckoutRoutes(app: FastifyInstance) {
       });
     }
 
+    const isLoginSession = body.purpose === "login";
+    const t0 = Date.now();
+
     try {
-      const result = await bbOpenSession(
-        body.bbContextId,
-        body.storeUrl,
-        body.purpose,
+      console.log(`[BB-CHECKOUT] open-session: purpose=${body.purpose}, contextId=${body.bbContextId.slice(0, 8)}, storeUrl=${body.storeUrl}`);
+
+      const stagehand = new Stagehand({
+        env: "BROWSERBASE",
+        model: STAGEHAND_MODEL,
+        browserbaseSessionCreateParams: {
+          browserSettings: {
+            context: { id: body.bbContextId, persist: true },
+          },
+          keepAlive: isLoginSession,
+          timeout: 1800,
+        },
+        verbose: 1,
+      });
+
+      await stagehand.init();
+      const sessionId = stagehand.browserbaseSessionID!;
+      console.log(`[BB-CHECKOUT] open-session: sessionId=${sessionId.slice(0, 8)}, connecting CDP...`);
+      const page = stagehand.context.pages()[0];
+
+      // Navigate to store
+      console.log(`[BB-CHECKOUT] open-session: Navigating to ${body.storeUrl}`);
+      await page.goto(body.storeUrl, { waitUntil: "domcontentloaded", timeoutMs: 30_000 });
+      const pageTitle = await page.title();
+      console.log(`[BB-CHECKOUT] open-session: Navigated to Amazon, title="${pageTitle}"`);
+
+      // Check login status using AI extraction
+      const loginCheck = await stagehand.extract(
+        "Check if the user is logged into Amazon. Look for a greeting like 'Hello, [Name]' in the navigation bar, or a 'Sign in' button. If on a sign-in page, the user is NOT logged in.",
+        z.object({
+          loggedIn: z.boolean().describe("true if user is logged in, false if sign-in page or 'Sign in' button visible"),
+          userName: z.string().optional().describe("The user's name if visible in nav bar"),
+        }),
       );
 
-      // Apply human stealth setup to new page
-      await setupHumanBehavior(result.page);
+      // Get live view URL with embedded auth token (works without BrowserBase login)
+      let liveUrl: string;
+      try {
+        liveUrl = await getLiveUrl(sessionId);
+      } catch {
+        liveUrl = `https://www.browserbase.com/sessions/${sessionId}/live-view`;
+      }
 
-      // Check login status
-      const loginCheck = await checkLoginStatus(result.page, "amazon");
-
-      const isLoginSession = body.purpose === "login";
+      console.log(`[BB-CHECKOUT] open-session: Login check result — loggedIn=${loginCheck.loggedIn}, userName=${loginCheck.userName ?? 'N/A'}`);
+      console.log(`[BB-CHECKOUT] open-session: Session ${sessionId.slice(0, 8)} opened in ${Date.now() - t0}ms`);
 
       if (isLoginSession) {
-        // LOGIN sessions: disconnect our CDP so the user can interact via Live View URL.
-        // The BrowserBase session stays alive (keepAlive=true) — cookies persist in Context.
-        // When we need the session later, we reconnect via CDP.
-        console.log(`[bb-checkout] Login session ${result.bbSessionId.slice(0, 8)} — releasing CDP so user can interact via Live View`);
-        try { await result.browser.close(); } catch { /* ignore */ }
-        // Do NOT store in activeSessions — user controls this session now
+        // Release Stagehand so user can interact via Live View / connect page
+        console.log(`[BB-CHECKOUT] open-session: Login session ${sessionId.slice(0, 8)} — releasing for user interaction`);
+        await stagehand.close();
       } else {
-        // CHECKOUT sessions: keep CDP connection for automated actions
-        activeSessions.set(result.bbSessionId, {
-          browser: result.browser,
-          page: result.page,
+        // Keep for automated actions
+        activeSessions.set(sessionId, {
+          stagehand,
           openedAt: Date.now(),
         });
       }
 
       return {
         success: true,
-        bbSessionId: result.bbSessionId,
-        liveUrl: result.liveUrl,
+        bbSessionId: sessionId,
+        liveUrl,
         loggedIn: loginCheck.loggedIn,
         userName: loginCheck.userName,
       };
@@ -135,26 +165,50 @@ export async function bbCheckoutRoutes(app: FastifyInstance) {
       });
     }
 
-    const sess = activeSessions.get(body.bbSessionId);
+    // Try active session first, or reconnect
+    console.log(`[BB-CHECKOUT] action: type=${body.action}, sessionId=${body.bbSessionId.slice(0, 8)}`);
+    let sess = activeSessions.get(body.bbSessionId);
     if (!sess) {
-      return reply.status(404).send({
-        success: false,
-        error: "Session not found. It may have expired.",
-      });
+      // Reconnect to existing BrowserBase session
+      try {
+        console.log(`[BB-CHECKOUT] action: Reconnecting to session ${body.bbSessionId.slice(0, 8)}`);
+        const stagehand = new Stagehand({
+          env: "BROWSERBASE",
+          browserbaseSessionID: body.bbSessionId,
+          model: STAGEHAND_MODEL,
+          verbose: 1,
+        });
+        await stagehand.init();
+        sess = { stagehand, openedAt: Date.now() };
+        activeSessions.set(body.bbSessionId, sess);
+      } catch (err) {
+        return reply.status(404).send({
+          success: false,
+          error: "Session not found or expired. Please start a new checkout.",
+        });
+      }
     }
 
-    const { page } = sess;
+    const { stagehand } = sess;
 
     try {
+      console.log(`[BB-CHECKOUT] action: stagehand.act() calling for action=${body.action}...`);
+      let result: any;
       switch (body.action) {
         case "add_to_cart":
-          return await addToCart(page, body.asin!, body.quantity ?? 1);
+          result = await addToCart(stagehand, body.asin!, body.quantity ?? 1);
+          console.log(`[BB-CHECKOUT] action: result=${JSON.stringify(result)}`);
+          return result;
 
         case "proceed_to_checkout":
-          return await proceedToCheckout(page);
+          result = await proceedToCheckout(stagehand);
+          console.log(`[BB-CHECKOUT] action: result=${JSON.stringify(result)}`);
+          return result;
 
         case "place_order":
-          return await placeOrder(page);
+          result = await placeOrder(stagehand);
+          console.log(`[BB-CHECKOUT] action: result=${JSON.stringify(result)}`);
+          return result;
 
         default:
           return reply.status(400).send({
@@ -169,6 +223,85 @@ export async function bbCheckoutRoutes(app: FastifyInstance) {
     }
   });
 
+  // ── POST /bb/inject-cookies ──────────────────────
+  // Injects vault cookies into a BB Context via a temporary Playwright session
+  app.post("/bb/inject-cookies", async (request, reply) => {
+    const body = request.body as { bbContextId?: string; cookies?: any[] };
+    if (!body?.bbContextId || !body?.cookies?.length) {
+      return reply.status(400).send({ success: false, error: "bbContextId and cookies[] required" });
+    }
+
+    const t0 = Date.now();
+    console.log(`[BB-CHECKOUT] inject-cookies: contextId=${body.bbContextId.slice(0, 8)}, cookieCount=${body.cookies.length}`);
+
+    try {
+      // Open a temporary session with the context
+      const stagehand = new Stagehand({
+        env: "BROWSERBASE",
+        model: STAGEHAND_MODEL,
+        browserbaseSessionCreateParams: {
+          browserSettings: {
+            context: { id: body.bbContextId, persist: true },
+          },
+          timeout: 300,
+        },
+        verbose: 0,
+      });
+
+      await stagehand.init();
+      const page = stagehand.context.pages()[0];
+
+      // Navigate to Amazon first (cookies need matching domain)
+      await page.goto("https://www.amazon.com", { waitUntil: "domcontentloaded", timeoutMs: 30_000 });
+
+      // Inject cookies via Playwright context
+      const browserContext = stagehand.context;
+      const cookiesToAdd = body.cookies
+        .filter((c: any) => c.name && c.value && c.domain)
+        .map((c: any) => ({
+          name: c.name,
+          value: c.value,
+          domain: c.domain,
+          path: c.path || "/",
+          secure: c.secure ?? true,
+          httpOnly: c.httpOnly ?? false,
+          sameSite: (c.sameSite === "None" ? "None" : c.sameSite === "Lax" ? "Lax" : "Strict") as "None" | "Lax" | "Strict",
+          ...(c.expires && c.expires > 0 ? { expires: c.expires } : {}),
+        }));
+
+      await browserContext.addCookies(cookiesToAdd);
+      console.log(`[BB-CHECKOUT] inject-cookies: Injected ${cookiesToAdd.length} cookies`);
+
+      // Reload to apply cookies
+      await page.reload({ waitUntil: "domcontentloaded", timeoutMs: 15_000 });
+
+      // Verify login
+      const loginCheck = await stagehand.extract(
+        "Check if the user is logged into Amazon. Look for 'Hello, [Name]' in the nav bar.",
+        z.object({
+          loggedIn: z.boolean(),
+          userName: z.string().optional(),
+        }),
+      );
+
+      console.log(`[BB-CHECKOUT] inject-cookies: After injection — loggedIn=${loginCheck.loggedIn}, userName=${loginCheck.userName ?? 'N/A'}, took ${Date.now() - t0}ms`);
+
+      // Close session — cookies are persisted in the Context
+      await stagehand.close();
+
+      return {
+        success: true,
+        loggedIn: loginCheck.loggedIn,
+        userName: loginCheck.userName,
+        cookiesInjected: cookiesToAdd.length,
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Cookie injection failed";
+      console.error(`[BB-CHECKOUT] inject-cookies: ERROR — ${message}`);
+      return reply.status(500).send({ success: false, error: message });
+    }
+  });
+
   // ── POST /bb/close-session ────────────────────────
   app.post("/bb/close-session", async (request, reply) => {
     const body = request.body as { bbSessionId?: string };
@@ -176,12 +309,14 @@ export async function bbCheckoutRoutes(app: FastifyInstance) {
       return reply.status(400).send({ success: false, error: "bbSessionId required" });
     }
 
+    console.log(`[BB-CHECKOUT] close-session: sessionId=${body.bbSessionId.slice(0, 8)}`);
     const sess = activeSessions.get(body.bbSessionId);
     if (sess) {
-      try {
-        await bbCloseSession(body.bbSessionId, sess.browser);
-      } catch { /* ignore */ }
+      try { await sess.stagehand.close(); } catch { /* ignore */ }
       activeSessions.delete(body.bbSessionId);
+      console.log(`[BB-CHECKOUT] close-session: Session closed and removed from active map`);
+    } else {
+      console.log(`[BB-CHECKOUT] close-session: Session not found in active map (already closed?)`);
     }
 
     return { success: true };
@@ -189,11 +324,11 @@ export async function bbCheckoutRoutes(app: FastifyInstance) {
 }
 
 // ═══════════════════════════════════════════════════════
-// CHECKOUT ACTIONS (Playwright + Human Simulation)
+// CHECKOUT ACTIONS (Stagehand AI)
 // ═══════════════════════════════════════════════════════
 
 async function addToCart(
-  page: Page,
+  stagehand: Stagehand,
   asin: string,
   quantity: number,
 ): Promise<{ success: boolean; data?: any; error?: string }> {
@@ -201,79 +336,59 @@ async function addToCart(
   console.log(`[bb-checkout] addToCart asin=${asin} qty=${quantity}`);
 
   try {
-    // Navigate to product page if not already there
+    const page = stagehand.context.pages()[0];
+
+    // Navigate to product page
     const currentUrl = page.url();
     if (!currentUrl.includes(`/dp/${asin}`)) {
-      await humanNavigate(page, `https://www.amazon.com/dp/${asin}`);
+      await page.goto(`https://www.amazon.com/dp/${asin}`, {
+        waitUntil: "domcontentloaded",
+        timeoutMs: 30_000,
+      });
     }
 
-    // Simulate reading the product page
-    await humanReadPage(page);
+    // Check availability using AI
+    const availability = await stagehand.extract(
+      "Check if this product is available for purchase. Look for 'In Stock', 'Add to Cart' button, or 'Currently unavailable' / 'Out of Stock' messages.",
+      z.object({
+        available: z.boolean().describe("true if product can be purchased"),
+        price: z.string().optional().describe("Current price if visible"),
+      }),
+    );
 
-    // Scroll down to see the Add to Cart area
-    await humanScroll(page, "down", 300);
-    await humanWait(400, 1000);
-
-    // Wait for add to cart button
-    const addBtnSelector =
-      '#add-to-cart-button, #add-to-cart-button-ubb, input[name="submit.add-to-cart"]';
-    const addBtn = await page.waitForSelector(addBtnSelector, { timeout: 10_000 }).catch(() => null);
-
-    if (!addBtn) {
-      const outOfStock = await page.$('#outOfStock, .a-color-unavailable');
-      if (outOfStock) {
-        return { success: false, error: "Product is out of stock" };
-      }
-      return { success: false, error: "Add to Cart button not found" };
+    if (!availability.available) {
+      return { success: false, error: "Product is out of stock" };
     }
 
     // Set quantity if > 1
     if (quantity > 1) {
-      const qtySelector = await page.$('#quantity');
-      if (qtySelector) {
-        await preActionJitter(page);
-        await qtySelector.selectOption(String(quantity));
-        await humanWait(400, 900);
-      }
+      try {
+        await stagehand.act(`Select quantity ${quantity} from the quantity dropdown`);
+      } catch { /* quantity selector may not exist */ }
     }
 
-    // Human-like click on Add to Cart
-    await preActionJitter(page);
-    const clicked = await humanClick(
-      page,
-      '#add-to-cart-button, #add-to-cart-button-ubb, input[name="submit.add-to-cart"]',
-    );
-    if (!clicked) {
-      // Fallback: direct click
-      await addBtn.click();
-    }
+    // Add to cart using AI action
+    await stagehand.act("Click the 'Add to Cart' button");
 
-    // Wait for cart confirmation (human-like variable wait)
-    await humanWait(1500, 3500);
-
-    await page.waitForSelector(
-      '#sw-atc-details-single-container, #huc-v2-order-row-confirm-text, #NATC_SMART_WAGON_CONF_MSG_SUCCESS, .a-size-medium-plus',
-      { timeout: 10_000 },
-    ).catch(() => null);
-
-    // Brief read of confirmation
-    await humanWait(500, 1200);
+    // Wait for cart confirmation
+    await page.waitForTimeout(2000);
 
     // Verify item was added
-    const cartText = await page.textContent('body') ?? '';
-    const added =
-      cartText.includes('Added to Cart') ||
-      cartText.includes('Subtotal') ||
-      cartText.includes('added to your cart') ||
-      cartText.includes('Cart subtotal');
+    const cartStatus = await stagehand.extract(
+      "Check if the item was successfully added to the cart. Look for 'Added to Cart', 'Subtotal', cart confirmation messages, or 'Proceed to checkout' button.",
+      z.object({
+        added: z.boolean().describe("true if item was added to cart successfully"),
+        cartSubtotal: z.string().optional().describe("Cart subtotal if visible"),
+      }),
+    );
 
-    console.log(`[bb-checkout] addToCart completed in ${Date.now() - t0}ms — added=${added}`);
+    console.log(`[bb-checkout] addToCart completed in ${Date.now() - t0}ms — added=${cartStatus.added}`);
 
-    if (!added) {
+    if (!cartStatus.added) {
       return { success: false, error: "Could not confirm item was added to cart" };
     }
 
-    return { success: true, data: { added: true } };
+    return { success: true, data: { added: true, cartSubtotal: cartStatus.cartSubtotal } };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Add to cart failed";
     console.error(`[bb-checkout] addToCart FAILED in ${Date.now() - t0}ms — ${message}`);
@@ -282,117 +397,51 @@ async function addToCart(
 }
 
 async function proceedToCheckout(
-  page: Page,
+  stagehand: Stagehand,
 ): Promise<{ success: boolean; data?: any; error?: string }> {
   const t0 = Date.now();
   console.log("[bb-checkout] proceedToCheckout");
 
   try {
-    const proceedSelector =
-      '#sc-buy-box-ptc-button input, a[name="proceedToRetailCheckout"], #hlb-ptc-btn-native, #sc-buy-box-ptc-button a, input[name="proceedToRetailCheckout"]';
-    const proceedBtn = await page.$(proceedSelector);
+    const page = stagehand.context.pages()[0];
 
-    if (proceedBtn) {
-      await preActionJitter(page);
-      const clicked = await humanClick(page, proceedSelector);
-      if (!clicked) {
-        await proceedBtn.click();
-      }
-    } else {
-      await humanNavigate(
-        page,
+    // Try to proceed to checkout
+    try {
+      await stagehand.act("Click 'Proceed to checkout' or 'Proceed to Buy' button");
+    } catch {
+      // Fallback: navigate directly
+      await page.goto(
         "https://www.amazon.com/gp/buy/spc/handlers/display.html?hasWorkingJavascript=1",
+        { waitUntil: "domcontentloaded", timeoutMs: 30_000 },
       );
     }
 
-    // Human-like wait for checkout page load
-    await humanWait(2000, 4500);
+    await page.waitForTimeout(3000);
 
     // Check if we're on checkout page
     const url = page.url();
-    const isCheckout =
-      url.includes("/buy/") ||
-      url.includes("/checkout/") ||
-      url.includes("spc/handlers");
-
-    if (!isCheckout) {
-      if (url.includes("/ap/signin") || url.includes("/ap/cvf")) {
-        return { success: false, error: "Amazon requires re-authentication at checkout" };
-      }
-      return { success: false, error: "Could not reach checkout page" };
+    if (url.includes("/ap/signin") || url.includes("/ap/cvf")) {
+      return { success: false, error: "Amazon requires re-authentication at checkout" };
     }
 
-    // Simulate reading the checkout summary
-    await humanReadPage(page);
-    await humanScroll(page, "down", 200);
-    await humanWait(500, 1500);
-
-    // Extract checkout summary
-    const summary = await page.evaluate(() => {
-      const getText = (selectors: string[]): string => {
-        for (const sel of selectors) {
-          const el = document.querySelector(sel);
-          if (el?.textContent?.trim()) return el.textContent.trim();
-        }
-        return "";
-      };
-
-      const address = getText([
-        ".displayAddressDiv",
-        ".ship-to-this-address",
-        "#address-book-entry-0 .displayAddressLI",
-        ".shipping-address",
-      ]);
-
-      const payment = getText([
-        ".pmts-instrument-description",
-        ".payment-info",
-        ".pmts-account-radio-button",
-      ]);
-
-      const delivery = getText([
-        ".delivery-option .a-text-bold",
-        ".ship-option .a-text-bold",
-        "#delivery-message",
-        ".arrival-date",
-      ]);
-
-      const total = getText([
-        ".grand-total-price",
-        "#subtotals-marketplace-table .a-color-price",
-        ".order-summary-line-item-amount",
-      ]);
-
-      const items: string[] = [];
-      document
-        .querySelectorAll(
-          ".item-title, .sc-product-title, .shipping-group-item-title",
-        )
-        .forEach((el) => {
-          const text = el.textContent?.trim();
-          if (text && text.length > 3) items.push(text.substring(0, 120));
-        });
-
-      return { address, payment, delivery, total, items };
-    });
-
-    const priceMatch = summary.total?.match(/[\d,]+\.\d{2}/);
-    const price = priceMatch ? parseFloat(priceMatch[0].replace(/,/g, "")) : undefined;
+    // Extract checkout summary using AI
+    const summary = await stagehand.extract(
+      "Extract the complete checkout summary from this Amazon checkout page. Get the shipping address, payment method, delivery estimate, item names, and order total.",
+      z.object({
+        title: z.string().describe("Main item name"),
+        price: z.number().optional().describe("Order total as a number"),
+        address: z.string().optional().describe("Shipping address"),
+        paymentMethod: z.string().optional().describe("Payment method (card ending in XXXX)"),
+        estimatedDelivery: z.string().optional().describe("Estimated delivery date"),
+        total: z.string().optional().describe("Order total as displayed (e.g. '$12.99')"),
+      }),
+    );
 
     console.log(`[bb-checkout] proceedToCheckout completed in ${Date.now() - t0}ms`);
 
     return {
       success: true,
-      data: {
-        summary: {
-          title: summary.items[0] ?? "Amazon Order",
-          price,
-          address: summary.address || undefined,
-          paymentMethod: summary.payment || undefined,
-          estimatedDelivery: summary.delivery || undefined,
-          total: summary.total || undefined,
-        },
-      },
+      data: { summary },
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Checkout navigation failed";
@@ -402,86 +451,40 @@ async function proceedToCheckout(
 }
 
 async function placeOrder(
-  page: Page,
+  stagehand: Stagehand,
 ): Promise<{ success: boolean; data?: any; error?: string }> {
   const t0 = Date.now();
   console.log("[bb-checkout] placeOrder");
 
   try {
-    // Check we're on checkout page
+    const page = stagehand.context.pages()[0];
+
+    // Verify we're on checkout page
     const url = page.url();
     if (!url.includes("/buy/") && !url.includes("/checkout/") && !url.includes("spc/handlers")) {
-      await humanNavigate(
-        page,
+      await page.goto(
         "https://www.amazon.com/gp/buy/spc/handlers/display.html?hasWorkingJavascript=1",
+        { waitUntil: "domcontentloaded", timeoutMs: 30_000 },
       );
-      await humanWait(1500, 3000);
+      await page.waitForTimeout(2000);
     }
 
-    // Simulate reviewing the order one last time
-    await humanReadPage(page);
-    await humanScroll(page, "down", 150);
-    await humanWait(800, 2000);
-
-    // Find "Place your order" button
-    const placeSelector =
-      '#submitOrderButtonId input, #placeYourOrder input, input[name="placeYourOrder1"], #bottomSubmitOrderButtonId input, .place-your-order-button';
-    const placeBtn = await page.$(placeSelector);
-
-    if (!placeBtn) {
-      return { success: false, error: "Place your order button not found" };
-    }
-
-    // Human-like final click — with deliberate pause (this is a big decision)
-    await preActionJitter(page);
-    await humanWait(500, 1500);
-    const clicked = await humanClick(page, placeSelector);
-    if (!clicked) {
-      await placeBtn.click();
-    }
-
-    // Wait for confirmation (longer human wait — watching the spinner)
-    await humanWait(4000, 7000);
+    // Place the order using AI action
+    await stagehand.act("Click the 'Place your order' button to finalize the purchase");
 
     // Wait for confirmation page
-    await page.waitForSelector(
-      '.a-box.a-alert-success, #thank-you-page, .a-alert-success, [data-testid="order-confirmation"]',
-      { timeout: 15_000 },
-    ).catch(() => null);
+    await page.waitForTimeout(5000);
 
-    // Read the confirmation page
-    await humanWait(1000, 2500);
-
-    // Extract confirmation details
-    const confirmation = await page.evaluate(() => {
-      const body = document.body?.textContent ?? "";
-
-      const orderMatch = body.match(
-        /(?:order|pedido)\s*(?:#|number|número)?\s*[:.]?\s*(\d{3}-\d{7}-\d{7})/i,
-      );
-
-      const deliveryMatch = body.match(
-        /(?:delivery|entrega|arriving)\s*(?:by|:)?\s*([A-Za-z]+,?\s+[A-Za-z]+\s+\d{1,2}(?:,?\s+\d{4})?)/i,
-      );
-
-      const totalMatch = body.match(
-        /(?:order total|total do pedido|grand total)[:\s]*\$?([\d,]+\.\d{2})/i,
-      );
-
-      const confirmed =
-        body.includes("Thank you") ||
-        body.includes("order has been placed") ||
-        body.includes("Obrigado") ||
-        !!orderMatch;
-
-      return {
-        confirmed,
-        amazonOrderId: orderMatch?.[1] ?? null,
-        estimatedDelivery: deliveryMatch?.[1] ?? null,
-        total: totalMatch ? `$${totalMatch[1]}` : null,
-        url: window.location.href,
-      };
-    });
+    // Extract order confirmation using AI
+    const confirmation = await stagehand.extract(
+      "Extract the order confirmation details. Look for 'Thank you', order number (format: 123-1234567-1234567), estimated delivery date, and order total. If this is NOT a confirmation page, set confirmed to false.",
+      z.object({
+        confirmed: z.boolean().describe("true if order was placed successfully"),
+        amazonOrderId: z.string().optional().describe("Amazon order number (123-1234567-1234567 format)"),
+        estimatedDelivery: z.string().optional().describe("Estimated delivery date"),
+        total: z.string().optional().describe("Order total"),
+      }),
+    );
 
     console.log(
       `[bb-checkout] placeOrder completed in ${Date.now() - t0}ms — confirmed=${confirmation.confirmed}, orderId=${confirmation.amazonOrderId}`,
@@ -499,19 +502,18 @@ async function placeOrder(
       };
     }
 
-    const errorText = await page.evaluate(() => {
-      const alerts = document.querySelectorAll(".a-alert-content, .a-color-error");
-      const texts: string[] = [];
-      alerts.forEach((el) => {
-        const t = el.textContent?.trim();
-        if (t && t.length > 5) texts.push(t.substring(0, 200));
-      });
-      return texts.join(" | ");
-    });
+    // Check for errors on page
+    const errorInfo = await stagehand.extract(
+      "Check if there are any error messages on this page, such as payment issues, address problems, or other checkout errors.",
+      z.object({
+        hasError: z.boolean(),
+        errorMessage: z.string().optional(),
+      }),
+    );
 
     return {
       success: false,
-      error: errorText || "Order confirmation not detected. Check your Amazon account.",
+      error: errorInfo.errorMessage || "Order confirmation not detected. Check your Amazon account.",
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Place order failed";

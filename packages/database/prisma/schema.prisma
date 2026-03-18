@@ -128,6 +128,8 @@ model User {
   onboardingCompleted Boolean    @default(false)
   botActivatedAt      DateTime?
   notificationChannel String     @default("none") // "none" | "telegram" | "email"
+  botNickname         String?    // custom name the user gave to the bot
+  shippingAddress     String?    @map("shipping_address")
   stripeAccountId        String?
   stripeCustomerId       String?
   stripeSubscriptionId   String?
@@ -227,7 +229,7 @@ model Bot {
   systemPrompt   String?   @map("system_prompt")
   botDisplayName String?   @map("bot_display_name")
   capabilities   String[]  @default([])
-  language       String    @default("pt-BR")
+  language       String    @default("en-US")
 
   owner            User              @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   agent            Agent?
@@ -587,6 +589,7 @@ model StoreContext {
   storeLabel      String    // e.g. "Amazon"
   bbContextId     String?   // Browserbase Context ID — only used for scraping, not login
   status          String    @default("configured") // configured | authenticated | expired
+  pendingProduct  Json?     // { asin, name, price, url } — saved before login, recovered after
   authenticatedAt DateTime?
   lastUsedAt      DateTime  @default(now())
   createdAt       DateTime  @default(now())
@@ -647,14 +650,17 @@ model OnboardingSession {
   telegramChatId     String?   @unique
   whatsappPhone      String?   @unique
   shareCode          String?
-  step               String    @default("start") // start | name | email | email_confirm | limits | payment | complete
+  step               String    @default("start") // name | bot_nickname | email_password | email_confirm | beta_choice | limits | stores | payment | complete
   fullName           String?
+  botNickname        String?
   email              String?
+  password           String?   // temporary: cleared after user creation
   emailToken         String?
   emailAttempts      Int       @default(0)
   userId             String?
   botId              String?
   limitsSet          Boolean   @default(false)
+  storesConfigured   Boolean   @default(false)
   paymentSetup       Boolean   @default(false)
   stripeSetupIntent  String?
   stripePaymentLink  String?

@@ -11,7 +11,9 @@
  */
 
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
-import { prisma } from "@payjarvis/database";
+import { prisma, Prisma } from "@payjarvis/database";
+
+const prismaDbNull = Prisma.DbNull;
 import QRCode from "qrcode";
 import { writeFile } from "fs/promises";
 import { join } from "path";
@@ -92,10 +94,10 @@ function buildSystemPrompt(userFacts: { fact_key: string; fact_value: string }[]
 
   // Extract user name from facts
   const nameFact = userFacts.find((f) => f.fact_key === "name" || f.fact_key === "first_name");
-  const userName = nameFact ? nameFact.fact_value : "usuário";
+  const userName = nameFact ? nameFact.fact_value : "user";
 
   const userDataBlock = isNewUser
-    ? "(Usuário novo — sem dados no perfil ainda.)"
+    ? "(New user — no profile data yet.)"
     : userFacts.map((f) => `- ${f.fact_key}: ${f.fact_value}`).join("\n");
 
   const today = new Date();
@@ -104,75 +106,75 @@ function buildSystemPrompt(userFacts: { fact_key: string; fact_value: string }[]
   const dayOfWeek = dayNames[today.getDay()];
   const tomorrowStr = new Date(today.getTime() + 86400000).toISOString().split("T")[0];
 
-  return `Você é Jarvis, secretário executivo pessoal de ${userName}.
+  return `You are Jarvis, personal executive assistant of ${userName}.
 
-PERSONALIDADE
-Discreto, preciso e proativo.
-Fale como um assistente executivo de alto nível — nunca como um chatbot genérico.
-Sem excessos. Sem emojis desnecessários.
-Respostas curtas e objetivas.
-Só fale quando tiver algo relevante a dizer.
+PERSONALITY
+Discreet, precise, and proactive.
+Speak like a high-level executive assistant — never like a generic chatbot.
+No excess. No unnecessary emojis.
+Short and objective responses.
+Only speak when you have something relevant to say.
 
-IDIOMA
-Detecta automaticamente o idioma do usuário.
-Responde SEMPRE no mesmo idioma da mensagem recebida.
-Português BR, English ou Español — nunca misture.
+LANGUAGE
+Automatically detect the user's language.
+ALWAYS respond in the same language as the received message.
+English, Português BR, or Español — never mix.
 
-MEMÓRIA
-Você lembra de absolutamente tudo:
-- Produtos comprados e frequência
-- Marcas preferidas e rejeitadas
-- Tamanhos, cores, especificações
-- Orçamento habitual por categoria
-- Datas importantes mencionadas
-- Restrições (alimentares, alergias, etc)
-- Endereços de entrega preferidos
-Nunca pergunte algo que já foi informado anteriormente.
-${knownKeys ? `\nDados que você JÁ SABE (NÃO pergunte novamente): ${knownKeys}` : ""}
+MEMORY
+You remember absolutely everything:
+- Products purchased and frequency
+- Preferred and rejected brands
+- Sizes, colors, specifications
+- Usual budget per category
+- Important dates mentioned
+- Restrictions (dietary, allergies, etc)
+- Preferred delivery addresses
+Never ask for something that was already provided.
+${knownKeys ? `\nData you ALREADY KNOW (DO NOT ask again): ${knownKeys}` : ""}
 
-Quando o usuário fornecer QUALQUER dado pessoal → use save_user_fact IMEDIATAMENTE.
+When the user provides ANY personal data → use save_user_fact IMMEDIATELY.
 
-PROATIVIDADE — REGRAS DE OURO
-Só entre em contato proativamente quando UMA dessas condições for verdadeira:
-1. Produto favorito com desconto acima de 20%
-2. Item de reposição periódica próximo do prazo
-3. Data importante em menos de 7 dias
-4. Pedido com problema (atraso, cancelamento)
-5. Oportunidade excepcional (Prime Day, Black Friday)
+PROACTIVITY — GOLDEN RULES
+Only reach out proactively when ONE of these conditions is true:
+1. Favorite product with discount above 20%
+2. Recurring item near reorder date
+3. Important date in less than 7 days
+4. Order with issue (delay, cancellation)
+5. Exceptional opportunity (Prime Day, Black Friday)
 
-NUNCA entre em contato para:
-- Marketing ou promoções genéricas
-- Confirmar coisas óbvias
-- Pedir feedback sem motivo
-- Dizer que está disponível
+NEVER reach out for:
+- Generic marketing or promotions
+- Confirming obvious things
+- Asking for feedback without reason
+- Saying you're available
 
-FORMATO
-Máximo 3 linhas por mensagem.
-Se listar opções: máximo 3.
-Nunca explique o que vai fazer — apenas faça.
-Use números para opções, nunca bullets.
+FORMAT
+Maximum 3 lines per message.
+If listing options: maximum 3.
+Never explain what you're going to do — just do it.
+Use numbers for options, never bullets.
 
-CANAL: WhatsApp — respostas ainda mais concisas (WhatsApp trunca mensagens longas).
+CHANNEL: WhatsApp — even more concise responses (WhatsApp truncates long messages).
 
-COMPRAS
-Quando receber pedido de compra:
-1. Busca Amazon e Mercado Livre simultaneamente
-2. Filtra pelo histórico de preferências do usuário
-3. Apresenta A MELHOR opção diretamente — não lista 10
-4. Se usuário quiser mais: mostra até 2 alternativas
-5. Aguarda confirmação e executa
+SHOPPING
+When receiving a purchase request:
+1. Search Amazon simultaneously
+2. Filter by user's preference history
+3. Present THE BEST option directly — don't list 10
+4. If user wants more: show up to 2 alternatives
+5. Wait for confirmation and execute
 
-Se valor abaixo do limite de auto-aprovação: executa sem pedir confirmação e avisa depois.
+If value below auto-approval limit: execute without asking and notify after.
 
-PRIMEIRAS 3 INTERAÇÕES
-Faz UMA pergunta por vez para entender o perfil.
-Nunca mais de uma pergunta por mensagem.
-Após 3 interações: para de perguntar, aprende pelo uso.
+FIRST 3 INTERACTIONS
+Ask ONE question at a time to understand the profile.
+Never more than one question per message.
+After 3 interactions: stop asking, learn from usage.
 
-APRENDIZADO
-A cada interação, atualiza silenciosamente o perfil.
-Ajusta recomendações baseado em aprovações/rejeições,
-padrões de horário, feedback explícito e implícito.
+LEARNING
+With each interaction, silently update the profile.
+Adjust recommendations based on approvals/rejections,
+time patterns, explicit and implicit feedback.
 
 ---
 
@@ -185,10 +187,10 @@ ABSOLUTE RULES
 3. Payment ONLY with real transaction ID from PayJarvis
 4. BEFORE PAYING — always confirm with complete summary
 
-PERFIL DO USUÁRIO
+USER PROFILE
 ${userDataBlock}
 
-Use TODOS os dados do perfil automaticamente em cada ação.
+Use ALL profile data automatically in every action.
 
 TOOLS
 - search_flights, search_hotels, search_restaurants, search_events
@@ -197,18 +199,18 @@ TOOLS
 - search_transit, compare_transit, train_status, search_rental_cars
 - find_home_service, find_mechanic
 - request_payment, get_transactions, set_reminder, get_reminders, save_user_fact
-- share_jarvis — gera link de indicação + QR Code para o usuário convidar amigos
+- share_jarvis — generates a referral link + QR Code so the user can invite friends
 
-COMPARTILHAMENTO
-Quando o usuário quiser compartilhar, indicar, convidar amigos, pedir QR code ou link:
-→ Use share_jarvis IMEDIATAMENTE. Ele gera o link e envia o QR Code automaticamente.
-→ Depois diga que o link e QR foram enviados. O amigo ganha 60 dias grátis.
+SHARING
+When the user wants to share, invite, refer friends, or asks for a QR code or link:
+→ Use share_jarvis IMMEDIATELY. It generates the link and sends the QR Code automatically.
+→ Then tell the user the link and QR were sent. Their friend gets free Beta access.
 
-EXECUÇÃO
-1. Usuário pede → USA A TOOL IMEDIATAMENTE
-2. Apresenta A MELHOR opção (máximo 3)
-3. Confirmação → request_payment
-4. Pronto`;
+EXECUTION
+1. User asks → USE THE TOOL IMMEDIATELY
+2. Present THE BEST option (max 3)
+3. Confirmation → request_payment
+4. Done`;
 }
 
 // ─── Tool declarations (same as openclaw) ──────────────
@@ -366,11 +368,48 @@ const tools: any[] = [
       },
       {
         name: "share_jarvis",
-        description: "Generate a referral link and QR Code so the user can invite friends to Jarvis. Use when user wants to share, invite, refer a friend, or asks for QR code/link. The friend gets 60 free days.",
+        description: "Generate a referral link and QR Code so the user can invite friends to Jarvis. Use when user wants to share, invite, refer a friend, or asks for QR code/link. The friend gets free Beta access.",
         parameters: {
           type: SchemaType.OBJECT,
           properties: {},
           required: [],
+        },
+      },
+      {
+        name: "amazon_check_session",
+        description: "Check if the user has an active Amazon session for purchases. Call this when the user wants to buy something on Amazon.",
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            userId: { type: SchemaType.STRING, description: "The user ID" },
+          },
+          required: ["userId"],
+        },
+      },
+      {
+        name: "amazon_start_checkout",
+        description: "Start Amazon checkout for a product. Adds item to cart and proceeds to checkout. Only call after confirming the user wants to buy AND the Amazon session is authenticated.",
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            userId: { type: SchemaType.STRING, description: "The user ID" },
+            asin: { type: SchemaType.STRING, description: "Amazon product ASIN" },
+            title: { type: SchemaType.STRING, description: "Product name" },
+            price: { type: SchemaType.NUMBER, description: "Product price in USD" },
+          },
+          required: ["userId", "asin", "title", "price"],
+        },
+      },
+      {
+        name: "amazon_confirm_order",
+        description: "Confirm and place an Amazon order. Only call after the user explicitly confirms they want to place the order.",
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            userId: { type: SchemaType.STRING, description: "The user ID" },
+            orderId: { type: SchemaType.STRING, description: "The order ID from start_checkout" },
+          },
+          required: ["userId", "orderId"],
         },
       },
     ],
@@ -562,6 +601,65 @@ async function handleTool(userId: string, name: string, args: Record<string, unk
       }
     }
 
+    case "amazon_check_session": {
+      console.log(`[AMAZON-CHECKOUT] Tool called: amazon_check_session { userId: "${args.userId || userId}" }`);
+      try {
+        const res = await fetch(`${PAYJARVIS_URL}/api/amazon/checkout/check-session`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: args.userId || userId }),
+          signal: AbortSignal.timeout(60_000),
+        });
+        const data = await res.json() as Record<string, unknown>;
+        return data.success ? (data.data as Record<string, unknown>) : { error: (data as any).error || "Session check failed" };
+      } catch (err) {
+        return { error: `Amazon session check failed: ${(err as Error).message}` };
+      }
+    }
+
+    case "amazon_start_checkout": {
+      console.log(`[AMAZON-CHECKOUT] Tool called: amazon_start_checkout { asin: "${args.asin}", userId: "${args.userId || userId}" }`);
+      try {
+        // Resolve botId for the user
+        const cleanPhone = userId.replace("whatsapp:", "");
+        const user = await prisma.user.findUnique({ where: { phone: cleanPhone }, select: { id: true, bots: { select: { id: true }, take: 1 } } });
+        const botId = user?.bots?.[0]?.id || "";
+        const res = await fetch(`${PAYJARVIS_URL}/api/amazon/checkout/start`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId: args.userId || user?.id || userId,
+            botId,
+            asin: args.asin,
+            title: args.title,
+            price: args.price,
+            quantity: 1,
+          }),
+          signal: AbortSignal.timeout(120_000),
+        });
+        const data = await res.json() as Record<string, unknown>;
+        return data.success ? (data.data as Record<string, unknown>) : { error: (data as any).error || "Checkout failed" };
+      } catch (err) {
+        return { error: `Amazon checkout failed: ${(err as Error).message}` };
+      }
+    }
+
+    case "amazon_confirm_order": {
+      console.log(`[AMAZON-CHECKOUT] Tool called: amazon_confirm_order { orderId: "${args.orderId}", userId: "${args.userId || userId}" }`);
+      try {
+        const res = await fetch(`${PAYJARVIS_URL}/api/amazon/checkout/confirm`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ orderId: args.orderId, userId: args.userId || userId }),
+          signal: AbortSignal.timeout(120_000),
+        });
+        const data = await res.json() as Record<string, unknown>;
+        return data.success ? (data.data as Record<string, unknown>) : { error: (data as any).error || "Order confirmation failed" };
+      } catch (err) {
+        return { error: `Amazon order confirmation failed: ${(err as Error).message}` };
+      }
+    }
+
     default:
       return { error: `Unknown tool: ${name}` };
   }
@@ -582,10 +680,10 @@ async function generateShareForWhatsApp(userId: string): Promise<Record<string, 
   });
 
   let code: string;
-  let firstName = "você";
+  let firstName = "you";
 
   if (user) {
-    firstName = user.fullName?.split(" ")[0] || "você";
+    firstName = user.fullName?.split(" ")[0] || "you";
 
     // Find user's bot for proper share link
     const bot = await prisma.bot.findFirst({
@@ -656,7 +754,7 @@ async function generateShareForWhatsApp(userId: string): Promise<Record<string, 
   await client.messages.create({
     from: fromNumber,
     to: toNumber,
-    body: `📲 *Seu link de indicação:*\n\n${whatsappLink}\n\nSeu amigo ganha 60 dias grátis!\nOu escaneie o QR Code acima.`,
+    body: `📲 *Your referral link:*\n\n${whatsappLink}\n\nYour friend gets free Beta access!\nOr scan the QR Code above.`,
     mediaUrl: [qrPublicUrl],
   });
 
@@ -668,7 +766,7 @@ async function generateShareForWhatsApp(userId: string): Promise<Record<string, 
     whatsappLink,
     webLink,
     qrCodeSent: true,
-    message: `Link de indicação gerado e enviado para ${firstName}. O amigo ganha 60 dias grátis do Jarvis.`,
+    message: `Referral link generated and sent to ${firstName}. Your friend gets free Beta access to Jarvis.`,
   };
 }
 
@@ -693,7 +791,7 @@ async function chatWithGemini(
   userFacts: { fact_key: string; fact_value: string }[]
 ): Promise<string> {
   if (!GEMINI_API_KEY) {
-    return "Jarvis está temporariamente indisponível. Tente novamente em instantes.";
+    return "Jarvis is temporarily unavailable. Please try again in a moment.";
   }
 
   const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
@@ -807,7 +905,8 @@ export async function processWhatsAppMessage(from: string, text: string): Promis
   console.log(`[WhatsApp] ${userId}: ${text.substring(0, 80)}`);
 
   // 0a. Handle START command (referral deep-link from wa.me/17547145921?text=START+CODE)
-  const startMatch = text.match(/^START\s+(\S+)$/i);
+  // Also match "Quero começar CODE" as alternative link format
+  const startMatch = text.match(/^(?:START|Quero\s+come[cç]ar)\s+(\S+)$/i);
   if (startMatch) {
     try {
       const result = await startOnboarding(userId, "whatsapp", startMatch[1]);
@@ -827,8 +926,8 @@ export async function processWhatsAppMessage(from: string, text: string): Promis
         // QR + link already sent by generateShareForWhatsApp
         // Save conversation
         await saveMessage(userId, "user", text);
-        await saveMessage(userId, "model", `Link de indicação enviado: ${result.whatsappLink}`);
-        return `Seu link de indicação e QR Code foram enviados! 📲\n\nSeu amigo ganha 60 dias grátis do Jarvis.`;
+        await saveMessage(userId, "model", `Referral link sent: ${result.whatsappLink}`);
+        return `Your referral link and QR Code have been sent! 📲\n\nYour friend gets free Beta access to Jarvis.`;
       }
       // If error (no account, no bot), fall through to normal Gemini flow
       console.log(`[WA SHARE] Not eligible: ${result.error}`);
@@ -867,6 +966,120 @@ export async function processWhatsAppMessage(from: string, text: string): Promis
     // Fall through to normal Jarvis flow
   }
 
+  // 1b. Unknown user — no account, no onboarding session → check pending referrals
+  if (!resolvedUserId) {
+    const hasOnboarding = await hasActiveSession(userId, "whatsapp").catch(() => false);
+    if (!hasOnboarding) {
+      // Check if this number has a pending referral (from direct invite)
+      const cleanPhone = userId.replace("whatsapp:", "");
+      try {
+        const pending = await prisma.$queryRaw<{ share_code: string | null; referrer_name: string; invitee_name: string; id: number }[]>`
+          SELECT id, share_code, referrer_name, invitee_name FROM pending_referrals
+          WHERE (phone = ${cleanPhone} OR phone = ${'+' + cleanPhone.replace('+', '')})
+            AND used = false AND expires_at > NOW()
+          ORDER BY created_at DESC LIMIT 1
+        `;
+
+        if (pending.length > 0) {
+          const ref = pending[0];
+          console.log(`[WhatsApp] Pending referral found for ${cleanPhone}: invited by ${ref.referrer_name}, code ${ref.share_code}`);
+
+          // Mark as used
+          await prisma.$executeRaw`UPDATE pending_referrals SET used = true WHERE id = ${ref.id}`;
+
+          // Start onboarding with the share code
+          try {
+            const result = await startOnboarding(userId, "whatsapp", ref.share_code ?? undefined);
+            return result.message;
+          } catch (err) {
+            console.error("[WA REFERRAL] Onboarding start error:", (err as Error).message);
+            return "Erro ao iniciar. Tente novamente.";
+          }
+        }
+      } catch (err) {
+        console.error("[WA REFERRAL] Pending check error:", (err as Error).message);
+      }
+
+      // No pending referral — generic unknown user message
+      console.log(`[WhatsApp] Unknown user ${userId} — no account, no onboarding, no pending referral`);
+      return "Hi! 👋 I'm Jarvis, your personal assistant.\n\nIt looks like you don't have an account yet. To get started:\n\n1. Ask a friend who already uses Jarvis for an invite\n2. Or visit payjarvis.com to create your account\n\nWe're in Beta — access is completely free!";
+    }
+  }
+
+  // 1c. Check for Amazon login confirmation — recover pending product
+  if (resolvedUserId) {
+    const amazonConfirmPattern = /\b(conectad[oa]|pronto|done|já\s*(fiz|fez)\s*login|logged\s*in|connected|já\s*conectei|entrei|logado|loguei)\b/i;
+    if (amazonConfirmPattern.test(text)) {
+      try {
+        const pendingCtx = await prisma.storeContext.findFirst({
+          where: { userId: resolvedUserId, store: "amazon", pendingProduct: { not: Prisma.DbNull } },
+        });
+        if (pendingCtx?.pendingProduct && typeof pendingCtx.pendingProduct === "object") {
+          const product = pendingCtx.pendingProduct as { asin: string; name: string; price: number; url: string };
+          console.log(`[AMAZON-CHECKOUT] Recovered pending product after login: ${JSON.stringify(product)}`);
+
+          // Clear pending product
+          await prisma.storeContext.update({
+            where: { id: pendingCtx.id },
+            data: { pendingProduct: prismaDbNull, updatedAt: new Date() },
+          });
+
+          // Check session first
+          try {
+            const sessionRes = await fetch(`${PAYJARVIS_URL}/api/amazon/checkout/check-session`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ userId: resolvedUserId }),
+              signal: AbortSignal.timeout(30_000),
+            });
+            const sessionData = await sessionRes.json() as { success: boolean; data?: { authenticated?: boolean } };
+
+            if (sessionData.success && sessionData.data?.authenticated) {
+              console.log(`[AMAZON-CHECKOUT] Session confirmed, auto-starting checkout for ASIN=${product.asin}`);
+              // Auto-start checkout
+              const user = await prisma.user.findUnique({
+                where: { id: resolvedUserId },
+                select: { bots: { select: { id: true }, take: 1 } },
+              });
+              const botId = user?.bots?.[0]?.id || "";
+              const checkoutRes = await fetch(`${PAYJARVIS_URL}/api/amazon/checkout/start`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  userId: resolvedUserId,
+                  botId,
+                  asin: product.asin,
+                  title: product.name,
+                  price: product.price,
+                  quantity: 1,
+                }),
+                signal: AbortSignal.timeout(120_000),
+              });
+              const checkoutData = await checkoutRes.json() as { success: boolean; data?: any };
+
+              if (checkoutData.success && checkoutData.data?.status === "READY_TO_CONFIRM") {
+                const summary = checkoutData.data.summary;
+                return `Amazon Connected! I found your product:\n\n🛒 *${product.name}*\n💰 $${product.price}\n\n${summary?.address ? `📦 Shipping to: ${summary.address}\n` : ""}${summary?.estimatedDelivery ? `🚚 Delivery: ${summary.estimatedDelivery}\n` : ""}\nShall I place the order?`;
+              } else if (checkoutData.data?.status === "NEEDS_AUTH") {
+                return `Thanks! But it seems the login didn't complete. Please try again:\n\n${checkoutData.data.authUrl}`;
+              } else {
+                return `Amazon Connected! But there was an issue starting the checkout: ${checkoutData.data?.message || "Unknown error"}. Please try again.`;
+              }
+            }
+          } catch (err) {
+            console.error(`[AMAZON-CHECKOUT] Auto-checkout error: ${(err as Error).message}`);
+          }
+
+          // If session check failed, tell user we recovered the product
+          return `Amazon Connected! I had ${product.name} ($${product.price}) saved. Let me check your session and start the checkout...`;
+        }
+      } catch (err) {
+        console.error(`[AMAZON-CHECKOUT] Pending product recovery error: ${(err as Error).message}`);
+        // Fall through to normal flow
+      }
+    }
+  }
+
   // 2. Check credits before processing
   if (resolvedUserId) {
     try {
@@ -882,20 +1095,63 @@ export async function processWhatsAppMessage(from: string, text: string): Promis
     }
   }
 
-  // 3. Process as normal Jarvis message
+  // 3. Determine tier: standard vs premium
+  let userTier = "free";
+  if (resolvedUserId) {
+    try {
+      const user = await prisma.user.findUnique({
+        where: { id: resolvedUserId },
+        select: { planType: true },
+      });
+      userTier = user?.planType || "free";
+    } catch { /* default free */ }
+  }
+
+  // 4. Process message
   try {
     const [history, userFacts] = await Promise.all([
       getHistory(userId),
       getUserContext(userId),
     ]);
 
-    const response = await chatWithGemini(history, text, userId, userFacts);
+    let response: string;
 
-    // Save conversation
-    await saveMessage(userId, "user", text);
-    await saveMessage(userId, "model", response);
+    if (userTier === "premium") {
+      // ═══ PREMIUM PIPELINE ═══
+      // Call OpenClaw premium endpoint (runs adaptive agent layers)
+      console.log(`[WA PREMIUM] Processing for ${userId}`);
+      try {
+        const premiumRes = await fetch(`http://localhost:4000/api/premium/process`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-internal-secret": process.env.INTERNAL_SECRET || "" },
+          body: JSON.stringify({ userId, text, platform: "whatsapp" }),
+          signal: AbortSignal.timeout(30000),
+        });
+        const premiumData = await premiumRes.json() as { success: boolean; response: string };
+        if (premiumData.success) {
+          response = premiumData.response;
+        } else {
+          // Fallback to standard
+          console.warn("[WA PREMIUM] Fallback to standard:", premiumData);
+          response = await chatWithGemini(history, text, userId, userFacts);
+          await saveMessage(userId, "user", text);
+          await saveMessage(userId, "model", response);
+        }
+      } catch (err) {
+        // Fallback to standard if premium service unavailable
+        console.warn("[WA PREMIUM] Service unavailable, fallback:", (err as Error).message);
+        response = await chatWithGemini(history, text, userId, userFacts);
+        await saveMessage(userId, "user", text);
+        await saveMessage(userId, "model", response);
+      }
+    } else {
+      // ═══ STANDARD PIPELINE ═══
+      response = await chatWithGemini(history, text, userId, userFacts);
+      await saveMessage(userId, "user", text);
+      await saveMessage(userId, "model", response);
+    }
 
-    // Extract facts in background (don't block response)
+    // Extract facts in background (both tiers — premium also does its own enhanced version)
     extractAndSaveFacts(userId, text, response).catch((err) =>
       console.error("[WA FACT] Background error:", err.message)
     );

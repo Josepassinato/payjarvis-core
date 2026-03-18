@@ -11,6 +11,7 @@
 
 import type { FastifyInstance } from "fastify";
 import crypto from "crypto";
+import { prisma } from "@payjarvis/database";
 import {
   saveSession,
   getSession,
@@ -24,7 +25,7 @@ const VAULT_LINK_SECRET =
 const WEB_URL = process.env.WEB_URL ?? "https://www.payjarvis.com";
 
 function generateConnectToken(userId: string): { token: string; expiresAt: string } {
-  const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 60 minutes
   const payload = JSON.stringify({
     userId,
     purpose: "amazon-connect",
@@ -98,18 +99,183 @@ export async function vaultRoutes(app: FastifyInstance) {
         .send({ success: false, error: "token is required" });
     }
 
+    console.log(`[CONNECT-AMAZON] Token received, verifying...`);
     const result = verifyConnectToken(body.token);
     if (!result) {
+      console.log(`[CONNECT-AMAZON] Token invalid or expired`);
       return reply.status(401).send({
         success: false,
         error: "Invalid or expired token",
       });
     }
 
+    console.log(`[CONNECT-AMAZON] Token valid, userId=${result.userId}`);
     return reply.send({
       success: true,
       data: { userId: result.userId },
     });
+  });
+
+  // ── Start live login session (BrowserBase iframe) ────
+  app.post("/api/vault/amazon/start-live-login", async (request, reply) => {
+    const body = request.body as { userId?: string };
+    if (!body?.userId) {
+      return reply.status(400).send({ success: false, error: "userId is required" });
+    }
+
+    console.log(`[CONNECT-AMAZON] Starting live login session for userId=${body.userId}`);
+
+    try {
+      // 1. Reuse existing BrowserBase context or create a new one
+
+      const existingCtx = await prisma.storeContext.findFirst({
+        where: { userId: body.userId, store: "amazon" },
+        select: { bbContextId: true },
+      });
+
+      let bbContextId = existingCtx?.bbContextId ?? null;
+
+      if (bbContextId) {
+        console.log(`[CONNECT-AMAZON] Reusing existing BrowserBase context: ${bbContextId.slice(0, 8)}`);
+      } else {
+        console.log(`[CONNECT-AMAZON] No existing context, creating new one...`);
+        const ensureRes = await fetch(`${BROWSER_AGENT_URL}/bb/create-context`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+          signal: AbortSignal.timeout(30_000),
+        });
+        const ensureData = (await ensureRes.json()) as { success: boolean; bbContextId?: string; error?: string };
+        if (!ensureData.success || !ensureData.bbContextId) {
+          return reply.status(500).send({ success: false, error: ensureData.error ?? "Failed to create browser context" });
+        }
+        bbContextId = ensureData.bbContextId;
+        console.log(`[CONNECT-AMAZON] New context created: ${bbContextId.slice(0, 8)}`);
+      }
+
+      // 2. Open login session → navigates to Amazon sign-in, returns liveUrl
+      const sessionRes = await fetch(`${BROWSER_AGENT_URL}/bb/open-session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bbContextId,
+          storeUrl: "https://www.amazon.com/ap/signin?openid.pape.max_auth_age=0&openid.return_to=https%3A%2F%2Fwww.amazon.com%2F&openid.identity=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.assoc_handle=usflex&openid.mode=checkid_setup&openid.claimed_id=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.ns=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0",
+          purpose: "login",
+        }),
+        signal: AbortSignal.timeout(90_000),
+      });
+      const sessionData = (await sessionRes.json()) as {
+        success: boolean;
+        bbSessionId?: string;
+        liveUrl?: string;
+        loggedIn?: boolean;
+        userName?: string;
+        error?: string;
+      };
+
+      if (!sessionData.success) {
+        return reply.status(500).send({ success: false, error: sessionData.error ?? "Failed to open login session" });
+      }
+
+      // Already logged in? Mark as connected immediately
+      if (sessionData.loggedIn) {
+        console.log(`[CONNECT-AMAZON] User already logged in! userName=${sessionData.userName}`);
+        // Save the context for future use
+        await prisma.storeContext.upsert({
+          where: { userId_store: { userId: body.userId, store: "amazon" } },
+          create: { userId: body.userId, store: "amazon", storeUrl: "https://www.amazon.com", storeLabel: "Amazon", bbContextId, status: "authenticated", authenticatedAt: new Date() },
+          update: { bbContextId, status: "authenticated", authenticatedAt: new Date(), updatedAt: new Date() },
+        });
+        return reply.send({
+          success: true,
+          data: { alreadyLoggedIn: true, userName: sessionData.userName },
+        });
+      }
+
+      console.log(`[CONNECT-AMAZON] Live login session opened: sessionId=${sessionData.bbSessionId?.slice(0, 8)}, liveUrl=${sessionData.liveUrl?.slice(0, 80)}`);
+
+      // Store bbContextId for this user so check-live-login can find it
+      await prisma.storeContext.upsert({
+        where: { userId_store: { userId: body.userId, store: "amazon" } },
+        create: { userId: body.userId, store: "amazon", storeUrl: "https://www.amazon.com", storeLabel: "Amazon", bbContextId, status: "configured" },
+        update: { bbContextId, status: "configured", updatedAt: new Date() },
+      });
+
+      return reply.send({
+        success: true,
+        data: {
+          bbSessionId: sessionData.bbSessionId,
+          liveUrl: sessionData.liveUrl,
+          bbContextId,
+        },
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to start live login";
+      request.log.error(err, "[VAULT] start-live-login error");
+      return reply.status(500).send({ success: false, error: message });
+    }
+  });
+
+  // ── Check if live login completed ──────────────────
+  app.get("/api/vault/amazon/check-live-login/:bbContextId", async (request, reply) => {
+    const { bbContextId } = request.params as { bbContextId: string };
+    const userId = (request.query as any).userId as string | undefined;
+
+    if (!userId) {
+      return reply.status(400).send({ success: false, error: "userId query param required" });
+    }
+
+    try {
+      // Open a quick verification session with the same context
+      const verifyRes = await fetch(`${BROWSER_AGENT_URL}/bb/open-session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bbContextId,
+          storeUrl: "https://www.amazon.com",
+          purpose: "verify",
+        }),
+        signal: AbortSignal.timeout(60_000),
+      });
+      const verifyData = (await verifyRes.json()) as {
+        success: boolean;
+        bbSessionId?: string;
+        loggedIn?: boolean;
+        userName?: string;
+        error?: string;
+      };
+
+      // Close verify session
+      if (verifyData.bbSessionId) {
+        fetch(`${BROWSER_AGENT_URL}/bb/close-session`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ bbSessionId: verifyData.bbSessionId }),
+        }).catch(() => {});
+      }
+
+      if (verifyData.success && verifyData.loggedIn) {
+        console.log(`[CONNECT-AMAZON] Live login verified! userName=${verifyData.userName}`);
+        // Mark as authenticated
+  
+        await prisma.storeContext.updateMany({
+          where: { userId, store: "amazon" },
+          data: { status: "authenticated", authenticatedAt: new Date(), updatedAt: new Date() },
+        });
+        return reply.send({
+          success: true,
+          data: { loggedIn: true, userName: verifyData.userName },
+        });
+      }
+
+      return reply.send({
+        success: true,
+        data: { loggedIn: false },
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Login check failed";
+      return reply.status(500).send({ success: false, error: message });
+    }
   });
 
   // ── Automated Amazon login (email+password → cookies) ─
@@ -128,6 +294,7 @@ export async function vaultRoutes(app: FastifyInstance) {
     }
 
     // SECURITY: never log credentials
+    console.log(`[CONNECT-AMAZON] Login form submitted, userId=${body.userId}, email=${body.email}`);
     request.log.info({ userId: body.userId }, "[VAULT] Amazon login requested");
 
     try {
@@ -155,6 +322,7 @@ export async function vaultRoutes(app: FastifyInstance) {
 
       // NEEDS_HUMAN: verification required, session stays open
       if (loginData.status === "NEEDS_HUMAN" && loginData.sessionId) {
+        console.log(`[CONNECT-AMAZON] Login result: success=false, needs2FA=true, obstacle=${loginData.obstacle}, sessionId=${loginData.sessionId}`);
         request.log.info(
           { userId: body.userId, obstacle: loginData.obstacle, sessionId: loginData.sessionId },
           "[VAULT] Amazon login needs human verification"
@@ -171,6 +339,7 @@ export async function vaultRoutes(app: FastifyInstance) {
       }
 
       if (!loginData.success) {
+        console.log(`[CONNECT-AMAZON] Login result: success=false, error=${loginData.error}, step=${loginData.step}`);
         return reply.status(loginRes.status).send({
           success: false,
           error: loginData.error ?? "Login failed",
@@ -180,12 +349,25 @@ export async function vaultRoutes(app: FastifyInstance) {
       }
 
       // Direct success — save cookies
+      console.log(`[CONNECT-AMAZON] Login result: success=true, cookieCount=${loginData.data!.cookieCount}`);
       const result = await saveSession({
         userId: body.userId,
         provider: "amazon",
         cookies: loginData.data!.cookies,
         userAgent: loginData.data!.userAgent,
       });
+
+      // Also mark store_contexts as authenticated (keeps both systems in sync)
+      try {
+        await prisma.storeContext.upsert({
+          where: { userId_store: { userId: body.userId, store: "amazon" } },
+          create: { userId: body.userId, store: "amazon", storeUrl: "https://www.amazon.com", storeLabel: "Amazon", status: "authenticated", authenticatedAt: new Date() },
+          update: { status: "authenticated", authenticatedAt: new Date(), updatedAt: new Date() },
+        });
+        console.log(`[CONNECT-AMAZON] store_contexts marked authenticated for userId=${body.userId}`);
+      } catch (syncErr) {
+        console.error(`[CONNECT-AMAZON] Failed to sync store_contexts: ${(syncErr as Error).message}`);
+      }
 
       request.log.info(
         { userId: body.userId, cookieCount: loginData.data!.cookieCount },
@@ -226,12 +408,25 @@ export async function vaultRoutes(app: FastifyInstance) {
       if (data.success && data.status === "completed" && data.data) {
         const userId = (request.query as any).userId;
         if (userId) {
+          console.log(`[CONNECT-AMAZON] Amazon Connected! Saving session for userId=${userId}, cookieCount=${data.data.cookieCount}`);
           await saveSession({
             userId,
             provider: "amazon",
             cookies: data.data.cookies,
             userAgent: data.data.userAgent,
           });
+
+          // Also mark store_contexts as authenticated
+          try {
+            await prisma.storeContext.upsert({
+              where: { userId_store: { userId, store: "amazon" } },
+              create: { userId, store: "amazon", storeUrl: "https://www.amazon.com", storeLabel: "Amazon", status: "authenticated", authenticatedAt: new Date() },
+              update: { status: "authenticated", authenticatedAt: new Date(), updatedAt: new Date() },
+            });
+            console.log(`[CONNECT-AMAZON] store_contexts marked authenticated (2FA) for userId=${userId}`);
+          } catch (syncErr) {
+            console.error(`[CONNECT-AMAZON] Failed to sync store_contexts (2FA): ${(syncErr as Error).message}`);
+          }
 
           request.log.info(
             { userId, cookieCount: data.data.cookieCount },

@@ -1,5 +1,643 @@
 # HISTORICO.md — PayJarvis
 
+## 2026-03-18 — Fix: Context reutilizado + Verificação completa
+
+### Diagnóstico BrowserBase Contexts
+- **Contexts JÁ estavam implementados** — `bb-context.service.ts` cria Contexts, `bb-checkout.ts` vincula Sessions
+- Stagehand suporta nativamente via `browserbaseSessionCreateParams.browserSettings.context.id`
+- Context `cc08d476-...` existia no BrowserBase (verificado via API)
+- Banco: 3 `store_contexts`, 1 com `bbContextId` preenchido
+
+### Bug corrigido
+- `start-live-login` criava **Context NOVO a cada login** em vez de reutilizar o existente do banco
+- Fix: verifica `store_contexts.bbContextId` primeiro → só cria se não existir
+- Removidos dynamic imports duplicados de prisma → import estático no topo
+
+### Fluxo correto agora
+1. Primeiro login: cria Context → Session → usuário loga → cookies persistem no Context
+2. Próximas compras: mesmo Context → nova Session → **já logado** → direto pro checkout
+3. Contexts duram indefinidamente no BrowserBase (sem TTL)
+
+---
+
+## 2026-03-18 — Live Login iFrame (BrowserBase) + Logs + PendingProduct + TTL 60min
+
+### O que foi feito (Parte 7 — Live Login iFrame)
+
+#### Página /connect/amazon reescrita
+- **Formulário email/senha removido como fluxo principal**
+- Agora abre sessão BrowserBase → navega para Amazon signin → mostra iFrame com Live View
+- Usuário digita credenciais **diretamente na Amazon real** dentro do iFrame
+- PayJarvis **NUNCA recebe as credenciais** — só o BrowserBase tem acesso
+- Polling a cada 8s verifica se login completou (abre sessão verify com mesmo context)
+
+#### Novos endpoints API
+| Endpoint | Método | Função |
+|---|---|---|
+| `/api/vault/amazon/start-live-login` | POST | Cria contexto BB + sessão login + retorna liveUrl |
+| `/api/vault/amazon/check-live-login/:bbContextId` | GET | Verifica se login completou via sessão verify |
+
+#### Fluxo completo
+1. Token verificado → auto-inicia sessão BrowserBase
+2. Stagehand navega para Amazon signin, verifica se já logado
+3. Se já logado → marca authenticated imediatamente
+4. Se não → mostra iFrame com Live View (página real da Amazon)
+5. Polling verifica login a cada 8s (primeira check após 15s)
+6. Login detectado → "Amazon Connected!" com nome da conta
+7. StoreContext salvo com bbContextId + status=authenticated
+
+#### Fallbacks (Safari mobile / iFrame bloqueado)
+- Botão "Open in new tab" → `window.open(liveUrl)`
+- Botão "Use form instead" → formulário legacy email/senha
+- Timeout 10s se iFrame não carrega → mostra ambas opções
+- Formulário legacy mantido como fallback completo (NEEDS_HUMAN, 2FA, etc)
+
+### Arquivos alterados
+| Arquivo | Ação |
+|---|---|
+| apps/api/src/routes/vault.ts | +2 endpoints (start-live-login, check-live-login) |
+| apps/web/src/app/connect/amazon/page.tsx | Reescrito — iFrame + fallbacks |
+
+---
+
+## 2026-03-18 — Logs detalhados + PendingProduct + TTL 60min + Auto-checkout após login
+
+### O que foi feito
+
+#### PARTE 1: Logs detalhados em todo o fluxo
+- 38+ console.log com prefixos `[AMAZON-CHECKOUT]`, `[BB-CHECKOUT]`, `[CONNECT-AMAZON]`
+- checkout.service.ts: logs em checkSession, startCheckout, confirmOrder (cada etapa)
+- bb-checkout.ts: logs em create-context, open-session, action, close-session
+- vault.ts: logs em verify-token, login, login-status
+- checkout.ts (routes): logs "Tool called" em cada endpoint
+- page.tsx (browser): console.log para debug no DevTools
+
+#### PARTE 2: Token TTL 60 minutos
+- checkout.service.ts: `15 * 60 * 1000` → `60 * 60 * 1000`
+- vault.ts: `15 * 60 * 1000` → `60 * 60 * 1000`
+
+#### PARTE 3: PendingProduct — produto salvo antes do login
+- Schema Prisma: `pendingProduct Json?` no model StoreContext
+- Migration: `20260318_add_pending_product`
+- checkout.service.ts: salva `{asin, name, price, url}` quando NEEDS_AUTH
+- Novo endpoint: `GET /api/amazon/checkout/pending-product?userId=` — retorna e limpa
+
+#### PARTE 4: Auto-checkout após login ("conectado/pronto/done")
+- jarvis-whatsapp.service.ts: intercepta "conectado/pronto/done/já fiz login" antes do Gemini
+  - Verifica pendingProduct → auto-inicia checkout → retorna resumo ao usuário
+- openclaw/index.js: mesma interceptação no Telegram
+  - Chama `/api/amazon/checkout/pending-product` → auto-inicia checkout
+
+#### PARTE 5: Gemini tools amazon_* no WhatsApp
+- Adicionadas 3 tools: amazon_check_session, amazon_start_checkout, amazon_confirm_order
+- handleTool: 3 novos cases chamando a API de checkout
+- Já existiam no OpenClaw (Telegram) — adicionados logs `[AMAZON-CHECKOUT]`
+
+### Arquivos alterados
+| Arquivo | Ação |
+|---|---|
+| apps/api/src/services/amazon/checkout.service.ts | Logs + TTL 60min + pendingProduct save/recover |
+| apps/api/src/routes/checkout.ts | Logs + novo endpoint pending-product |
+| apps/api/src/routes/vault.ts | Logs + TTL 60min |
+| apps/api/src/services/jarvis-whatsapp.service.ts | 3 Gemini tools + handlers + interceptação login |
+| apps/browser-agent/src/routes/bb-checkout.ts | Logs [BB-CHECKOUT] detalhados |
+| apps/web/src/app/connect/amazon/page.tsx | console.log browser |
+| packages/database/prisma/schema.prisma | pendingProduct Json? |
+| openclaw/index.js | Interceptação login + logs |
+
+### Teste
+- Build OK: API, browser-agent, web
+- PM2 restart: payjarvis-api, browser-agent, payjarvis-web, openclaw — todos online
+- Migration aplicada no banco
+
+### Integracoes ativas
+- BrowserBase: Stagehand v3.1.0, contexts persistentes
+- Gemini 2.5 Flash: tools amazon_check_session, amazon_start_checkout, amazon_confirm_order
+- Telegram (OpenClaw): interceptação de "conectado/pronto"
+- WhatsApp (Jarvis): interceptação de "conectado/pronto"
+
+---
+
+## 2026-03-18 — Amazon Checkout Reescrito: BrowserBase Context + Playwright
+
+### O que foi feito
+1. **checkout.service.ts** reescrito — vault cookie injection → BrowserBase Context (cookies persistentes)
+2. **bb-checkout.ts** (browser-agent) — 4 endpoints Playwright: create-context, open-session, action, close-session
+3. **checkout.ts** (routes) — novo endpoint check-session
+4. **resolveUserId()** — mapeia telegramId → Prisma userId automaticamente
+5. **Gemini tools** re-adicionadas no OpenClaw: amazon_check_session, amazon_start_checkout, amazon_confirm_order
+
+### Arquivos
+| Arquivo | Ação |
+|---|---|
+| apps/api/src/services/amazon/checkout.service.ts | Reescrito |
+| apps/api/src/routes/checkout.ts | Modificado |
+| apps/browser-agent/src/routes/bb-checkout.ts | **Novo** |
+| apps/browser-agent/src/server.ts | Modificado |
+
+### Teste
+- POST /api/amazon/checkout/check-session → 200 OK, authUrl retornado
+- BrowserBase Context criado: cc08d476-e9d9-4378-85af-c1079e72ebd5
+- Playwright CDP connected em 2087ms, navigation em 318ms
+
+---
+
+## 2026-03-17 — Referral Banner + Template Proativo WhatsApp
+
+### Banner de convite
+- Criado `apps/api/public/images/referral-banner.png` (1200x628, 78KB)
+- Gradiente azul/roxo, robô Jarvis, "Você foi convidado!", badge "60 dias GRÁTIS"
+- Nginx: `/images/` → servido diretamente do filesystem
+- URL: https://www.payjarvis.com/images/referral-banner.png
+
+### Template proativo WhatsApp
+Novo fluxo de indicação: envio direto de template Twilio pro WhatsApp do amigo.
+
+**Fluxo no Telegram (openclaw/index.js):**
+1. Usuário diz "quero indicar" → "Telegram ou WhatsApp?"
+2. Se WhatsApp → "Sabe o número do amigo? 1=Sim, 2=Não (gera link)"
+3. Se Sim → pergunta número → pergunta nome → chama API
+4. Se Não → fallback: QR Code/link (fluxo antigo)
+
+**Novos steps no `_sharePending`:** `wa_choice`, `friend_phone`, `friend_name`
+
+**API (routes/referrals.ts):**
+- `POST /api/referrals/send-invite` — recebe referrerName, friendPhone, friendName
+- Valida: número não tem conta, não tem pending_referral
+- Cria `pending_referrals` (PostgreSQL) — phone, share_code, referrer_name, 7d TTL
+- Envia template Twilio HX07d65064afbb7d96223a0a406b2769c2
+
+**Webhook WhatsApp (jarvis-whatsapp.service.ts):**
+- Novo: quando número desconhecido manda qualquer mensagem
+- Verifica `pending_referrals` por phone
+- Se existe: marca `used=true`, inicia `startOnboarding()` com share_code
+- Se não: "Peça um convite a um amigo ou acesse payjarvis.com"
+
+### Tabela pending_referrals (PostgreSQL)
+- phone, share_code, referrer_name, referrer_user_id, invitee_name
+- expires_at: now + 7 dias
+- Index em phone WHERE used = false
+
+### Teste real
+- `POST /api/referrals/send-invite` → Twilio template enviado (SID: MMc9401b...)
+- `pending_referrals` criado corretamente
+- Validações funcionando: "já tem conta", "já tem convite pendente"
+
+### Arquivos alterados
+- `openclaw/index.js` — 3 novos steps (wa_choice, friend_phone, friend_name), handleDirectWhatsAppInvite
+- `apps/api/src/routes/referrals.ts` — NOVO, endpoint send-invite
+- `apps/api/src/server.ts` — import + register referralRoutes
+- `apps/api/src/services/jarvis-whatsapp.service.ts` — pending_referrals check no handler de unknown user
+- `apps/api/public/images/referral-banner.png` — NOVO, banner de convite
+- `/etc/nginx/sites-enabled/payjarvis` — location /images/
+
+---
+
+## 2026-03-17 — Fix Share Platform Switch + WhatsApp Onboarding UX
+
+### Problema 1: Troca de plataforma não executava ação
+- Usuário dizia "ele precisa do whatsapp eu me enganei" no Telegram
+- Bot respondia "Compreendido. Estou gerando o link para o WhatsApp" (Gemini)
+- Mas NÃO enviava QR Code nem link
+- Causa: `isPlatformSwitch()` não reconhecia "precisa", "enganei", "mas", "na verdade"
+- Fallback em `tryHandleShareContext()` exigia "mand/envi/gera" — insuficiente
+
+### Fix Problema 1 (openclaw/index.js)
+- `isPlatformSwitch()` expandido: +8 palavras contextuais (precisa, quer, prefere, errei, enganei, na verdade, mas, melhor)
+- Fallback no `tryHandleShareContext()`: qualquer menção de plataforma dentro da janela de 5min agora é suficiente
+- Testado: "ele precisa do whatsapp eu me enganei" → `[SHARE] Platform switch: telegram → whatsapp`
+
+### Problema 2: Experiência confusa do indicado no WhatsApp
+- Link `wa.me/17547145921?text=start+LKA9DB3Q` mostrava texto técnico "start LKA9DB3Q"
+- Usuário não sabia o que fazer com tela vazia
+- Novo usuário sem conta recebia resposta do Gemini (genérica)
+
+### Fix Problema 2
+
+#### Link mais amigável
+- Texto pré-preenchido: `start LKA9DB3Q` → `Quero começar LKA9DB3Q`
+- Atualizado em 3 locais: openclaw/index.js, jarvis-whatsapp.service.ts, bot-share.ts
+- Backend aceita ambos: `START CODE` e `Quero começar CODE` (regex `/^(?:START|Quero\s+come[cç]ar)\s+(\S+)$/i`)
+
+#### Greeting melhorado (onboarding-bot.service.ts)
+- Com referrer: "Olá! 👋 Bem-vindo ao Jarvis! Seu amigo {nome} te convidou... 🎁 Você ganhou 60 dias GRÁTIS!"
+- Sem referrer: "Olá! 👋 Bem-vindo ao Jarvis! Sou seu assistente pessoal disponível 24/7..."
+
+#### Handler de usuário desconhecido (jarvis-whatsapp.service.ts)
+- Novo: se !resolvedUserId e !hasOnboarding → mensagem amigável
+- "Parece que você ainda não tem uma conta. Peça um convite a um amigo ou acesse payjarvis.com"
+- Evita que Gemini responda genericamente para quem não tem conta
+
+### Arquivos alterados
+- `openclaw/index.js` — isPlatformSwitch expandido, fallback contextual simplificado
+- `jarvis-whatsapp.service.ts` — regex START expandido, link "Quero começar", handler unknown user
+- `onboarding-bot.service.ts` — greeting melhorado com menção de 60 dias grátis
+- `bot-share.ts` — link "Quero começar"
+
+### Estado atual
+- OpenClaw: ONLINE, 0 erros
+- PayJarvis API: ONLINE, 0 erros, health 200
+
+---
+
+## 2026-03-17 — Migração Email: Resend → Zoho SMTP
+
+### O que foi feito
+- `email.ts` reescrito: Resend SDK → Nodemailer com Zoho SMTP
+- Retry com 3 tentativas e backoff (1s, 2s)
+- Reset de transporter em erros de autenticação
+- `.env` e `.env.production`: RESEND_API_KEY comentada, SMTP_* configuradas
+- Interface pública inalterada: `sendEmail()`, `sendOnboardingConfirmation()`, todos os templates
+
+### Credenciais Zoho
+- SMTP: smtp.zoho.com:465 (SSL)
+- User: admin@payjarvis.com
+- From: PayJarvis <admin@payjarvis.com>
+
+### Teste real
+- Email enviado com sucesso via SMTP Zoho: `250 Message received`
+- MessageId: `2383ac56-5c2a-2afd-a67f-35c043824c6c@payjarvis.com`
+- API health: 200 OK, webhook WhatsApp: 200 OK
+
+### Consumidores do email service (sem alteração necessária)
+- `onboarding-bot.service.ts` — código 6 dígitos de confirmação
+- `notifications.ts` — alertas do sistema
+- `routes/notifications.ts` — API de notificações
+
+### Estado atual
+- API: ONLINE, porta 3001, 0 erros pós-restart
+- Email: Zoho SMTP ativo, Resend desabilitada
+- Todos os templates mantidos (approval, confirmed, blocked, daily summary, handoff, onboarding)
+
+---
+
+## 2026-03-17 — Migração WhatsApp Sandbox → Produção (OpenClaw)
+
+### Problema
+ClawdBot/OpenClaw gerava links de indicação WhatsApp apontando para o sandbox Twilio (+14155238886). Sandbox expira a cada 72h, causando erro "not connected to a Sandbox" para novos usuários.
+
+### O que foi feito
+- `openclaw/.env` — adicionado `WHATSAPP_BOT_NUMBER=17547145921` (número de produção)
+- `openclaw/index.js:1378` — fallback alterado de `14155238886` para `17547145921`
+- Verificado que `jarvis-whatsapp.service.ts` já trata `START <CODE>` na linha 810 (regex `/^START\s+(\S+)$/i`)
+- Webhook produção `/webhook/whatsapp` → PayJarvis API (porta 3001) — já configurado no nginx
+- OpenClaw reiniciado via PM2 — online, 0 erros
+
+### Fluxo de indicação agora
+1. Usuário usa `/indicar` no Telegram → escolhe WhatsApp
+2. OpenClaw gera link: `wa.me/17547145921?text=start+<CODE>`
+3. Amigo clica → WhatsApp abre com número de produção
+4. Twilio recebe → webhook → PayJarvis API → `processWhatsAppMessage` → `startOnboarding`
+
+### Estado atual
+- OpenClaw: ONLINE, porta 4000, links WhatsApp apontam para +17547145921
+- PayJarvis API: ONLINE, porta 3001, webhook WhatsApp respondendo 200
+- Sandbox Twilio (+14155238886): NÃO mais usado por nenhum projeto ativo
+
+### Integração WhatsApp
+- Número produção: +17547145921 (Twilio, conta ACbbe2c9...)
+- Webhook: https://www.payjarvis.com/webhook/whatsapp → localhost:3001
+- Templates: Welcome (HXed40c5...) e Referral (HX07d650...)
+
+---
+
+## 2026-03-17 — Multi-Tenant Isolation Audit + Onboarding Hardening
+
+### O que foi feito
+
+#### Auditoria de Isolamento Multi-Tenant
+- **User.phone @unique** — campo era opcional sem constraint, permitia lookup ambiguo via findFirst
+- **User.telegramChatId @unique** — duplicata real encontrada no DB (user 1762460701 em 2 registros)
+- **session-manager.ts** — chave Redis era `session:bot:${botId}` (sem userId), agora `session:bot:${botId}:user:${userId}`
+- **jarvis-whatsapp.service.ts** — findFirst com OR → findUnique no phone (determinístico)
+- **onboarding-bot.service.ts** — WhatsApp phone agora salvo em User.phone durante onboarding
+
+#### 4 Riscos Corrigidos
+1. **Email brute-force** — max 5 tentativas no email_confirm, após isso regenera código e reenvia email
+2. **Fire-and-forget** — initSequence agora tem retry com backoff (1s, 2s, 4s) + log CRITICAL se falhar
+3. **Transaction** — completeOnboarding usa prisma.$transaction (session + user + credits atômicos)
+4. **Sessão 24h → 72h** — mais tempo para completar onboarding
+
+#### Limpeza de DB
+- Removido telegramChatId duplicado do user cmmnz1os7 (teste antigo)
+- Deletados 2 registros de crédito órfãos (userId='1762460701', 'test-final')
+- Migração SQL: unique indexes + emailAttempts column
+
+### Arquivos alterados
+- `apps/api/src/core/session-manager.ts` — sessionKey inclui userId
+- `apps/api/src/routes/core.ts` — passa userId nas chamadas de sessão
+- `apps/api/src/services/jarvis-whatsapp.service.ts` — findUnique no phone
+- `apps/api/src/services/onboarding-bot.service.ts` — brute-force protection, transaction, retry, 72h
+- `packages/database/prisma/schema.prisma` — phone @unique, telegramChatId @unique, emailAttempts
+- `packages/database/prisma/migrations/20260317_phone_unique_constraint/migration.sql`
+
+### Estado atual
+- API: ONLINE, 0 restarts, 0 erros
+- Health: https://www.payjarvis.com/api/health → 200 OK
+- DB: unique constraints ativos em phone e telegramChatId
+- Onboarding: brute-force protection + transaction + retry ativos
+
+### Integracoes ativas
+- WhatsApp: +17547145921 (Twilio, webhook /webhook/whatsapp)
+- Telegram: @Jarvis12Brain_bot (webhook /webhook/telegram)
+- Stripe: ativo (webhook configurado)
+- Clerk: proxy /__clerk/ configurado
+- Sentinel: monitoramento 24/7 + Telegram alerts
+- CFO Agent: relatórios automáticos
+
+---
+
+## 2026-03-17 — Production Hardening: 6 Issues Resolvidos
+
+### O que foi feito
+
+#### Issue 1: CORS origin:true → Restrito
+- `server.ts`: CORS agora aceita apenas `https://payjarvis.com`, `https://www.payjarvis.com`, `https://admin.payjarvis.com`
+- Origens não permitidas não recebem headers CORS (request prossegue sem Access-Control headers)
+- Requests sem origin (curl, mobile, server-to-server) continuam funcionando
+
+#### Issue 2: API Heap usage 96% → 56%
+- Adicionado `node_args: "--max-old-space-size=384"` no ecosystem.config.cjs para payjarvis-api
+- V8 agora aloca heap maior (78MB vs 47MB), heap usage caiu de 96% para 56%
+- Não era leak — V8 estava operando com heap default pequeno e fazendo GC agressivo
+
+#### Issue 3: DB password "payjarvis123" → Senha forte
+- Nova senha: `XLd1Vj4SAsx4aIQuZm5RpbwwoDlbzPaxDct5AF2T` (openssl rand -base64 32)
+- Atualizado: PostgreSQL (ALTER USER), Payjarvis/.env, .env.production, openclaw/.env, sentinel/.env
+- Senha antiga rejeitada — confirmado
+
+#### Issue 4: Fastify logger:true → level:'warn'
+- `server.ts`: logger agora é `{ level: "warn" }` em produção, `true` em dev
+- Elimina logs INFO/DEBUG de cada request — reduz I/O e tamanho de logs
+
+#### Issue 5: /api/health retornava 404 → 200
+- Nginx: adicionado `location = /api/health` com `proxy_pass http://127.0.0.1:3001/health`
+- Testado: `curl https://www.payjarvis.com/api/health` → 200 OK
+
+#### Issue 6: payjarvis-kyc 266k+ restarts → 0
+- Causa: contador histórico acumulado, não crashes ativos
+- Reset: `pm2 reset payjarvis-kyc` → 0 restarts
+- Sentinel: corrigido health check de `GET /` (404) para `GET /health` (200)
+- KYC agora monitorado corretamente pelo Sentinel
+
+### Arquivos alterados
+- `apps/api/src/server.ts` — CORS whitelist + logger level warn
+- `ecosystem.config.cjs` — --max-old-space-size=384 para API
+- `/etc/nginx/sites-enabled/payjarvis` — location /api/health
+- `/root/sentinel/monitors/services.js` — KYC health URL corrigida
+- `.env`, `.env.production`, `openclaw/.env`, `sentinel/.env` — nova DB password
+
+### Estado atual
+- Todos serviços: ONLINE, 0 restarts
+- CORS: restrito a 3 domínios payjarvis.com
+- DB: senha forte ativa
+- Heap: 56% usage (saudável)
+- /api/health: 200 OK via Nginx
+- KYC: estável, monitorado corretamente
+
+### Integracoes ativas
+- WhatsApp: +17547145921 (Twilio, webhook /webhook/whatsapp)
+- Telegram: @Jarvis12Brain_bot (webhook /webhook/telegram)
+- Stripe: ativo (webhook configurado)
+- Clerk: proxy /__clerk/ configurado
+- Sentinel: monitoramento 24/7 + Telegram alerts
+- CFO Agent: relatórios automáticos
+
+---
+
+## 2026-03-17 — Visa Click to Pay: Frontend + Backend integração completa
+
+### Sessão 4 — Integração Full-Stack Click to Pay
+
+#### Backend (API)
+- **`routes/visa.routes.ts`** criado com 3 endpoints:
+  - `GET /api/visa/sdk-config` — retorna config para inicializar SDK (requer auth)
+  - `POST /api/visa/checkout` — descriptografa payload JWE do checkout (requer auth)
+  - `GET /api/visa/status` — diagnóstico público (certs, credentials, SDK URL)
+- Registrado em `server.ts`
+
+#### Frontend (Web)
+- **`components/visa-click-to-pay.tsx`** — componente React completo:
+  - Carrega SDK Visa dinamicamente via `<script>`
+  - Fluxo: init → isRecognized → identityLookup → OTP → getSrcProfile → checkout
+  - UI com steps: loading → lookup → OTP → card selection → success
+  - Envia payload JWE para backend descriptografar
+- **`payment-methods/page.tsx`** atualizado:
+  - Card "Visa Click to Pay" adicionado ao grid de providers
+  - Botão "Set up Click to Pay" → abre componente inline
+  - Dynamic import (SSR disabled)
+
+#### Testes
+- `GET /api/visa/sdk-config` → 401 sem auth (correto)
+- `GET /api/visa/status` → 200, certLoaded: true, keyLoaded: true, credentialsConfigured: true
+- `/payment-methods` → 307 (redirect para login, correto)
+- Build API: 0 erros TypeScript
+- Build Web: sucesso, `/payment-methods` 5.21 kB
+- PM2: payjarvis-api e payjarvis-web reiniciados e online
+- Logs: sem erros
+
+#### Arquivos criados/modificados
+| Arquivo | Ação |
+|---|---|
+| `apps/api/src/routes/visa.routes.ts` | Criado |
+| `apps/api/src/server.ts` | Modificado (+ import/register visaRoutes) |
+| `apps/web/src/components/visa-click-to-pay.tsx` | Criado |
+| `apps/web/src/app/(dashboard)/payment-methods/page.tsx` | Modificado (+ Visa card) |
+
+---
+
+## 2026-03-16 — Visa Click to Pay: Arquitetura correta identificada (SDK frontend)
+
+### Sessão 3 — Descoberta: SRC é SDK frontend, não REST API
+
+#### Descoberta crítica
+Visa Click to Pay (Secure Remote Commerce) **NÃO é uma REST API backend**.
+É um **SDK JavaScript frontend** carregado no browser do usuário.
+
+- Sandbox SDK: `https://sandbox-assets.secure.checkout.visa.com/checkout-widget/resources/js/src-i-adapter/visaSdk.js?v2`
+- Production SDK: `https://assets.secure.checkout.visa.com/checkout-widget/resources/js/src-i-adapter/visaSdk.js?v2`
+
+#### Evidência: testes de endpoint
+- Todos endpoints `/src/...` retornaram **404** (rota não existe)
+- Endpoints como `/vdp/helloworld` e `/visadirect/...` retornaram **401** (existem, sem acesso)
+- Conclusão: endpoints SRC não existem no `sandbox.api.visa.com`
+
+#### Arquitetura correta Click to Pay
+| Camada | Responsabilidade |
+|---|---|
+| **Frontend (SDK JS)** | init, isRecognized, identityLookup, checkout, authenticate (9 métodos) |
+| **Backend (visa.service.ts)** | Fornece config pro SDK, descriptografa payload JWE pós-checkout |
+| **mTLS** | Para outras APIs Visa (VisaDirect, etc.), não para SRC |
+
+#### visa.service.ts atualizado
+- `getSdkConfig()` — retorna config para o frontend inicializar o SDK
+- `decryptCheckoutPayload(jwe)` — descriptografa resposta do checkout (RSA-OAEP + AES-256-GCM)
+- `helloWorld()` — teste de conectividade mTLS
+- `testConnection()` — diagnóstico de certificados e credenciais
+- Build TypeScript: 0 erros
+
+---
+
+## 2026-03-16 — Visa mTLS: Shared Secrets descriptografados, serviço criado, auth 401
+
+### Sessão 2 — Shared Secrets + visa.service.ts
+
+#### Shared Secrets descriptografados via XPay RSA
+- Gerado par RSA 2048 para XPay Token (`visa-xpay-private.key` / `visa-xpay-public.pem`)
+- Public key registrada no portal VDP
+- **Secret 1** (API Key SJD7...): descriptografado e salvo em `VISA_SHARED_SECRET_1`
+- **Secret 2** (API Key N2MUFKY2...): descriptografado e salvo em `VISA_SHARED_SECRET`
+
+#### visa.service.ts criado
+- `apps/api/src/services/visa.service.ts` — mTLS via `https.Agent` + Basic Auth
+- Métodos: `helloWorld()`, `clickToPay()`, `testConnection()`
+- Build TypeScript: 0 erros
+
+#### Testes de autenticação — TODOS 401
+Testamos **todas combinações** de credenciais × certificados:
+- Old cert+key, new cert+key, P12 keystore
+- username:secret1, username:secret2, username:apikey, apikey:secret
+- **mTLS handshake sempre OK** (TLS 1.2 aceito)
+- **Basic Auth sempre 401** (code 9122 "Authentication failed")
+
+#### Diagnóstico provável
+O 401 em todas combinações indica que **o projeto VDP pode não ter Hello World API adicionada**, ou as credenciais no portal precisam ser vinculadas ao certificado enviado. Não é problema de escape de caracteres (testado via Python com base64 direto).
+
+### Estado atual dos certificados
+| Arquivo | Status | Detalhes |
+|---|---|---|
+| `certs/visa-private.key` | OK | RSA 2048, corresponde ao CSR e self-signed cert |
+| `certs/visa-key.pem` | Salvo | Chave nova do portal (par diferente, aguardando cert correspondente) |
+| `certs/visa-cert.pem` | Placeholder | Cópia do self-signed (substituir com cert oficial da Visa) |
+| `certs/visa-csr.pem` | OK | `CN=payjarvis.com, O=Increase Trainer Inc` |
+| `certs/visa-self-signed.pem` | OK | Self-signed 365 dias |
+| `certs/visa-keystore.p12` | OK | PKCS12 (senha: payjarvis2026) |
+| `certs/visa-xpay-private.key` | OK | RSA 2048 para XPay Token |
+| `certs/visa-xpay-public.pem` | OK | Public key registrada no portal |
+
+### Pendências
+1. **No portal VDP**: verificar se Hello World API está adicionada ao projeto
+2. **Vincular certificado**: no portal, Two-Way SSL → upload do CSR ou cert
+3. **Obter cert assinado pela Visa**: substituir `visa-cert.pem` quando disponível
+4. **CA Bundle**: baixar `SBX-2024-Prod-Root.pem` + `SBX-2024-Prod-Inter.pem` do portal
+
+### Referências
+- [Two-Way SSL](https://developer.visa.com/pages/working-with-visa-apis/two-way-ssl)
+- [CSR Wizard FAQ](https://developer.visa.com/pages/csr-wizard-faq)
+- [Going Live](https://developer.visa.com/pages/going-live)
+
+---
+
+## 2026-03-16 — Share/Referral via WhatsApp com QR Code
+
+### Problema
+Usuário pedia "quero compartilhar" no WhatsApp → Gemini respondia "Sim, pode compartilhar" sem gerar link ou QR Code.
+
+### Solução
+1. **Intent detection** em `processWhatsAppMessage()` — regex detecta "compartilhar", "indicar", "share", "invite", "QR code", etc.
+2. **`generateShareForWhatsApp()`** — nova função que:
+   - Busca user no PostgreSQL (se existir, usa bot share link formal)
+   - Se não tiver conta formal, gera código anônimo `WA{XXXX}{4digits}`
+   - Gera QR Code PNG via `qrcode.toFile()` → salva em `/public/qr/`
+   - Envia QR Code como imagem MMS via Twilio (`mediaUrl`)
+   - Envia link clicável `wa.me/17547145921?text=START {CODE}`
+3. **Tool `share_jarvis`** — adicionada ao Gemini como fallback se intent direto não matchou
+4. **Credenciais Twilio API Key** adicionadas ao `.env.production`
+
+### Testes
+- "quero compartilhar jarvis com um amigo" → intent detectado → QR Code gerado
+- QR Code servido: `GET /public/qr/qr_WA3UQ92431.png` → 200
+- MMS com imagem: `MM100646adfb46d09e246f4ed34f7054d8` → **delivered** (media=1)
+- Texto com link: `SM71462c7668380f329015e97de1f3317c` → **delivered**
+- Link gerado: `wa.me/17547145921?text=START WA3UQ92431`
+
+### Integracoes
+- QR Codes salvos em `/root/Payjarvis/public/qr/` (servidos via Fastify static)
+- Twilio MediaUrl aponta para `https://www.payjarvis.com/public/qr/qr_{CODE}.png`
+
+---
+
+## 2026-03-16 — Templates OK + Remoção completa do sandbox + START referral
+
+### Templates testados
+- **Welcome** (`HXed40c560b2a6a80126988a2657e47004`): delivered para José
+- **Referral** (`HX07d65064afbb7d96223a0a406b2769c2`): delivered para José
+
+### Sandbox removido
+Todas referências a `+14155238886` e "sandbox" removidas dos fontes:
+- `credit.service.ts`, `subscription.service.ts`, `sequence.service.ts` — fallback atualizado para `+17547145921`
+- `broadcast.service.ts` — corrigido bug double-prefix (`whatsapp:whatsapp:+...`)
+- `bot-share.ts` — link WhatsApp atualizado: `wa.me/17547145921?text=START+{CODE}`
+- `server.ts` — comentário "sandbox" → "production"
+
+### START referral (novo)
+WhatsApp agora suporta deep-link de referral:
+- URL: `https://wa.me/17547145921?text=START CODIGO`
+- `processWhatsAppMessage()` intercepta `START XXXXX` → chama `startOnboarding(userId, "whatsapp", code)`
+- Inicia onboarding com nome do referrer se código válido
+
+### Testes
+- Webhook + Gemini + REST API response → `delivered`
+- START TESTCODE → onboarding iniciado, mensagem enviada (erro 63024 = número fictício, esperado)
+- `grep -r "14155238886" apps/` → zero resultados
+
+---
+
+## 2026-03-16 — Fix WhatsApp: PM2 env cacheado + mensagens delivered
+
+### Bug
+Webhook recebia mensagens (HTTP 200) mas respostas saíam do número errado (`+14155238886` sandbox).
+Twilio retornava erro 63016 (freeform outside allowed window) porque o sandbox não tinha sessão 24h.
+
+### Causa raiz
+`pm2 restart` NÃO recarrega env do `ecosystem.config.cjs`. O PM2 cacheou `TWILIO_WHATSAPP_NUMBER=whatsapp:+14155238886` do deploy anterior.
+
+### Fix
+`pm2 delete payjarvis-api && pm2 start ecosystem.config.cjs --only payjarvis-api` — forçou reload do `.env.production` com `whatsapp:+17547145921`.
+
+### Testes realizados
+- Webhook recebe msg com X-Twilio-Signature → 200 OK
+- Gemini processa → responde via REST API → `SM7be5eb1a37a0c9dc6551a18e823b3312`
+- Status callback: `sent` → `delivered` — mensagem entregue no WhatsApp do José
+- Zero erros nos logs
+
+### Lição
+Sempre usar `pm2 delete + pm2 start ecosystem.config.cjs` ao mudar variáveis de ambiente (não apenas `pm2 restart`).
+
+---
+
+## 2026-03-16 — WhatsApp Production: Twilio REST API (saindo do sandbox)
+
+### O que foi feito
+1. **Sender registrado** no Twilio via Senders API v2 (SID: `XE70bc55a9f4ceb7bd010f518782d38219`)
+2. **Número**: `whatsapp:+17547145921` (WABA ID: `1447380596882836`) — status ONLINE
+3. **Webhook configurado** via API: `callback_url` → `https://www.payjarvis.com/webhook/whatsapp`
+4. **Status callback**: `https://www.payjarvis.com/webhook/whatsapp/status`
+5. **Twilio SDK instalado** (`npm install twilio` em apps/api)
+6. **Novo serviço**: `twilio-whatsapp.service.ts` — sendWhatsAppMessage(), sendWelcomeTemplate(), sendReferralTemplate()
+7. **Webhook reescrito**: `whatsapp-webhook.ts` — REST API (não TwiML), validação X-Twilio-Signature, resposta 200 imediata
+8. **Nginx**: rota `/webhook/whatsapp/status` adicionada
+9. **.env.production** atualizado: número production, template SIDs
+
+### Integracoes ativas
+- **Twilio Sender**: `XE70bc55a9f4ceb7bd010f518782d38219` → ONLINE
+- **Webhook**: `POST /webhook/whatsapp` → Fastify (porta 3001) → Gemini AI
+- **Status Callback**: `POST /webhook/whatsapp/status` → logs delivery status
+- **Templates**: welcome (`HXed40c560b2a6a80126988a2657e47004`), referral (`HX07d65064afbb7d96223a0a406b2769c2`)
+
+### Testes realizados
+- Health check `GET /webhook/whatsapp` → `{"mode":"production"}` OK
+- Mensagem de teste enviada via REST API → SID `SMe0952bddc4de205158a33cb417805987` → queued OK
+- Status callback recebido → `sent` → `undelivered` (63016 — destino sem sessão 24h, comportamento esperado)
+- Zero erros de startup nos logs
+
+### Observacoes
+- Mensagens free-form só funcionam dentro da janela de 24h (usuário precisa enviar primeiro)
+- Para mensagens fora da janela: usar templates (welcome/referral) via Content API
+- Número antigo sandbox `+14155238886` removido de todas as configs
+
+---
+
 ## 2026-03-16 — Fix onboarding: step 'name' antes do email
 
 ### Bug
@@ -1476,3 +2114,53 @@ Merge de duas sandboxes independentes em um deploy unificado:
 - Visa TAP + MC AgentPay + TrustBadges (agent em execução)
 - Chaves: Walmart (walmart.io), Walgreens (manual), CVS (invite), Macy's (partners)
 - Affiliate IDs: Walmart Impact Radius, Target CJ Affiliate, Macy's CJ
+
+---
+
+## 2026-03-17 — Production Hardening
+
+### Seguranca
+- **UFW hardened**: Portas 3333, 3400, 9222, 6080, 8080 fechadas. Restam: 22 (SSH), 80 (HTTP), 443 (HTTPS), 8000 (Nucleo), Tailscale
+- **PostgreSQL**: Confirmado bind 127.0.0.1 only
+- **Redis**: Confirmado bind 127.0.0.1 only
+- **Rate limiting**: Aplicado em todos endpoints do Nginx (API: 30r/s burst 20, General: 60r/s burst 30, Webhooks: 30r/s burst 10)
+- **Security headers**: Completos em www.payjarvis.com (HSTS preload, X-Frame, X-Content-Type, XSS-Protection, Referrer-Policy, Permissions-Policy)
+- **Admin headers**: Hardened com HSTS preload, rate limiting adicionado
+- **SSL/TLS**: TLSv1.2+1.3, certificados validos 77+ dias, certbot auto-renew ativo
+- **.env.production**: Protegido via .gitignore, nao commitado
+
+### Performance
+- **Gzip**: Ativo no Nginx (level 6, todos tipos relevantes)
+- **Static assets**: Cache 1y immutable via Nginx direto (bypass Next.js)
+- **Public assets**: Cache 7d
+- **PM2 logrotate**: Ativo (10M max, 3 retained, compressed, daily rotation)
+
+### Confiabilidade
+- **PM2 startup**: Configurado (systemd pm2-root.service)
+- **PM2 save**: Executado
+- **Auto-restart**: Todos servicos com autorestart=true, max_restarts=10
+- **Memory limits**: API 512M, Rules 256M, Web 512M, Browser 256M, KYC 1G, Admin 512M
+- **Sentinel**: Monitorando 5 servicos (API, Web, Admin, OpenClaw, KYC) a cada 60s
+
+### Dados
+- **PostgreSQL backup**: Criado cron diario 02:00 UTC (/root/scripts/backup_postgres.sh)
+- **Primeiro backup**: payjarvis_20260317_001643.sql.gz (148K)
+- **Retencao**: 7 dias
+- **DB size**: 12MB
+- **Usuarios prod**: 5
+
+### Issues pendentes (WARNING)
+- CORS origin: true (aceita qualquer origem) — restringir para payjarvis.com domains
+- Fastify logger: true em producao — considerar logger: { level: 'warn' }
+- API Heap usage 96.51% — monitorar, pode precisar aumentar max_memory_restart
+- payjarvis-kyc: 266k+ restarts historicos (sentinel checa GET / que retorna 404, nao e crash)
+- DB password "payjarvis123" — trocar para senha forte
+- /api/health retorna 404 via Nginx (rota e /health, nao /api/health)
+
+### Integracoes ativas
+- WhatsApp: +17547145921 (Twilio, webhook /webhook/whatsapp)
+- Telegram: @Jarvis12Brain_bot (webhook /webhook/telegram)
+- Stripe: ativo (webhook configurado)
+- Clerk: proxy /__clerk/ configurado
+- Sentinel: monitoramento 24/7 + Telegram alerts
+- CFO Agent: relatorios automaticos
