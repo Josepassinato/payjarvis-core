@@ -87,12 +87,23 @@ export async function bbCheckoutRoutes(app: FastifyInstance) {
       // Check login status
       const loginCheck = await checkLoginStatus(result.page, "amazon");
 
-      // Store the connection for subsequent actions
-      activeSessions.set(result.bbSessionId, {
-        browser: result.browser,
-        page: result.page,
-        openedAt: Date.now(),
-      });
+      const isLoginSession = body.purpose === "login";
+
+      if (isLoginSession) {
+        // LOGIN sessions: disconnect our CDP so the user can interact via Live View URL.
+        // The BrowserBase session stays alive (keepAlive=true) — cookies persist in Context.
+        // When we need the session later, we reconnect via CDP.
+        console.log(`[bb-checkout] Login session ${result.bbSessionId.slice(0, 8)} — releasing CDP so user can interact via Live View`);
+        try { await result.browser.close(); } catch { /* ignore */ }
+        // Do NOT store in activeSessions — user controls this session now
+      } else {
+        // CHECKOUT sessions: keep CDP connection for automated actions
+        activeSessions.set(result.bbSessionId, {
+          browser: result.browser,
+          page: result.page,
+          openedAt: Date.now(),
+        });
+      }
 
       return {
         success: true,
