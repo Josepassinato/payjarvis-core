@@ -12,8 +12,8 @@ import { getAmazonBaseUrl } from "./domains.js";
 const BROWSER_AGENT_URL =
   process.env.BROWSER_AGENT_URL ?? "http://localhost:3003";
 const WEB_URL = process.env.WEB_URL ?? "https://www.payjarvis.com";
-const VAULT_LINK_SECRET =
-  process.env.VAULT_LINK_SECRET ?? process.env.INTERNAL_SECRET ?? "dev-vault-secret";
+// MUST match the secret in vault.ts (VAULT_ENCRYPTION_KEY) for token verification
+const VAULT_LINK_SECRET = process.env.VAULT_ENCRYPTION_KEY!;
 
 function generateConnectUrl(userId: string): string {
   const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
