@@ -1,5 +1,57 @@
 # HISTORICO.md — PayJarvis
 
+## 2026-03-19 — Audio como Feature Core: WhatsApp STT + TTS
+
+### O que foi feito
+
+#### Novos módulos audio reutilizáveis (`apps/api/src/services/audio/`)
+1. **stt.service.ts** — STT via Gemini 2.5 Flash (transcribeAudio, multilingual)
+2. **tts.service.ts** — TTS via ElevenLabs + edge-tts fallback (11 idiomas)
+3. **converter.service.ts** — Download de audio + conversão ffmpeg (OGG/MP3/M4A → WAV)
+4. **index.ts** — Re-exports centralizados
+
+#### WhatsApp webhook com suporte a áudio
+5. **whatsapp-webhook.ts** — Reescrito: detecta `NumMedia` + `MediaContentType0` audio
+   - Remove o blocker `if (!text) return` que ignorava áudio silenciosamente
+   - Pipeline: Download Twilio → ffmpeg WAV → Gemini STT → processamento → TTS → envio
+   - Endpoint `GET /api/audio/temp/:id` para servir áudio ao Twilio (TTL 2 min)
+   - Resposta dupla: texto + áudio quando recebe voz
+
+#### System prompt com seção AUDIO/VOICE
+6. **jarvis-whatsapp.service.ts** — Adicionada seção AUDIO/VOICE ao system prompt
+   - Jarvis reconhece mensagens `[voice]` e responde conciso (2-3 frases)
+
+#### Novos bots herdam áudio
+7. **bots.ts** — Plataformas TELEGRAM, WHATSAPP, CUSTOM_API ganham `capabilities: ["voice_stt", "voice_tts"]` por default
+
+#### Twilio service expandido
+8. **twilio-whatsapp.service.ts** — `sendWhatsAppAudio()` + `getTwilioCredentials()`
+
+### Estado atual
+- payjarvis-api: ONLINE, build limpo (0 erros TypeScript)
+- Webhook WhatsApp aceita texto E áudio
+- Health check retorna `"audio": true`
+- Teste simulado: assinatura Twilio validada, pipeline executa, error handling funciona
+- Fluxo de texto NÃO quebrado (regressão zero)
+
+### Dependências do sistema (já instaladas)
+- ffmpeg 6.1.1, edge-tts 7.2.7, GEMINI_API_KEY configurada
+
+### Pendente
+- Testar com áudio real via WhatsApp (enviar voice message para +17547145921)
+- Adicionar ELEVENLABS_API_KEY ao .env.production do API (atualmente só edge-tts funciona)
+- Considerar adicionar audio ao Telegram webhook (notifications.ts)
+
+### Integracoes ativas
+- WhatsApp: +17547145921 (Twilio, webhook /webhook/whatsapp) — AGORA COM AUDIO
+- Telegram: @Jarvis12Brain_bot (webhook /webhook/telegram)
+- Stripe: ativo
+- Clerk: proxy /__clerk/
+- Sentinel: monitoramento 24/7
+- CFO Agent: relatórios automáticos
+
+---
+
 ## 2026-03-18 — Fix: Context reutilizado + Verificação completa
 
 ### Diagnóstico BrowserBase Contexts

@@ -206,6 +206,13 @@ When the user wants to share, invite, refer friends, or asks for a QR code or li
 → Use share_jarvis IMMEDIATELY. It generates the link and sends the QR Code automatically.
 → Then tell the user the link and QR were sent. Their friend gets free Beta access.
 
+AUDIO/VOICE
+When the user sends a voice message, it is automatically transcribed to text for you.
+You receive the transcription (prefixed with [voice]) and should respond normally.
+You fully understand voice messages. Never say you can't process audio, that you only work with text, or that you can't listen.
+The user spoke to you — respond naturally as if they typed the message.
+Keep voice responses concise (2-3 sentences max) since the response will be converted back to audio.
+
 EXECUTION
 1. User asks → USE THE TOOL IMMEDIATELY
 2. Present THE BEST option (max 3)
@@ -376,40 +383,15 @@ const tools: any[] = [
         },
       },
       {
-        name: "amazon_check_session",
-        description: "Check if the user has an active Amazon session for purchases. Call this when the user wants to buy something on Amazon.",
+        name: "amazon_search",
+        description: "Search for products on Amazon. Use this when the user wants to buy something, find a product, compare prices, or asks about items on Amazon. Returns real product data with prices and direct purchase links. The user will click the link to buy on their own browser.",
         parameters: {
           type: SchemaType.OBJECT,
           properties: {
-            userId: { type: SchemaType.STRING, description: "The user ID" },
+            query: { type: SchemaType.STRING, description: "Search query for Amazon (e.g. 'iPhone 17 charger cable 6ft')" },
+            max_results: { type: SchemaType.NUMBER, description: "Max products to return (default 3, max 5)" },
           },
-          required: ["userId"],
-        },
-      },
-      {
-        name: "amazon_start_checkout",
-        description: "Start Amazon checkout for a product. Adds item to cart and proceeds to checkout. Only call after confirming the user wants to buy AND the Amazon session is authenticated.",
-        parameters: {
-          type: SchemaType.OBJECT,
-          properties: {
-            userId: { type: SchemaType.STRING, description: "The user ID" },
-            asin: { type: SchemaType.STRING, description: "Amazon product ASIN" },
-            title: { type: SchemaType.STRING, description: "Product name" },
-            price: { type: SchemaType.NUMBER, description: "Product price in USD" },
-          },
-          required: ["userId", "asin", "title", "price"],
-        },
-      },
-      {
-        name: "amazon_confirm_order",
-        description: "Confirm and place an Amazon order. Only call after the user explicitly confirms they want to place the order.",
-        parameters: {
-          type: SchemaType.OBJECT,
-          properties: {
-            userId: { type: SchemaType.STRING, description: "The user ID" },
-            orderId: { type: SchemaType.STRING, description: "The order ID from start_checkout" },
-          },
-          required: ["userId", "orderId"],
+          required: ["query"],
         },
       },
     ],
@@ -601,62 +583,37 @@ async function handleTool(userId: string, name: string, args: Record<string, unk
       }
     }
 
-    case "amazon_check_session": {
-      console.log(`[AMAZON-CHECKOUT] Tool called: amazon_check_session { userId: "${args.userId || userId}" }`);
+    case "amazon_search": {
+      console.log(`[AMAZON-SEARCH] Tool called: amazon_search { query: "${args.query}" }`);
       try {
-        const res = await fetch(`${PAYJARVIS_URL}/api/amazon/checkout/check-session`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId: args.userId || userId }),
-          signal: AbortSignal.timeout(60_000),
+        const { searchAmazon } = await import("./amazon/search.service.js");
+        // Determine Amazon domain from user's country
+        const userRecord = await prisma.user.findFirst({
+          where: { OR: [{ telegramChatId: userId }, { phone: userId.replace("whatsapp:", "") }] },
+          select: { country: true },
         });
-        const data = await res.json() as Record<string, unknown>;
-        return data.success ? (data.data as Record<string, unknown>) : { error: (data as any).error || "Session check failed" };
-      } catch (err) {
-        return { error: `Amazon session check failed: ${(err as Error).message}` };
-      }
-    }
+        const country = userRecord?.country || "US";
+        const domainMap: Record<string, string> = { US: "amazon.com", BR: "amazon.com.br", UK: "amazon.co.uk", DE: "amazon.de", FR: "amazon.fr", ES: "amazon.es", CA: "amazon.ca", MX: "amazon.com.mx" };
+        const domain = domainMap[country] || "amazon.com";
+        const products = await searchAmazon(args.query as string, domain, (args.max_results as number) ?? 3);
 
-    case "amazon_start_checkout": {
-      console.log(`[AMAZON-CHECKOUT] Tool called: amazon_start_checkout { asin: "${args.asin}", userId: "${args.userId || userId}" }`);
-      try {
-        // Resolve botId for the user
-        const cleanPhone = userId.replace("whatsapp:", "");
-        const user = await prisma.user.findUnique({ where: { phone: cleanPhone }, select: { id: true, bots: { select: { id: true }, take: 1 } } });
-        const botId = user?.bots?.[0]?.id || "";
-        const res = await fetch(`${PAYJARVIS_URL}/api/amazon/checkout/start`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            userId: args.userId || user?.id || userId,
-            botId,
-            asin: args.asin,
-            title: args.title,
-            price: args.price,
-            quantity: 1,
-          }),
-          signal: AbortSignal.timeout(120_000),
-        });
-        const data = await res.json() as Record<string, unknown>;
-        return data.success ? (data.data as Record<string, unknown>) : { error: (data as any).error || "Checkout failed" };
-      } catch (err) {
-        return { error: `Amazon checkout failed: ${(err as Error).message}` };
-      }
-    }
+        if (products.length === 0) {
+          return { results: [], message: `No products found for "${args.query}"` };
+        }
 
-    case "amazon_confirm_order": {
-      console.log(`[AMAZON-CHECKOUT] Tool called: amazon_confirm_order { orderId: "${args.orderId}", userId: "${args.userId || userId}" }`);
-      try {
-        const res = await fetch(`${PAYJARVIS_URL}/api/amazon/checkout/confirm`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ orderId: args.orderId, userId: args.userId || userId }),
-          signal: AbortSignal.timeout(120_000),
-        });
-        const data = await res.json() as Record<string, unknown>;
-        return data.success ? (data.data as Record<string, unknown>) : { error: (data as any).error || "Order confirmation failed" };
+        return {
+          results: products.map(p => ({
+            title: p.title,
+            price: p.price,
+            rating: p.rating,
+            reviews: p.reviewCount,
+            prime: p.prime,
+            url: p.url,
+          })),
+          message: `Found ${products.length} products. Present them to the user with the direct Amazon links so they can buy.`,
+        };
       } catch (err) {
-        return { error: `Amazon order confirmation failed: ${(err as Error).message}` };
+        return { error: `Amazon search failed: ${(err as Error).message}` };
       }
     }
 

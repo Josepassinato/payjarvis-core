@@ -42,6 +42,10 @@ export async function botRoutes(app: FastifyInstance) {
     const kycLevelNum = getKycLevel(user.kycLevel);
     const initialTrustScore = getInitialTrustScore(kycLevelNum);
 
+    // Platforms that support voice natively
+    const voicePlatforms = ["TELEGRAM", "WHATSAPP", "CUSTOM_API"];
+    const supportsVoice = voicePlatforms.includes((platform || "").toUpperCase());
+
     const bot = await prisma.bot.create({
       data: {
         name,
@@ -49,6 +53,7 @@ export async function botRoutes(app: FastifyInstance) {
         ownerId: user.id,
         apiKeyHash,
         trustScore: initialTrustScore,
+        capabilities: supportsVoice ? ["voice_stt", "voice_tts"] : [],
       },
     });
 
