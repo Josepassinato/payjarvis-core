@@ -1,5 +1,332 @@
 # HISTORICO.md — PayJarvis
 
+## 2026-03-21 — FIX: Location Awareness + Immediate Feedback (2 UX bugs)
+
+### BUG 1: Bot pedia CEP/localização mesmo tendo os dados salvos
+- **Causa:** System prompt não instruía explicitamente a usar dados existentes do perfil
+- **Fix:** Regra "LOCATION AWARENESS" adicionada ao system prompt de AMBOS os bots (WhatsApp + Telegram)
+- **Regra:** Nunca pedir ZIP/CEP/cidade quando já tem no perfil; usar geocode_address para converter nomes de cidade
+- **Verificação:** José (whatsapp:+19546432431) tem city=Boca Raton, zip=33432, lat/lng, state=Florida, country=USA — 42 facts
+
+### BUG 2: Bot ficava em silêncio durante tarefas demoradas
+- **Causa:** Nenhum feedback entre pedido do usuário e resultado da tool
+- **Fix FORMA 1:** Regra "IMMEDIATE FEEDBACK" no system prompt instruindo Gemini a acknowledgar antes de usar tools
+- **Fix FORMA 2:** Backend envia mensagem de acknowledge automaticamente antes de executar 20 tools demoradas
+  - WhatsApp: via sendWhatsAppMessage (Twilio) direto no handleTool
+  - Telegram: via bot.api.sendMessage no createToolHandler
+  - 3 idiomas (PT/EN/ES) detectados pelo fact "language"/"preferred_language"
+
+### Arquivos alterados:
+- `apps/api/src/services/jarvis-whatsapp.service.ts` — system prompt + TOOL_ACKNOWLEDGE + sendToolAcknowledge()
+- `/root/openclaw/gemini.js` — system prompt (location + feedback rules)
+- `/root/openclaw/index.js` — TOOL_ACKNOWLEDGE + sendToolAcknowledge() (Telegram + WhatsApp via API)
+
+### Smoke test: 16/16 passed, 0 failed, 2 warnings não-críticos
+
+## 2026-03-21 — BUG FIX: Onboarding reconhece voice-call referrals
+
+### Bug: Arilson (unknown user) não reconhecido após voice call
+**Sintoma:** José ligou pro Arilson via Jarvis voice. Arilson depois mandou "Ola jarvis" pelo WhatsApp. Bot mostrou "you don't have an account" ao invés de iniciar onboarding.
+
+**Causa raiz:** O sistema verificava 3 fontes para reconhecer novos usuários:
+1. `users` table → não encontrava (conta não criada)
+2. `onboarding_sessions` table → não encontrava (sessão só por WhatsApp)
+3. `pending_referrals` table → não encontrava (referral direto não criado)
+Mas NÃO verificava a tabela `voice_calls` — que tinha registro de José ligando pro Arilson.
+
+**Correção:**
+Adicionado check de `voice_calls` como 4ª fonte de reconhecimento:
+- Se número desconhecido recebeu voice call recente de usuário existente → auto-start onboarding
+- Usa o share code do referrer para vincular o novo usuário
+- Log `[WA VOICE-REFERRAL]` para rastreamento
+- Mensagem genérica agora também bilíngue (PT/EN detectado pelo texto)
+
+**Fluxo corrigido:**
+1. José liga pro Arilson via Jarvis → voice_calls registra `to: +14072324025, from: +19546432431`
+2. Arilson manda "Ola jarvis" → sistema checa voice_calls → encontra José como referrer
+3. Auto-inicia onboarding com share code do José → Arilson começa cadastro normalmente
+
+---
+
+## 2026-03-21 — BUG FIX: Referral WhatsApp + Sistema Anti-Regressão
+
+### Bug: Referral link nunca enviado no WhatsApp
+**Sintoma:** José pede "convite pra Amanda" e "envia o link" — Jarvis responde com texto mas NUNCA envia o link/QR/cartão.
+
+**Causa raiz:** Regex de detecção de share intent (linha 2001 de jarvis-whatsapp.service.ts) incompleta:
+- Faltava `convid\w*` → "convite" não detectado (tinha só `convid[aá]`)
+- Faltava `mand[ae].*link` → "manda link" não detectado
+- Faltava `envi[ae].*link` → "envia o link" não detectado
+- Regex existia corretamente no OpenClaw/Telegram mas foi copiada incompleta para WhatsApp
+
+**Correção:**
+1. Regex alinhada com versão Telegram: adicionado `convid\w*`, `convite`, `mand[ae].*link`, `envi[ae].*link`, `compartilh\w*`
+2. Cartão de convite personalizado: `generate_referral_card.py` agora chamado no fluxo WhatsApp com nome do usuário
+3. Detecção de idioma: resposta em PT ou EN baseada no preferred_language do user
+4. Fallback: se geração de cartão falhar, envia QR code como antes
+
+### Sistema Anti-Regressão Implementado
+1. **Smoke test** (`/root/Payjarvis/scripts/smoke-test.sh`): 16 testes automáticos pós-deploy
+   - API health, PM2 processes, WhatsApp webhook, referral card, QR code, voice, HTTPS, DB, Redis
+2. **Critical features list** (`/root/PAYJARVIS_CRITICAL_FEATURES.md`): checklist de features que nunca podem quebrar
+3. **Regra de deploy** adicionada ao CLAUDE.md (raiz + PayJarvis): smoke test obrigatório após deploy
+
+### Integrações ativas
+- WhatsApp: webhook Twilio → processWhatsAppMessage → Gemini 2.5 Flash ✅
+- Telegram: OpenClaw → Gemini ✅
+- Referral WhatsApp: regex shortcut + share_jarvis tool + cartão personalizado ✅
+- Twilio Voice calls ✅
+- Google Places ✅
+
+---
+
+## 2026-03-20 — BUG FIX: Onboarding amnesia + Security page visibility
+
+### Image Processing no WhatsApp (Gemini Vision)
+- WhatsApp agora processa fotos enviadas pelo usuario via Gemini 2.5 Flash multimodal
+- Suporta: foto sozinha, foto+caption, foto+audio, audio+foto (qualquer ordem)
+- Download via Twilio auth, conversao base64, envio como inlineData ao Gemini
+- Function calling loop completo (pode buscar precos apos identificar produto na foto)
+- `processWhatsAppImageMessage()` + `chatWithGeminiMultimodal()` adicionados
+
+### CORE RULE — Self-Awareness do Agente
+- System prompt de TODOS os bots agora comeca com CORE RULE que lista todas as 30+ tools
+- Regra: "antes de responder, checar tools disponiveis. NUNCA dizer 'nao consigo' quando tem tool"
+- Aplicado em: jarvis-whatsapp.service.ts, openclaw/gemini.js, gemini.ts
+- Decision process de 5 passos para cada mensagem
+- Master reference: /root/PAYJARVIS_SYSTEM_PROMPT_MASTER.md
+
+### Bug critico corrigido: bot esquecia dados apos onboarding
+- **Causa raiz:** `completeOnboarding()` salvava dados do usuario na tabela `users` mas NAO em `openclaw_user_facts`. O Gemini só lê `openclaw_user_facts` → usuario novo sem nenhum fact → bot responde "I don't know your name"
+- **Correção camada 1:** `onboarding-bot.service.ts` agora chama `seedUserFacts()` ao completar onboarding — salva user_name, first_name, bot_nickname, email em `openclaw_user_facts`
+- **Correção camada 2:** `jarvis-whatsapp.service.ts` tem fallback — se `userFacts` esta vazio mas user existe na tabela `users`, faz seed automatico (recovery)
+- **Fix imediato:** Facts do Doug (dm@corp.io) inseridos manualmente no banco
+
+### Visibilidade da pagina /security
+- Landing page: nova seção "Security Highlight" com badge Zero-Knowledge, 3 cards, link para /security
+- Footer expandido com links Security, Privacy Policy, Terms of Service
+- /security: tabela comparativa Signal/ProtonMail/1Password, badge "Zero-Knowledge Certified", FAQ (5 perguntas)
+- Bot greeting (onboarding + welcome + Telegram /start): menciona Zero-Knowledge encryption
+- Traduções EN/PT/ES completas
+
+### Integracoes ativas
+- WhatsApp: +17547145921 (Twilio)
+- Telegram: @Jarvis12Brain_bot
+- Stripe: ativo
+- Clerk: proxy configurado
+- Sentinel: monitoramento 24/7
+
+---
+
+## 2026-03-20 — Zero-Knowledge Encryption + Secure Card Storage
+
+### Arquitetura Zero-Knowledge implementada
+- **vault/zero-knowledge.ts**: Módulo core — PBKDF2 (100k iterations, SHA-512) + AES-256-GCM
+- **Prisma migration**: Tabelas `user_zk_vaults` (salt + pinHash) e `secure_items` (encrypted data + IV + authTag)
+- **3 camadas de dados**: Públicos, Operacionais (server key), Sensíveis (user key — Zero-Knowledge)
+
+### API Endpoints (/api/vault/zk/*)
+- `POST /setup` — configurar PIN (gera salt, hash do PIN)
+- `POST /verify` — verificar PIN
+- `POST /store` — salvar item criptografado (card, credentials, document, password)
+- `POST /retrieve` — descriptografar com PIN
+- `GET /items/:userId` — listar itens (sem dados sensíveis)
+- `DELETE /items/:itemId` — deletar item
+- `POST /change-pin` — mudar PIN (re-criptografa todos os itens em transaction)
+
+### Gemini Tools (ambos bots: OpenClaw + WhatsApp)
+- `setup_vault` — configurar cofre com PIN
+- `save_card` — salvar cartão criptografado
+- `list_vault_items` — listar itens do cofre
+- `delete_vault_item` — remover item do cofre
+- System prompt atualizado com regras de segurança Zero-Knowledge
+
+### Segurança
+- Mensagens com dados sensíveis (PIN, cartão, senhas) são deletadas do Telegram automaticamente
+- Disclaimer trilíngue ao configurar vault
+- PIN NUNCA salvo — apenas hash com salt separado (PBKDF2 + "verify" suffix)
+- Dados no banco são base64 ilegível (testado e confirmado)
+
+### Página /security
+- **apps/web/src/app/security/page.tsx**: Página marketing explicando Zero-Knowledge
+- Analogia com Signal, diagrama visual, detalhes técnicos
+- Middleware atualizado para rota pública
+
+### Testes realizados
+- Setup vault → OK
+- Verify PIN correto → `{"valid": true}`
+- Verify PIN errado → `{"valid": false}`
+- Save card → `{"label": "Visa ending 4242"}`
+- Retrieve com PIN correto → dados descriptografados
+- Retrieve com PIN errado → `{"error": "Invalid PIN"}`
+- Dados no banco → base64 ilegível
+- Delete item → OK
+- Páginas /security, /privacy, /terms → HTTP 200
+
+### Integracoes ativas
+- Telegram bot: webhook ativo, deleção automática de msgs sensíveis
+- WhatsApp Twilio: produção ativa, vault tools disponíveis
+- Stripe: subscriptions + credits
+- Amazon vault: AES-256 (legacy) + Zero-Knowledge (novo)
+- Páginas: /security, /privacy, /terms públicas
+
+---
+
+## 2026-03-20 — Dossiê Jurídico: 6 Riscos Críticos Resolvidos
+
+### RISCO 1: Token Admin Bot — RESOLVIDO
+- **HISTORICO.md**: Sanitizado — 7 ocorrências de bot IDs/chat IDs/tokens substituídas por `[REDACTED_*]`
+- **.gitignore**: Adicionado `HISTORICO.md` para prevenir futuros leaks
+- **Nota**: Repo GitHub é PÚBLICO (Josepassinato/Payjarvis). Tokens NÃO estavam em .ts/.js (só no HISTORICO.md). Token não precisa ser revogado pois o full token nunca foi commitado — apenas bot IDs parciais.
+
+### RISCO 2: Privacy Policy — IMPLEMENTADA
+- **apps/web/src/app/privacy/page.tsx**: Página completa, LGPD/GDPR/CCPA
+- **public/privacy-policy.md**: Versão Markdown
+- **middleware.ts**: Adicionado `/privacy(.*)` como rota pública (sem auth)
+- **Testado**: `curl https://www.payjarvis.com/privacy` → HTTP 200
+
+### RISCO 3: Terms of Service — IMPLEMENTADOS
+- **apps/web/src/app/terms/page.tsx**: ToS completo, jurisdição Miami-Dade FL
+- **public/terms-of-service.md**: Versão Markdown
+- **middleware.ts**: Adicionado `/terms(.*)` como rota pública (sem auth)
+- **Testado**: `curl https://www.payjarvis.com/terms` → HTTP 200
+
+### RISCO 4: Amazon Cookies — JÁ SEGURO + DISCLAIMER ADICIONADO
+- **vault/crypto.ts**: Já usa AES-256-CBC (confirmado)
+- **vault/credentials.ts**: Endpoint delete já existia (`deleteStoreCredentials`)
+- **onboarding.routes.ts**: Adicionado disclaimer trilíngue (EN/PT/ES) quando usuário salva credenciais — informa sobre criptografia, como deletar, e link para /privacy
+
+### RISCO 5: Money Transmitter — DOCUMENTO GERADO
+- **/root/PAYJARVIS_PAYMENT_FLOW.md**: Documento técnico completo do fluxo de dinheiro
+- Diagrama mostrando que PayJarvis NUNCA toca no dinheiro do usuário
+- Análise regulatória preparada para revisão de advogado
+- Recomendação: consultar attorney em Florida para análise MSB estadual
+
+### RISCO 6: KYC — FUNÇÕES DE CRIPTOGRAFIA PRONTAS
+- **vault/crypto.ts**: Adicionadas funções `encryptPII()` e `decryptPII()` para dados KYC
+- **Status**: Campos `documentNumber` e `kycPhotoPath` existem no schema mas NÃO são populados no código atual. Funções prontas para quando KYC for implementado.
+
+### Integracoes ativas
+- Telegram bot: webhook ativo
+- WhatsApp Twilio: produção ativa
+- Stripe: subscriptions + credits
+- Amazon vault: AES-256 com disclaimer
+- Privacy/Terms: páginas públicas acessíveis
+
+---
+
+## 2026-03-20 — Quick Wins (Fase 1)
+
+### QW1: Webhooks nos Approvals
+- **approvals.ts**: Adicionado `dispatchWebhook("transaction.approved")` após approve e `dispatchWebhook("transaction.rejected")` após reject
+- **webhook-dispatcher.ts**: Melhorado retry de 1x → 3x com backoff exponencial (0s, 2s, 8s) + log de sucesso
+
+### QW2: CORS dev localhost
+- **server.ts**: Adicionado `localhost:3000` e `localhost:5173` em dev (NODE_ENV !== production)
+
+### QW5: SDKs prontos para publicação
+- **agent-sdk**: README.md + files + prepublishOnly no package.json → `npm pack --dry-run` OK (16.4 kB, 30 files)
+- **merchant-sdk**: README.md + files + prepublishOnly no package.json → `npm pack --dry-run` OK (12.6 kB, 22 files)
+
+### QW6: Swagger/OpenAPI
+- **server.ts**: Registrado `@fastify/swagger` + `@fastify/swagger-ui` com spec completa
+- **Resultado**: 240 rotas auto-documentadas em `/docs/` e `/docs/json`
+- **Produção**: https://www.payjarvis.com/docs/ → 200 OK
+
+### Quick Wins NÃO necessários (já implementados)
+- QW3 (Sessions Redis): Conversations já em PostgreSQL, não Map()
+- QW4 (AgentId): Já implementado em payjarvis.js com cache 30min
+
+---
+
+## 2026-03-20 — Channel Awareness (Cross-Channel Identity Fix)
+
+### O que foi feito
+
+#### Banco de dados
+1. **Prisma schema**: Adicionados `channel String?` (default "telegram") e `channelId String?` ao model OpenclawReminder
+2. **Migração**: `20260320_add_channel_to_reminders` aplicada em produção
+
+#### WhatsApp (PayJarvis API)
+3. **whatsapp-webhook.ts**: Novo endpoint `POST /api/whatsapp/send` — envio interno de mensagens WhatsApp (autenticado por x-internal-secret ou X-Bot-Api-Key)
+4. **jarvis-whatsapp.service.ts**: System prompt com bloco CHANNEL AWARENESS (WhatsApp)
+5. **jarvis-whatsapp.service.ts**: `handleTool()` set_reminder salva com channel=whatsapp e channel_id=userId
+
+### Estado atual
+- API: ONLINE (pm2 payjarvis-api, port 3001)
+- WhatsApp send endpoint: operacional, testado com reminder real
+- Twilio: ativo (whatsapp:+17547145921)
+
+### Integracoes ativas
+- Twilio WhatsApp: produção (REST API, não sandbox)
+- OpenClaw → PayJarvis: `/api/whatsapp/send` para reminders cross-channel
+- Premium pipeline: WhatsApp passa `platform: "whatsapp"` no body
+
+---
+
+## 2026-03-19 — Geolocalização Completa (Telegram + WhatsApp)
+
+### O que foi feito
+
+#### Banco de dados
+1. **Prisma schema**: Adicionados `latitude Float?`, `longitude Float?`, `locationUpdatedAt DateTime?` ao model User
+2. **Migração**: `20260319_add_geolocation_fields` aplicada em produção
+
+#### WhatsApp (PayJarvis API)
+3. **whatsapp-webhook.ts**: Captura `Latitude`/`Longitude` do Twilio quando usuário envia pin de localização
+4. **jarvis-whatsapp.service.ts**: `saveWhatsAppLocation()` salva coords nos user facts + Prisma User
+5. **jarvis-whatsapp.service.ts**: `getUserLocation()` busca coords salvas
+6. **jarvis-whatsapp.service.ts**: `handleTool()` auto-injeta lat/lng em search_restaurants, search_hotels, search_events, find_stores, search_products
+7. **jarvis-whatsapp.service.ts**: Seção LOCATION no system prompt do Gemini
+8. **jarvis-whatsapp.service.ts**: Tool declarations search_restaurants e search_hotels aceitam latitude/longitude, location/city não são mais required
+
+#### Commerce Services
+9. **restaurants.ts**: Interface aceita `latitude?/longitude?`, search usa Yelp `latitude+longitude` params quando disponíveis
+10. **events.ts**: Interface aceita `latitude?/longitude?`, search usa Ticketmaster `latlong` param
+11. **hotels.ts**: Interface aceita `latitude?/longitude?`, search usa Amadeus `hotels/by-geocode` endpoint
+12. **commerce.ts** (rotas): Aceita `latitude/longitude` em restaurants, events, hotels; validação relaxada
+
+#### API
+13. **health.ts**: Novo endpoint `PUT /api/users/:telegramId/location` para OpenClaw salvar coords
+
+### Testes realizados
+- WhatsApp webhook: HTTP 200 ✅
+- Location API endpoint: HTTP 200, funcional ✅
+- Restaurants search com coords: success=true ✅
+- Events search com coords: success=true ✅
+- Validação sem location nem coords: rejeita corretamente ✅
+- Zero erros nos logs ✅
+
+### Integracoes ativas
+- WhatsApp: +17547145921 (Twilio, webhook /webhook/whatsapp) — agora com suporte a localização
+- Telegram: @Jarvis12Brain_bot (webhook /webhook/telegram) — agora com suporte a localização
+- Yelp: aceita lat/lng nativo
+- Ticketmaster: aceita latlong param
+- Amadeus Hotels: aceita by-geocode endpoint
+
+### Pendente
+- **Google Places API (New)** — ativar em https://console.developers.google.com/apis/api/places.googleapis.com/overview?project=574027670672
+- Yelp API key configurar (opcional, Google Places substitui)
+- Ticketmaster API key configurar (atualmente mock mode)
+
+---
+
+## 2026-03-19 — Google Places API (New) integrado como fallback
+
+### O que foi feito
+1. **google-places.ts**: Reescrito para Places API (New) — usa GEMINI_API_KEY (mesmo projeto Cloud 574027670672)
+2. **google-places.ts**: Text Search + Nearby Search + Place Details com coordenadas nativas
+3. **google-places.ts**: Circuit breaker (PERMISSION_DENIED → desabilita 5min → mock)
+4. **google-places.ts**: Distância Haversine + fotos via Media endpoint
+5. **restaurants.ts**: Google Places como fallback automático quando Yelp não configurado
+6. **restaurants.ts**: Cadeia de prioridade: Yelp → Google Places → Mock
+
+### Para ativar (1 clique):
+https://console.developers.google.com/apis/api/places.googleapis.com/overview?project=574027670672
+Clique "Enable" → dados reais em ~1 min automaticamente.
+
+---
+
 ## 2026-03-19 — Audio como Feature Core: WhatsApp STT + TTS
 
 ### O que foi feito
@@ -359,7 +686,7 @@ ClawdBot/OpenClaw gerava links de indicação WhatsApp apontando para o sandbox 
 
 #### Auditoria de Isolamento Multi-Tenant
 - **User.phone @unique** — campo era opcional sem constraint, permitia lookup ambiguo via findFirst
-- **User.telegramChatId @unique** — duplicata real encontrada no DB (user 1762460701 em 2 registros)
+- **User.telegramChatId @unique** — duplicata real encontrada no DB (user [REDACTED_CHAT_ID] em 2 registros)
 - **session-manager.ts** — chave Redis era `session:bot:${botId}` (sem userId), agora `session:bot:${botId}:user:${userId}`
 - **jarvis-whatsapp.service.ts** — findFirst com OR → findUnique no phone (determinístico)
 - **onboarding-bot.service.ts** — WhatsApp phone agora salvo em User.phone durante onboarding
@@ -372,7 +699,7 @@ ClawdBot/OpenClaw gerava links de indicação WhatsApp apontando para o sandbox 
 
 #### Limpeza de DB
 - Removido telegramChatId duplicado do user cmmnz1os7 (teste antigo)
-- Deletados 2 registros de crédito órfãos (userId='1762460701', 'test-final')
+- Deletados 2 registros de crédito órfãos (userId='[REDACTED_CHAT_ID]', 'test-final')
 - Migração SQL: unique indexes + emailAttempts column
 
 ### Arquivos alterados
@@ -1815,7 +2142,7 @@ O config correto em `/etc/nginx/sites-enabled/payjarvis` usava `proxy_pass http:
 4. **Formato 12h AM/PM**: selects de horário no dashboard convertidos para formato 12h (`apps/web/src/app/(dashboard)/bots/[id]/page.tsx`)
 5. **Timezone por usuário**: campo `timezone` adicionado ao Policy (Prisma schema + SQL ALTER TABLE), dropdown com 20 fusos no dashboard, `checkTimeWindow` usa `Intl.DateTimeFormat` para calcular hora local
 6. **Trust score fix**: `checkTimeWindow` removido de `ANOMALY_RULES` (causava -50), novo delta `blocked_time_window: -5`. Scores dos bots resetados para 1000
-7. **Notificações bot fix**: `TELEGRAM_BOT_TOKEN` e `ADMIN_TELEGRAM_BOT_TOKEN` corrigidos para @Jarvis12Brain_bot (8615760515)
+7. **Notificações bot fix**: `TELEGRAM_BOT_TOKEN` e `ADMIN_TELEGRAM_BOT_TOKEN` corrigidos para @Jarvis12Brain_bot ([REDACTED_BOT_ID])
 8. **Browser-agent auto-connect**: CDP reconecta automaticamente no boot via setTimeout + POST /connect
 9. **Browser-agent no ecosystem**: adicionado ao `ecosystem.config.cjs` para sobreviver a `pm2 delete/start`
 
@@ -1842,7 +2169,7 @@ O config correto em `/etc/nginx/sites-enabled/payjarvis` usava `proxy_pass http:
 - Clerk auth: Google OAuth habilitado, email verification ativo
 - Stripe: sk_live_ configurada, CardElement dark theme
 - Chrome CDP: porta 18800 (auto-connect no boot)
-- Telegram @Jarvis12Brain_bot: notificações admin + onboarding (token 8615760515, chat 1762460701)
+- Telegram @Jarvis12Brain_bot: notificações admin + onboarding (token [REDACTED_BOT_ID], chat [REDACTED_CHAT_ID])
 - Redis: cache de approvals, handoffs, tokens BDIT
 - Prisma/PostgreSQL: banco principal (timezone column adicionada)
 
@@ -1855,8 +2182,8 @@ O config correto em `/etc/nginx/sites-enabled/payjarvis` usava `proxy_pass http:
 ## 2026-03-12 — Admin Telegram notifications via @Jarvis12Brain_bot
 
 ### O que foi feito
-1. Adicionado canal de notificação admin separado via @Jarvis12Brain_bot (token: 8615760515)
-2. `notifyApprovalCreated` agora SEMPRE envia para o admin (chat ID 1762460701) via @Jarvis12Brain_bot, independente do fluxo normal via @PayJarvisBot
+1. Adicionado canal de notificação admin separado via @Jarvis12Brain_bot (token: [REDACTED_BOT_ID])
+2. `notifyApprovalCreated` agora SEMPRE envia para o admin (chat ID [REDACTED_CHAT_ID]) via @Jarvis12Brain_bot, independente do fluxo normal via @PayJarvisBot
 3. Novo endpoint `POST /notifications/telegram/admin-webhook` para processar callbacks (aprovar/rejeitar) vindos do @Jarvis12Brain_bot
 4. `answerCallbackQuery` e `editMessageText` agora aceitam `botToken` opcional para suportar múltiplos bots
 5. Webhook do @Jarvis12Brain_bot configurado para `https://www.payjarvis.com/api/notifications/telegram/admin-webhook`
@@ -1878,7 +2205,7 @@ O config correto em `/etc/nginx/sites-enabled/payjarvis` usava `proxy_pass http:
 - Stripe: pk_live configurada, CardElement dark theme
 - Chrome CDP: porta 18800
 - Telegram @PayJarvisBot: webhook para onboarding/link de usuários (token 8486332506)
-- Telegram @Jarvis12Brain_bot: webhook para notificações admin de aprovação (token 8615760515, chat 1762460701)
+- Telegram @Jarvis12Brain_bot: webhook para notificações admin de aprovação (token [REDACTED_BOT_ID], chat [REDACTED_CHAT_ID])
 - Redis: cache de approvals, handoffs, tokens BDIT
 - Prisma/PostgreSQL: banco principal
 
@@ -2216,3 +2543,42 @@ Merge de duas sandboxes independentes em um deploy unificado:
 - Clerk: proxy /__clerk/ configurado
 - Sentinel: monitoramento 24/7 + Telegram alerts
 - CFO Agent: relatorios automaticos
+
+## 2026-03-21 — Sessão Completa
+
+### Implementado:
+- Google Places/Directions: 17/17 APIs testadas e funcionando
+- Zero-Knowledge Encryption (AES-256-GCM + PBKDF2) + Vault com PIN
+- Privacy Policy, Terms of Service, Security page — live
+- 6 riscos jurídicos do dossiê resolvidos
+- Reconhecimento de imagem (foto → identifica produto → busca preço)
+- CORE RULE — autoconsciência de 30+ tools/APIs no system prompt
+- Onboarding multilíngue (EN/PT/ES) com detecção automática
+- PWA completa com chat (payjarvis.com/chat) + Service Worker + manifest
+- Rebranding: logo caranguejo robô em todos os canais
+- Voz Orus (Gemini TTS) como padrão
+- Setup Shopping no dashboard (4 steps visuais)
+- Referral cards personalizados com "Powered by OpenClaw"
+- Channel awareness (reminders respeitam canal)
+- Twilio Voice: chamadas telefônicas com ElevenLabs + briefing + rapport
+- Verified Caller ID para usuários
+- Chamada Jarvis → Usuário (live conversation)
+- Catálogo de contatos por usuário
+- Anti-regressão: 16 smoke tests + CRITICAL_FEATURES.md
+- Mapa semântico (CLAUDE.md) para PayJarvis e OpenClaw
+- Apify e-commerce multi-loja (Amazon, Walmart, Google Shopping)
+- Mercado Livre Brasil (API gratuita)
+- Sistema de billing usage_logs com markup 15x
+- Banner PWA + tutoriais iPhone/Android EN/PT
+- Drip sequence atualizada (9 steps)
+- Mensagem de onboarding melhorada (email ≠ senha do email)
+- Fix bug memória WhatsApp (Doug)
+- Fix bug duplo /api/ no PWA
+- Fix bug relatório pós-chamada (race condition + duplo whatsapp:)
+- Fix bug referral share_jarvis
+- Fix bug compilação dist/ desatualizado
+- Fix smoke-test.sh: qrcode check agora roda no diretório correto
+
+### Estado: Produção, 4+ usuários beta ativos
+### Smoke test: 16/16 passed, 0 failed, 2 warnings não-críticos
+### Próximos: Contas Amadeus/Yelp/Ticketmaster, React Native app, billing ativo
