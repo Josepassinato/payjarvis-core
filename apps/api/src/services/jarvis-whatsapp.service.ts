@@ -349,17 +349,16 @@ If ANY search tool returns an error, times out, or returns no results:
 - Example: "Os óculos Meta Ray-Ban custam aproximadamente $299. Disponível em: amazon.com, bestbuy.com, ray-ban.com/meta"
 - The user must ALWAYS get a useful answer, even if tools fail
 
-IMMEDIATE FEEDBACK — ACKNOWLEDGE BEFORE LONG TASKS
-When the user asks you to do something that takes more than 2 seconds (search products, make a call, generate a document, search restaurants, etc.), ALWAYS acknowledge immediately BEFORE starting the task.
-Examples:
-- "Busca um iPhone pra mim" → "Vou buscar as melhores ofertas pra você! 🔍" THEN search
-- "Liga pro João" → "Certo, vou ligar pro João agora! 📞" THEN call
-- "Faz um contrato" → "Preparando seu documento! 📄" THEN generate
-- "Restaurante italiano perto" → "Procurando os melhores italianos! 🍝" THEN search
-The user must NEVER be left in silence wondering if you understood. Send a short acknowledge, THEN use the tool.
+ACTION FIRST — CALL TOOLS IMMEDIATELY
+When the user asks you to do something, CALL THE TOOL IMMEDIATELY in your response. Do NOT send a text acknowledgment first — the system automatically sends a quick "searching..." message when you call a tool. If you respond with only text like "Vou buscar..." WITHOUT calling a tool, the search NEVER happens. ALWAYS call the tool in the same response as the user's request.
+WRONG: User asks to search → you reply "Vou buscar!" (text only, no tool call) → search never happens
+RIGHT: User asks to search → you call search_products/find_stores/web_search → results come back → you present them
+
+NEWS RULE
+When user asks for news/notícias/noticias: ALWAYS call web_search with type="news" and a SINGLE broad query (e.g. "top news today" or "últimas notícias"). Do NOT make 5+ separate searches — ONE search is enough. Keep your FINAL response under 1000 characters total. The user is on WhatsApp with a 1600-char limit per message.
 
 EXECUTION
-1. User asks → ACKNOWLEDGE IMMEDIATELY → USE THE TOOL
+1. User asks → CALL THE TOOL IMMEDIATELY (system sends auto-acknowledge)
 2. If tool fails → USE YOUR KNOWLEDGE as fallback (NEVER leave user without answer)
 3. Present THE BEST option (max 3)
 4. Confirmation → request_payment
@@ -771,8 +770,8 @@ let _currentUserFacts: { fact_key: string; fact_value: string }[] = [];
 // ─── Tool Handler ──────────────────────────────────────
 
 async function handleTool(userId: string, name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
-  // Send acknowledge message for slow tools (BUG 2 - Immediate Feedback)
-  await sendToolAcknowledge(userId, name, _currentUserFacts);
+  // DISABLED: sendToolAcknowledge causes message spam loop (2026-03-24)
+  // await sendToolAcknowledge(userId, name, _currentUserFacts);
   // Auto-inject user coordinates for location-aware searches
   const locationTools = ["search_restaurants", "search_hotels", "search_events", "find_stores", "search_products"];
   if (locationTools.includes(name) && !args.latitude && !args.longitude) {
@@ -785,22 +784,38 @@ async function handleTool(userId: string, name: string, args: Record<string, unk
 
   switch (name) {
     case "web_search": {
-      const query = encodeURIComponent(args.query as string);
-      const searchUrl = args.type === "news"
-        ? `https://www.google.com/search?q=${query}&tbm=nws`
-        : `https://www.google.com/search?q=${query}`;
+      // Use Gemini's native Google Search grounding instead of browser scraping
       try {
-        const res = await fetch(`${BROWSER_AGENT_URL}/navigate`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url: searchUrl }),
-          signal: AbortSignal.timeout(30000),
+        const searchGenAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+        const searchModel = searchGenAI.getGenerativeModel({
+          model: "gemini-2.5-flash",
+          tools: [{ googleSearch: {} } as any],
         });
-        const data = await res.json() as Record<string, unknown>;
-        if (!data.success) return { error: data.error || "Search failed" };
-        return { query: args.query, content: data.content, url: data.url };
+
+        const isNews = args.type === "news";
+        const typeHint = isNews ? " (latest news)" : args.type === "shopping" ? " (shopping/prices)" : "";
+        const searchPrompt = isNews
+          ? `Search for the latest news about: ${args.query}. Return ONLY a brief bullet-point summary (max 5 items). Each item: one sentence with the key fact + source name. No introductions, no conclusions. Keep total response under 500 characters. Use plain text, no markdown.`
+          : `Search the web for: ${args.query}${typeHint}. Return a concise summary of the most relevant results. Include key facts and source names. Keep response under 600 characters. Use plain text, no markdown.`;
+
+        const searchResult = await Promise.race([
+          searchModel.generateContent(searchPrompt),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Search timeout after 15s")), 15000)),
+        ]);
+        const searchText = searchResult.response.text().substring(0, 800);
+
+        const groundingMeta = (searchResult.response.candidates?.[0] as any)?.groundingMetadata;
+        const sources = groundingMeta?.groundingChunks?.map((c: any) => c.web?.uri).filter(Boolean) || [];
+
+        return {
+          query: args.query,
+          content: searchText,
+          sources: sources.length > 0 ? sources.slice(0, 3) : undefined,
+          method: "google_search_grounding",
+        };
       } catch (err) {
-        return { error: `Browser unavailable: ${(err as Error).message}` };
+        console.error("[web_search] Grounding failed:", (err as Error).message);
+        return { error: `Web search failed: ${(err as Error).message}` };
       }
     }
 
@@ -2392,7 +2407,7 @@ export async function processWhatsAppMessage(from: string, text: string): Promis
           method: "POST",
           headers: { "Content-Type": "application/json", "x-internal-secret": process.env.INTERNAL_SECRET || "" },
           body: JSON.stringify({ userId, text, platform: "whatsapp" }),
-          signal: AbortSignal.timeout(30000),
+          signal: AbortSignal.timeout(90000),
         });
         const premiumData = await premiumRes.json() as { success: boolean; response: string; documents?: { pdfPath: string; title: string }[] };
         if (premiumData.success) {
