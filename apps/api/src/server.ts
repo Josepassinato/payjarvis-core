@@ -310,6 +310,11 @@ try {
   await app.listen({ port, host: "0.0.0.0" });
   console.log(`PayJarvis API listening on port ${port}`);
   startTimeoutChecker();
+
+  // Seed call playbooks (idempotent — upserts)
+  import("./services/voice/call-playbooks.service.js")
+    .then(m => m.seedPlaybooks())
+    .catch(err => console.error("[PLAYBOOK] Seed failed:", err.message));
 } catch (err) {
   app.log.error(err);
   process.exit(1);

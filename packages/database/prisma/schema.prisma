@@ -1183,6 +1183,26 @@ model CallIntelligence {
   @@map("call_intelligence")
 }
 
+// ─── Call Playbooks (pre-defined scripts) ───
+
+model CallPlaybook {
+  id                 String   @id @default(cuid())
+  name               String
+  category           String
+  language           String   @default("en")
+  openingLine        String
+  requiredInfo       Json     @default("[]")
+  scriptSteps        Json     @default("[]")
+  successCriteria    String?
+  commonObjections   Json?    @default("[]")
+  avgDurationSeconds Int?     @default(120)
+  createdAt          DateTime @default(now())
+
+  @@unique([name, language])
+  @@index([category])
+  @@map("call_playbooks")
+}
+
 // ─── User Contacts (for voice calls) ───
 
 model UserContact {

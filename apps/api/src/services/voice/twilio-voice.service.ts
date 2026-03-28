@@ -51,6 +51,51 @@ const DAILY_LIMIT_PREMIUM = 20;
 const MAX_CALL_DURATION_SEC = 300;
 const BLOCKED_PREFIXES = ["911", "112", "999", "100", "190", "192", "193"];
 
+// ─── Improvisation Rules (Parte D) ──────────────────
+
+const IMPROVISATION_RULES = `
+
+=== FLEXIBLE CONVERSATION RULES ===
+
+The playbook/briefing above is a GUIDE, not a rigid script. You have an OBJECTIVE and REQUIRED INFO. The PATH to get there is 100% free and adaptive.
+
+IMPROVISATION:
+- Always keep the objective in mind, but be flexible in how you get there
+- If the conversation goes off-script, bring it back naturally — never abruptly
+- If the person gives you info early, acknowledge it and skip ahead
+- Match the person's energy and pace at all times
+
+UNEXPECTED INFORMATION — When you receive new info that affects the user's decision:
+- DO NOT decide for the user (e.g. don't accept a $45 tasting menu without asking)
+- Note the information
+- Either ask "Can you hold one moment while I check?" or say "Let me confirm with [owner] and call back"
+- Report ALL options to the user afterward
+
+WHAT YOU CAN DECIDE ALONE:
+- Accept timing ±30min from requested (19:30 instead of 20:00)
+- Give the user's phone number or name
+- Choose between equivalent options (table A vs B)
+- Accept minor alternatives (bar seating if no tables)
+
+WHAT YOU MUST CONSULT THE USER FIRST:
+- Price above expected / any cost commitment
+- Time >1 hour different from requested
+- Different date than requested
+- Cancellation of something existing
+- Significant change to the original plan
+
+NEVER DO:
+- Give financial info (cards, bank details)
+- Accept charges or confirm purchases
+- Give home address (unless explicitly authorized)
+
+IVR / AUTOMATED SYSTEMS:
+- If you detect an IVR menu, navigate it by saying the option number or "agent"/"representative"
+- Try pressing 0 or saying "speak to someone" to reach a human
+- If stuck in a loop, hang up and report to the user
+
+=== END RULES ===`;
+
 // ─── Audio file store (in-memory, short-lived) ──────
 
 interface AudioEntry {
@@ -806,7 +851,40 @@ export async function makeCall(params: {
     console.log(`[VOICE-INTEL] Found intelligence for ${targetPhone}: personality=${contactIntel.personalityType}, calls=${contactIntel.totalCalls}`);
   }
 
-  // Build conversation plan with Gemini (inject intelligence if available)
+  // Detect and load playbook if applicable
+  const { detectPlaybookName, findPlaybook, buildPlaybookPrompt } = await import("./call-playbooks.service.js");
+  const playbookName = detectPlaybookName(objective);
+  let playbookPrompt = "";
+  if (playbookName) {
+    const playbook = await findPlaybook(playbookName, lang);
+    if (playbook) {
+      // Build info map from briefing
+      const info: Record<string, string> = {};
+      if (briefing) {
+        info.contact_name = briefing.userName;
+        info.restaurant_name = businessName || targetName;
+        info.business_name = businessName || targetName;
+        info.patient_name = briefing.userName;
+        info.reservation_name = briefing.userName;
+        info.recipient_name = briefing.userName;
+      }
+      // Extract info from objective/details using simple patterns
+      const sizeMatch = objective.match(/(\d+)\s*(pessoas|people|pax|guests)/i);
+      if (sizeMatch) info.party_size = sizeMatch[1];
+      const timeMatch = objective.match(/(\d{1,2}[h:]?\d{0,2}\s*(?:am|pm|h)?)/i);
+      if (timeMatch) info.time = timeMatch[1];
+      // Pass details as service_type/product_or_service
+      if (details) {
+        info.service_type = details;
+        info.product_or_service = details;
+      }
+
+      playbookPrompt = buildPlaybookPrompt(playbook, info);
+      console.log(`[PLAYBOOK] Using playbook: ${playbookName}/${lang} for call ${callId}`);
+    }
+  }
+
+  // Build conversation plan with Gemini (inject intelligence + playbook if available)
   let plan = briefing
     ? buildBriefingSystemPrompt(briefing)
     : await buildCallPlan(objective, details || "", businessName || "", lang);
@@ -814,6 +892,12 @@ export async function makeCall(params: {
   if (contactIntel) {
     plan += buildIntelligencePrompt(contactIntel);
   }
+  if (playbookPrompt) {
+    plan += playbookPrompt;
+  }
+
+  // Add flexible improvisation rules
+  plan += IMPROVISATION_RULES;
 
   // Create in-memory state
   const callState: ActiveCall = {
