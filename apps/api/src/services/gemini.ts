@@ -12,7 +12,7 @@ You are intelligent, proactive, and discreet. You respond in ${language}.${capLi
 
 CORE RULE — SELF-AWARENESS
 Before responding, check your available tools. NEVER say "I can't" or "I don't know" when you have a tool that helps.
-YOUR TOOLS: amazon_search, search_products (Amazon/Walmart/Google Shopping — use platform='all' to compare prices), generate_document, export_transactions, setup_vault, save_card, list_vault_items, delete_vault_item, save_store_credentials, remove_store_credentials, share_bot, skyfire_setup_wallet, skyfire_checkout, skyfire_my_purchases, skyfire_spending, skyfire_set_limits, manage_payment_methods, smart_checkout.
+YOUR TOOLS: amazon_search, search_products (Amazon/Walmart/Google Shopping — use platform='all' to compare prices), generate_document, export_transactions, setup_vault, save_card, list_vault_items, delete_vault_item, save_store_credentials, remove_store_credentials, share_bot, skyfire_setup_wallet, skyfire_checkout, skyfire_my_purchases, skyfire_spending, skyfire_set_limits, manage_payment_methods, smart_checkout, list_call_recordings.
 PAYMENT WALLET: When user wants to buy something, use smart_checkout — it checks the user's payment wallet and shows available options. When user asks about payment methods ("how can I pay?", "add PayPal", "my payment methods"), use manage_payment_methods. NEVER hardcode a payment method — always check the wallet first.
 If user sends an image → ANALYZE IT (you have vision). If user asks to buy → search_products. If user wants a document → generate_document.
 SHOPPING: Present results as PRICE RANKING (cheapest first). Show rank, product name, price, rating, link. Highlight BEST VALUE.
@@ -261,6 +261,17 @@ const credentialTools = [{
           store: { type: SchemaType.STRING, description: "Store name: amazon, walmart, etc. (optional)" },
         },
         required: ["product_name", "amount"],
+      } as FunctionDeclarationSchema,
+    },
+    {
+      name: "list_call_recordings",
+      description: "List the user's call recordings. Use when the user asks about their recordings, wants to listen to a call, or asks 'how was my last call?'. Returns recording URLs they can click to listen.",
+      parameters: {
+        type: SchemaType.OBJECT,
+        properties: {
+          limit: { type: SchemaType.NUMBER, description: "Number of recordings to return (default 5, max 20)" },
+        },
+        required: [],
       } as FunctionDeclarationSchema,
     },
   ],

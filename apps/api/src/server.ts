@@ -1,3 +1,20 @@
+import { readFileSync as readEnvFile } from "fs";
+import { resolve as resolvePath } from "path";
+// Load .env from monorepo root (PM2 cwd may not be project root)
+try {
+  const envPath = resolvePath(import.meta.dirname, "../../../.env");
+  const envContent = readEnvFile(envPath, "utf-8");
+  for (const line of envContent.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eqIdx = trimmed.indexOf("=");
+    if (eqIdx === -1) continue;
+    const key = trimmed.substring(0, eqIdx);
+    const val = trimmed.substring(eqIdx + 1).replace(/^["']|["']$/g, "");
+    if (!process.env[key] || process.env[key] === "") process.env[key] = val;
+  }
+} catch { /* .env not found, use existing env */ }
+
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import fastifyStatic from "@fastify/static";
@@ -22,6 +39,11 @@ import { onboardingRoutes } from "./routes/onboarding.routes.js";
 import { paymentMethodRoutes } from "./routes/payment-methods.js";
 import { agentRoutes } from "./routes/agents.js";
 import { commerceRoutes } from "./routes/commerce.js";
+import { hotelRoutes } from "./routes/hotels.js";
+import { restaurantRoutes } from "./routes/restaurants.js";
+import { flightRoutes } from "./routes/flights.js";
+import { eventRoutes } from "./routes/events.js";
+import { productRoutes } from "./routes/products.js";
 import { composioRoutes } from "./routes/composio.js";
 import { coreRoutes } from "./routes/core.js";
 import { instanceRoutes } from "./routes/instances.js";
@@ -35,6 +57,7 @@ import { botShareRoutes } from "./routes/bot-share.js";
 import { onboardingBotRoutes } from "./routes/onboarding-bot.js";
 import { stripeWebhookRoutes } from "./routes/stripe-webhook.js";
 import { whatsappWebhookRoutes } from "./routes/whatsapp-webhook.js";
+import { referralRoutes } from "./routes/referrals.js";
 import { creditRoutes } from "./routes/credits.js";
 import { sequenceRoutes } from "./routes/sequence.js";
 import { subscriptionRoutes } from "./routes/subscription.js";
@@ -46,15 +69,62 @@ import { adminBroadcastRoutes } from "./routes/admin/admin-broadcast.js";
 import { adminRevenueRoutes } from "./routes/admin/admin-revenue.js";
 import { adminSentinelRoutes } from "./routes/admin/admin-sentinel.js";
 import { adminCfoRoutes } from "./routes/admin/admin-cfo.js";
+import { adminResilienceRoutes } from "./routes/admin/admin-resilience.js";
+import { adminInnerCircleRoutes } from "./routes/admin/admin-inner-circle.js";
 import { mastercardRoutes } from "./routes/mastercard.routes.js";
+import { visaRoutes } from "./routes/visa.routes.js";
+import { shoppingConfigRoutes } from "./routes/shopping-config.js";
+import { webChatRoutes } from "./routes/web-chat.js";
+import { voiceRoutes } from "./routes/voice.js";
+import { recordingRoutes } from "./routes/recordings.js";
+import { engagementRoutes } from "./routes/engagement.js";
+import { butlerRoutes } from "./routes/butler.js";
+import { innerCircleRoutes } from "./routes/inner-circle.js";
+import { scheduledTaskRoutes } from "./routes/scheduled-tasks.js";
+import skyfireRoutes from "./routes/skyfire.js";
+import { rateLimiter, webhookRateLimiter } from "./middleware/rate-limiter.js";
 
 // Cron jobs
 import "./jobs/sequence-cron.js";
 import "./jobs/trial-cron.js";
+import "./jobs/engagement-cron.js";
+import "./jobs/scheduled-tasks-cron.js";
+import { startPriceAlertCron } from "./services/search/price-alert-cron.js";
+startPriceAlertCron();
 
-const app = Fastify({ logger: true });
+const app = Fastify({
+  logger: process.env.NODE_ENV === "production"
+    ? { level: "warn" }
+    : true,
+});
 
-await app.register(cors, { origin: true });
+const allowedOrigins = [
+  "https://payjarvis.com",
+  "https://www.payjarvis.com",
+  "https://admin.payjarvis.com",
+];
+
+await app.register(cors, {
+  origin: (origin, cb) => {
+    // Allow requests with no origin (mobile apps, curl, server-to-server)
+    if (!origin || allowedOrigins.includes(origin)) {
+      cb(null, true);
+    } else {
+      cb(null, false);
+    }
+  },
+  credentials: true,
+});
+
+// Rate limiter — applies to all /api/ routes
+app.addHook("onRequest", async (req, reply) => {
+  // Skip health, static, JWKS, webhooks (webhooks have their own limiter)
+  if (req.url === "/health" || req.url.startsWith("/.well-known") || req.url === "/adapter.js") return;
+  if (req.url.startsWith("/webhook/")) return; // Webhooks use webhookRateLimiter
+  if (req.url.startsWith("/api/")) {
+    await rateLimiter(req, reply);
+  }
+});
 
 // Register all routes
 await app.register(healthRoutes);
@@ -83,6 +153,21 @@ await app.register(coreRoutes);
 
 // Commerce — flights, hotels, restaurants, events, transport, delivery
 await app.register(commerceRoutes);
+
+// Hotels — direct hotel endpoints (search, offer details, booking stub)
+await app.register(hotelRoutes);
+
+// Restaurants — direct restaurant endpoints (search, details, reservation)
+await app.register(restaurantRoutes);
+
+// Flights — direct flight search endpoints
+await app.register(flightRoutes);
+
+// Events — direct event search endpoints (Ticketmaster)
+await app.register(eventRoutes);
+
+// Products — Mercado Libre + eBay product search
+await app.register(productRoutes);
 
 // Composio — Gmail, Google Calendar, Slack integrations
 await app.register(composioRoutes);
@@ -120,13 +205,16 @@ await app.register(onboardingBotRoutes);
 // Stripe Webhook — setup_intent.succeeded, payment confirmations
 await app.register(stripeWebhookRoutes);
 
-// WhatsApp Webhook — Twilio sandbox, Jarvis AI responses
+// WhatsApp Webhook — Twilio production, Jarvis AI responses
 await app.register(whatsappWebhookRoutes);
+
+// Referrals — direct WhatsApp invite via Twilio template
+await app.register(referralRoutes);
 
 // Credits — LLM message billing, packages, balance
 await app.register(creditRoutes);
 
-// Onboarding Sequence — drip banners over 60 days
+// Onboarding Sequence — drip banners (Beta phase)
 await app.register(sequenceRoutes);
 
 // Subscription — Jarvis Premium $20/month
@@ -134,6 +222,36 @@ await app.register(subscriptionRoutes);
 
 // Mastercard — Buyer Payment Agent + MDES Token Requestor
 await app.register(mastercardRoutes);
+
+// Visa — Click to Pay (Secure Remote Commerce) SDK config + checkout
+await app.register(visaRoutes);
+
+// Shopping Config — setup-shopping wizard (limits, categories, card)
+await app.register(shoppingConfigRoutes);
+
+// Web Chat — PWA chat interface (same Jarvis pipeline as WhatsApp/Telegram)
+await app.register(webChatRoutes);
+
+// Voice Calls — Twilio outbound calls, AI conversations
+await app.register(voiceRoutes);
+
+// Call Recordings — Twilio webhook, admin listing, user recordings
+await app.register(recordingRoutes);
+
+// Engagement — proactive messages, gamification, push notifications, preferences
+await app.register(engagementRoutes);
+
+// Butler Protocol 🎩 — profile vault, credentials, account creation
+await app.register(butlerRoutes);
+
+// Inner Circle — specialist referral network
+await app.register(innerCircleRoutes);
+
+// Scheduled Tasks — user-created recurring jobs (news, prices, weather, etc.)
+await app.register(scheduledTaskRoutes);
+
+// Skyfire — wallet-based payments, purchase tracking, webhooks
+await app.register(skyfireRoutes);
 
 // Admin Dashboard — separate auth, overview, users, broadcast, revenue
 await app.register(adminAuthRoutes);
@@ -143,6 +261,8 @@ await app.register(adminBroadcastRoutes);
 await app.register(adminRevenueRoutes);
 await app.register(adminSentinelRoutes);
 await app.register(adminCfoRoutes);
+await app.register(adminResilienceRoutes);
+await app.register(adminInnerCircleRoutes);
 
 // Static files — banners, public assets
 const publicDir = join(process.cwd(), "public");

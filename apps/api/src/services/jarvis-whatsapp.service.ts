@@ -2319,6 +2319,53 @@ async function handleTool(userId: string, name: string, args: Record<string, unk
       }
     }
 
+    // ─── Call Recordings ────────────────────────────────────
+    case "list_call_recordings": {
+      console.log("[RECORDINGS] Tool called: list_call_recordings");
+      try {
+        const limit = Math.min((args.limit as number) || 5, 20);
+        const userRecord = await prisma.user.findFirst({
+          where: { OR: [{ telegramChatId: userId }, { phone: userId.replace("whatsapp:", "") }] },
+        });
+        if (!userRecord) return { error: "User not found" };
+
+        const recordings = await prisma.$queryRaw<Array<{
+          id: string;
+          callSid: string;
+          recordingUrl: string;
+          durationSeconds: number;
+          fromNumber: string;
+          toNumber: string;
+          createdAt: Date;
+        }>>`
+          SELECT id, "callSid", "recordingUrl", "durationSeconds", "fromNumber", "toNumber", "createdAt"
+          FROM call_recordings
+          WHERE "userId" = ${userRecord.id}
+          ORDER BY "createdAt" DESC
+          LIMIT ${limit}
+        `;
+
+        if (recordings.length === 0) {
+          return { recordings: [], message: "No call recordings yet. Make a call and it will be recorded automatically!" };
+        }
+
+        return {
+          recordings: recordings.map(r => ({
+            id: r.id,
+            from: r.fromNumber,
+            to: r.toNumber,
+            duration: `${Math.floor(r.durationSeconds / 60)}m ${r.durationSeconds % 60}s`,
+            date: new Date(r.createdAt).toLocaleDateString("en-US"),
+            listenUrl: r.recordingUrl,
+          })),
+          message: `Found ${recordings.length} recording(s). Send the listen URL to the user so they can play it.`,
+          instructions: "Show each recording with: date, who was called (to number), duration, and the listen URL as a clickable link.",
+        };
+      } catch (err) {
+        return { error: `Failed to fetch recordings: ${(err as Error).message}` };
+      }
+    }
+
     default:
       return { error: `Unknown tool: ${name}` };
   }

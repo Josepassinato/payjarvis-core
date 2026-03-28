@@ -1135,6 +1135,25 @@ model VoiceCall {
   @@map("voice_calls")
 }
 
+// ─── Call Recordings ───
+
+model CallRecording {
+  id              String   @id @default(cuid())
+  userId          String
+  callSid         String
+  recordingSid    String   @unique
+  recordingUrl    String
+  durationSeconds Int
+  fromNumber      String
+  toNumber        String
+  direction       String   @default("outbound") // outbound, inbound
+  createdAt       DateTime @default(now())
+
+  @@index([userId])
+  @@index([callSid])
+  @@map("call_recordings")
+}
+
 // ─── User Contacts (for voice calls) ───
 
 model UserContact {
