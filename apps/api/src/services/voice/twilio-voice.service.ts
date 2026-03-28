@@ -311,6 +311,8 @@ interface ActiveCall {
   notified: boolean;
   result?: string;
   briefing?: CallBriefing;
+  startedAt?: number; // timestamp when call started
+  contactIntel?: ContactIntel | null; // pre-loaded intelligence
   preGeneratedGreeting?: string; // Audio URL pre-generated before call
   pendingResponse?: {           // Response being generated in background
     promise: Promise<{ text: string; audioUrl: string | null; done?: boolean; summary?: string }>;
@@ -797,10 +799,21 @@ export async function makeCall(params: {
     });
   }
 
-  // Build conversation plan with Gemini
-  const plan = briefing
+  // Lookup contact intelligence for adaptive behavior
+  const targetPhone = cleanNumber.startsWith("+") ? cleanNumber : `+${cleanNumber}`;
+  const contactIntel = await getContactIntelligence(targetPhone);
+  if (contactIntel) {
+    console.log(`[VOICE-INTEL] Found intelligence for ${targetPhone}: personality=${contactIntel.personalityType}, calls=${contactIntel.totalCalls}`);
+  }
+
+  // Build conversation plan with Gemini (inject intelligence if available)
+  let plan = briefing
     ? buildBriefingSystemPrompt(briefing)
     : await buildCallPlan(objective, details || "", businessName || "", lang);
+
+  if (contactIntel) {
+    plan += buildIntelligencePrompt(contactIntel);
+  }
 
   // Create in-memory state
   const callState: ActiveCall = {
@@ -819,6 +832,8 @@ export async function makeCall(params: {
     completed: false,
     notified: false,
     briefing,
+    startedAt: Date.now(),
+    contactIntel,
   };
   activeCalls.set(callId, callState);
 
@@ -1202,6 +1217,12 @@ export async function handleStatusCallback(callId: string, status: string, durat
         call.completed = true;
         if (call.transcript.length > 0 && !call.result) {
           call.result = await generateCallSummary(call);
+        }
+        // Analyze call and learn (async, don't block notification)
+        if (call.transcript.length > 0) {
+          analyzeCallAndLearn(call).catch(err =>
+            console.error(`[VOICE-INTEL] Post-call analysis error:`, (err as Error).message)
+          );
         }
       }
 
@@ -1829,4 +1850,168 @@ function escapeXml(text: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&apos;");
+}
+
+// ─── Call Intelligence: Adaptive Learning ──────────────
+
+interface ContactIntel {
+  contactPhone: string;
+  contactName: string | null;
+  totalCalls: number;
+  personalityType: string | null;
+  speaksLanguage: string | null;
+  preferredGreeting: string | null;
+  bestTimeToCall: string | null;
+  notes: string | null;
+  lastCallOutcome: string | null;
+  lastCallMood: string | null;
+}
+
+/** Fetch intelligence about a contact before calling them */
+export async function getContactIntelligence(phone: string): Promise<ContactIntel | null> {
+  try {
+    const rows = await prisma.$queryRaw<ContactIntel[]>`
+      SELECT "contactPhone", "contactName", "totalCalls", "personalityType",
+             "speaksLanguage", "preferredGreeting", "bestTimeToCall", "notes",
+             "lastCallOutcome", "lastCallMood"
+      FROM call_intelligence
+      WHERE "contactPhone" = ${phone}
+      LIMIT 1
+    `;
+    return rows[0] || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Build adaptive prompt section from contact intelligence */
+function buildIntelligencePrompt(intel: ContactIntel): string {
+  const lines: string[] = ["\n\n=== CONTACT INTELLIGENCE (from previous calls) ==="];
+
+  if (intel.totalCalls > 0) {
+    lines.push(`You have called this person ${intel.totalCalls} time(s) before.`);
+  }
+  if (intel.personalityType) {
+    lines.push(`Personality: ${intel.personalityType}`);
+    if (intel.personalityType === "impatient") {
+      lines.push("STRATEGY: Skip small talk. Get to the point FAST. Short sentences. No fillers.");
+    } else if (intel.personalityType === "friendly") {
+      lines.push("STRATEGY: Be warm and chatty. Build rapport. Ask how they are. Take your time.");
+    } else if (intel.personalityType === "suspicious" || intel.personalityType === "skeptical") {
+      lines.push("STRATEGY: Be transparent immediately. State who you are and why you're calling in the first 5 seconds. Don't be pushy.");
+    } else if (intel.personalityType === "hostile") {
+      lines.push("STRATEGY: Be extremely polite. Keep it very brief. If they seem upset, offer to have the owner call back. Don't push.");
+    } else if (intel.personalityType === "playful") {
+      lines.push("STRATEGY: Match their energy. Joke along lightly. Be fun but still deliver the message.");
+    }
+  }
+  if (intel.preferredGreeting) {
+    lines.push(`Preferred greeting: "${intel.preferredGreeting}"`);
+  }
+  if (intel.speaksLanguage) {
+    lines.push(`Language: ${intel.speaksLanguage}`);
+  }
+  if (intel.notes) {
+    lines.push(`Notes: ${intel.notes}`);
+  }
+  if (intel.lastCallOutcome) {
+    lines.push(`Last call result: ${intel.lastCallOutcome} (mood: ${intel.lastCallMood || "unknown"})`);
+  }
+
+  lines.push("=== END INTELLIGENCE ===");
+  return lines.join("\n");
+}
+
+/** Analyze a completed call and update intelligence */
+export async function analyzeCallAndLearn(call: ActiveCall): Promise<void> {
+  if (!call.transcript || call.transcript.length === 0) return;
+
+  const transcript = call.transcript.map((t) => `${t.speaker}: ${t.text}`).join("\n");
+  const phone = call.to;
+
+  try {
+    // Ask Gemini to analyze the call
+    const analysis = await geminiGenerate(`Analyze this phone call transcript and classify it.
+
+TRANSCRIPT:
+${transcript}
+
+Respond in EXACTLY this JSON format (no markdown, no explanation):
+{
+  "callOutcome": "completed|voicemail|rejected|no_answer|detected_as_bot",
+  "personMood": "friendly|impatient|suspicious|playful|hostile|neutral",
+  "personalityType": "formal|casual|impatient|friendly|skeptical|playful",
+  "detectedAsBot": true/false,
+  "botDetectionMoment": "description of when they detected AI, or null",
+  "adaptationNotes": "1-2 sentences about what to do differently next time",
+  "preferredGreeting": "how this person seems to prefer being greeted",
+  "speaksLanguage": "en|pt|es"
+}`);
+
+    if (!analysis) return;
+
+    // Parse JSON from Gemini response
+    let parsed: Record<string, unknown>;
+    try {
+      const jsonMatch = analysis.match(/\{[\s\S]*\}/);
+      parsed = JSON.parse(jsonMatch?.[0] || "{}");
+    } catch {
+      console.warn("[VOICE-INTEL] Failed to parse Gemini analysis");
+      return;
+    }
+
+    const outcome = (parsed.callOutcome as string) || "completed";
+    const mood = (parsed.personMood as string) || "neutral";
+    const personality = (parsed.personalityType as string) || "casual";
+    const detectedBot = Boolean(parsed.detectedAsBot);
+    const botMoment = (parsed.botDetectionMoment as string) || null;
+    const notes = (parsed.adaptationNotes as string) || null;
+    const greeting = (parsed.preferredGreeting as string) || null;
+    const lang = (parsed.speaksLanguage as string) || "en";
+
+    // Update call_recordings with analysis
+    await prisma.$executeRaw`
+      UPDATE call_recordings
+      SET "callOutcome" = ${outcome}, "personMood" = ${mood},
+          "adaptationNotes" = ${notes}, "detectedAsBot" = ${detectedBot},
+          "botDetectionMoment" = ${botMoment}
+      WHERE "callSid" = ${call.callSid || ""}
+    `;
+
+    // Upsert call_intelligence for this contact
+    const duration = call.transcript.length > 0 ? Math.floor((Date.now() - (call.startedAt || Date.now())) / 1000) : 0;
+    const isSuccess = outcome === "completed" && !detectedBot;
+
+    await prisma.$executeRaw`
+      INSERT INTO call_intelligence (id, "contactPhone", "contactName", "totalCalls", "avgDurationSeconds",
+        "successfulCalls", "preferredGreeting", "personalityType", "speaksLanguage",
+        "notes", "lastCallOutcome", "lastCallMood", "lastCallAt", "createdAt", "updatedAt")
+      VALUES (
+        ${`ci_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`},
+        ${phone}, ${call.businessName || null}, 1, ${duration},
+        ${isSuccess ? 1 : 0}, ${greeting}, ${personality}, ${lang},
+        ${notes}, ${outcome}, ${mood}, now(), now(), now()
+      )
+      ON CONFLICT ("contactPhone") DO UPDATE SET
+        "contactName" = COALESCE(EXCLUDED."contactName", call_intelligence."contactName"),
+        "totalCalls" = call_intelligence."totalCalls" + 1,
+        "avgDurationSeconds" = (call_intelligence."avgDurationSeconds" * call_intelligence."totalCalls" + ${duration}) / (call_intelligence."totalCalls" + 1),
+        "successfulCalls" = call_intelligence."successfulCalls" + ${isSuccess ? 1 : 0},
+        "preferredGreeting" = COALESCE(EXCLUDED."preferredGreeting", call_intelligence."preferredGreeting"),
+        "personalityType" = EXCLUDED."personalityType",
+        "speaksLanguage" = EXCLUDED."speaksLanguage",
+        "notes" = CASE
+          WHEN call_intelligence.notes IS NULL THEN EXCLUDED.notes
+          ELSE call_intelligence.notes || E'\n' || COALESCE(EXCLUDED.notes, '')
+        END,
+        "lastCallOutcome" = EXCLUDED."lastCallOutcome",
+        "lastCallMood" = EXCLUDED."lastCallMood",
+        "lastCallAt" = now(),
+        "updatedAt" = now()
+    `;
+
+    console.log(`[VOICE-INTEL] Call to ${phone} analyzed: outcome=${outcome}, mood=${mood}, personality=${personality}, bot_detected=${detectedBot}`);
+  } catch (err) {
+    console.error(`[VOICE-INTEL] Analysis failed for ${phone}:`, (err as Error).message);
+  }
 }

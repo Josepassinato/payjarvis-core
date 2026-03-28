@@ -1138,20 +1138,49 @@ model VoiceCall {
 // ─── Call Recordings ───
 
 model CallRecording {
-  id              String   @id @default(cuid())
-  userId          String
-  callSid         String
-  recordingSid    String   @unique
-  recordingUrl    String
-  durationSeconds Int
-  fromNumber      String
-  toNumber        String
-  direction       String   @default("outbound") // outbound, inbound
-  createdAt       DateTime @default(now())
+  id                 String   @id @default(cuid())
+  userId             String
+  callSid            String
+  recordingSid       String   @unique
+  recordingUrl       String
+  durationSeconds    Int
+  fromNumber         String
+  toNumber           String
+  direction          String   @default("outbound") // outbound, inbound
+  callOutcome        String?  // completed, voicemail, rejected, no_answer, detected_as_bot
+  personMood         String?  // friendly, impatient, suspicious, playful, hostile
+  adaptationNotes    String?  // what Jarvis learned from this call
+  detectedAsBot      Boolean  @default(false)
+  botDetectionMoment String?  // at what point they detected it was AI
+  createdAt          DateTime @default(now())
 
   @@index([userId])
   @@index([callSid])
   @@map("call_recordings")
+}
+
+// ─── Call Intelligence (per-contact adaptive learning) ───
+
+model CallIntelligence {
+  id                 String    @id @default(cuid())
+  contactPhone       String    @unique
+  contactName        String?
+  totalCalls         Int       @default(0)
+  avgDurationSeconds Int       @default(0)
+  successfulCalls    Int       @default(0)
+  preferredGreeting  String?   // how this person prefers to be greeted
+  personalityType    String?   // formal, casual, impatient, friendly, skeptical
+  speaksLanguage     String?   @default("en")
+  bestTimeToCall     String?   // morning, afternoon, evening
+  notes              String?   // accumulated observations
+  lastCallOutcome    String?
+  lastCallMood       String?
+  lastCallAt         DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@index([contactName])
+  @@map("call_intelligence")
 }
 
 // ─── User Contacts (for voice calls) ───
