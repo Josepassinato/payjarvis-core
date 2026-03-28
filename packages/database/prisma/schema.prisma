@@ -97,12 +97,17 @@ enum PaymentProvider {
   APPLE_PAY
   GOOGLE_PAY
   BNPL
+  SKYFIRE
+  AMAZON
+  PIX
+  CREDIT_CARD
 }
 
 enum PaymentMethodStatus {
   CONNECTED
   PENDING
   DISABLED
+  EXPIRED
 }
 
 // ─── Models ───
@@ -136,6 +141,12 @@ model User {
   subscriptionStatus     String?    // active | past_due | canceled | trialing
   subscriptionEndsAt     DateTime?
   planType               String     @default("free") // free | premium
+  verifiedCallerId       String?    // user's verified phone for outbound caller ID
+  callerIdDisclaimerAt   DateTime?  // when user accepted caller ID disclaimer
+  callerIdVerifiedAt     DateTime?  // when caller ID was verified via Twilio
+  latitude               Float?
+  longitude              Float?
+  locationUpdatedAt      DateTime?  @map("location_updated_at")
   createdAt              DateTime   @default(now())
   updatedAt           DateTime   @updatedAt
 
@@ -151,6 +162,8 @@ model User {
   shareLinks         BotShareLink[]
   botClones          BotClone[]        // bots que este user clonou
   llmCredits         LlmCredit?        @relation("UserCredits")
+  zkVault            UserZkVault?
+  secureItems        SecureItem[]
 
   @@map("users")
 }
@@ -172,16 +185,17 @@ model PaymentMethod {
   userId          String
   provider        PaymentProvider
   status          PaymentMethodStatus @default(PENDING)
-  accountId       String?             // e.g. Stripe account ID
+  accountId       String?             // e.g. Stripe account ID, PayPal email
+  displayName     String?             // "PayPal (jose@gmail.com)", "Visa ••••4242"
   credentials     Json?               // encrypted provider-specific data
   isDefault       Boolean             @default(false)
-  metadata        Json?               // display info, last4, brand, etc
+  metadata        Json?               // display info, last4, brand, balance, etc
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, provider])
+  @@unique([userId, provider, accountId])
   @@index([userId])
   @@map("payment_methods")
 }
@@ -661,6 +675,7 @@ model OnboardingSession {
   botId              String?
   limitsSet          Boolean   @default(false)
   storesConfigured   Boolean   @default(false)
+  language           String    @default("en")
   paymentSetup       Boolean   @default(false)
   stripeSetupIntent  String?
   stripePaymentLink  String?
@@ -903,6 +918,8 @@ model OpenclawReminder {
   recurring    String?
   completed    Boolean  @default(false)
   sent         Boolean  @default(false)
+  channel      String?  @default("telegram") // "telegram" or "whatsapp"
+  channelId    String?  @map("channel_id")    // chatId (telegram) or whatsapp:+number
   createdAt    DateTime @default(now()) @map("created_at")
 
   @@index([userId])
@@ -1041,4 +1058,385 @@ model FraudAlert {
   @@index([severity])
   @@index([createdAt])
   @@map("fraud_alerts")
+}
+
+// ─── Apify Usage Logs (Billing) ───
+
+model ApifyUsageLog {
+  id             String   @id @default(cuid())
+  userId         String   @map("user_id")
+  operation      String
+  platforms      String
+  costRealUsd    Float    @default(0) @map("cost_real_usd")
+  costChargedUsd Float    @default(0) @map("cost_charged_usd")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@index([createdAt])
+  @@index([operation])
+  @@map("apify_usage_logs")
+}
+
+// ─── Zero-Knowledge Vault ───
+
+model UserZkVault {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  salt      String   // PBKDF2 salt (not secret, stored as hex)
+  pinHash   String   // Hash of PIN for verification
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_zk_vaults")
+}
+
+model SecureItem {
+  id            String   @id @default(cuid())
+  userId        String
+  itemType      String   // "card", "amazon_credentials", "document", "password"
+  label         String   // "Visa ending 4242", "Amazon account", etc.
+  encryptedData String   // Ciphertext (base64)
+  iv            String   // Initialization vector (base64)
+  authTag       String   // GCM authentication tag (base64)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, itemType])
+  @@map("secure_items")
+}
+
+// ─── Voice Calls ───
+
+model VoiceCall {
+  id           String   @id
+  userId       String
+  callSid      String   @unique
+  to           String
+  from         String
+  businessName String?
+  objective    String
+  status       String   @default("initiated") // initiated, ringing, in-progress, completed, busy, no-answer, failed, canceled
+  transcript   Json?    // [{speaker, text, timestamp}]
+  result       String?  // summary of the call outcome
+  duration     Int?     // seconds
+  recordingUrl String?
+  channel      String   // whatsapp, telegram, web
+  briefing     Json?    // Call briefing document (callerIdentity, targetName, keyMessages, tone, etc.)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([userId])
+  @@index([callSid])
+  @@index([status])
+  @@map("voice_calls")
+}
+
+// ─── User Contacts (for voice calls) ───
+
+model UserContact {
+  id           String   @id @default(cuid())
+  userId       String
+  name         String
+  phone        String
+  relationship String?  // friend, colleague, doctor, restaurant, etc.
+  notes        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([userId, name])
+  @@index([userId])
+  @@map("user_contacts")
+}
+
+// ─── Engagement — Notification Preferences ───
+
+model UserNotificationPreferences {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  morningBriefing Boolean  @default(true)
+  priceAlerts     Boolean  @default(true)
+  reengagement    Boolean  @default(true)
+  weeklyReport    Boolean  @default(true)
+  smartTips       Boolean  @default(true)
+  achievements    Boolean  @default(true)
+  birthday        Boolean  @default(true)
+  pushEnabled     Boolean  @default(true)
+  timezone        String   @default("America/New_York")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("user_notification_preferences")
+}
+
+// ─── Engagement — Gamification ───
+
+model UserGamification {
+  id               String   @id @default(cuid())
+  userId           String   @unique
+  streakDays       Int      @default(0)
+  longestStreak    Int      @default(0)
+  totalSearches    Int      @default(0)
+  totalCalls       Int      @default(0)
+  totalRestaurants Int      @default(0)
+  totalSavingsUsd  Float    @default(0)
+  totalInteractions Int     @default(0)
+  level            String   @default("newbie") // newbie | explorer | power_user | jarvis_vip
+  achievements     String[] @default([])
+  lastInteraction  DateTime @default(now())
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@map("user_gamification")
+}
+
+// ─── Engagement — Proactive Messages Log ───
+
+model ProactiveMessageLog {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String   // morning_briefing | price_alert | reengagement | birthday | tip | achievement | weekly_report
+  channel   String   // whatsapp | telegram | web
+  message   String
+  sentAt    DateTime @default(now())
+
+  @@index([userId, type])
+  @@index([userId, sentAt])
+  @@map("proactive_message_logs")
+}
+
+// ─── Engagement — Push Subscriptions (Web Push) ───
+
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  endpoint  String
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+
+  @@unique([userId, endpoint])
+  @@index([userId])
+  @@map("push_subscriptions")
+}
+
+// ─── Price Alerts ───
+
+model PriceAlert {
+  id           String    @id @default(cuid())
+  userId       String
+  query        String
+  store        String?
+  targetPrice  Float
+  currentPrice Float?
+  currency     String    @default("USD")
+  country      String    @default("US")
+  active       Boolean   @default(true)
+  lastChecked  DateTime?
+  notifiedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([active, lastChecked])
+  @@map("price_alerts")
+}
+
+// ─── Butler Protocol 🎩 ───
+
+model ButlerProfile {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  fullName    String?  // encrypted via encryptPII
+  email       String?  // encrypted
+  address     String?  // encrypted (JSON: street, city, state, zip, country)
+  phone       String?  // encrypted
+  dateOfBirth String?  // encrypted
+  ssn         String?  // encrypted (optional)
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  credentials ButlerCredential[]
+
+  @@map("butler_profiles")
+}
+
+model ButlerCredential {
+  id                String    @id @default(cuid())
+  userId            String
+  serviceName       String    // "Best Buy", "Amazon", etc.
+  serviceUrl        String    // "bestbuy.com"
+  login             String    // encrypted
+  encryptedPassword String    // encrypted
+  notes             String?
+  createdAt         DateTime  @default(now())
+  lastUsed          DateTime?
+
+  profile ButlerProfile @relation(fields: [userId], references: [userId])
+
+  @@unique([userId, serviceName])
+  @@index([userId])
+  @@map("butler_credentials")
+}
+
+model ButlerAuditLog {
+  id        String   @id @default(cuid())
+  userId    String
+  action    String   // "setup_profile", "create_account", "fill_form", "update_profile"
+  service   String?  // "bestbuy.com"
+  status    String   // "success", "failed", "pending_confirmation"
+  details   String?  // JSON
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
+  @@map("butler_audit_logs")
+}
+
+// ─── Butler — Connected Google/Microsoft Accounts ───
+
+model ButlerConnectedAccount {
+  id            String   @id @default(cuid())
+  userId        String
+  provider      String   // "google" | "microsoft"
+  email         String   // user's email on this provider
+  accessToken   String   // encrypted
+  refreshToken  String   // encrypted
+  tokenExpiry   DateTime?
+  scopes        String[] // ["gmail.readonly", "calendar.readonly", ...]
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([userId, provider])
+  @@index([userId])
+  @@map("butler_connected_accounts")
+}
+
+// ─── Scheduled Tasks (User-created recurring jobs) ───
+
+model ScheduledTask {
+  id          String    @id @default(cuid())
+  userId      String
+  description String    // "Buscar notícias de tecnologia"
+  action      String    // "search_news" | "search_products" | "check_weather" | "web_search" | "custom_message"
+  actionData  Json?     // { query: "technology news", tool: "search_news" }
+  schedule    String    // Cron expression: "0 8 * * *"
+  timezone    String    @default("America/New_York")
+  channel     String    // "whatsapp" | "telegram"
+  channelId   String    // whatsapp:+19546432431 or telegram chatId
+  language    String    @default("pt")
+  active      Boolean   @default(true)
+  lastRun     DateTime?
+  nextRun     DateTime?
+  runCount    Int       @default(0)
+  maxRuns     Int?      // null = infinite
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  logs ScheduledTaskLog[]
+
+  @@index([active, nextRun])
+  @@index([userId])
+  @@map("scheduled_tasks")
+}
+
+model ScheduledTaskLog {
+  id        String   @id @default(cuid())
+  taskId    String
+  status    String   // "success" | "failed" | "skipped"
+  result    String?  @db.Text
+  error     String?
+  duration  Int?     // ms
+  createdAt DateTime @default(now())
+
+  task ScheduledTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+  @@index([createdAt])
+  @@map("scheduled_task_logs")
+}
+
+// ─── Inner Circle — Specialist Referral Network ───
+
+model InnerCircleSpecialist {
+  id                String   @id @default(cuid())
+  name              String   // "Jessica Passinato"
+  slug              String   @unique // "jessica-passinato"
+  expertise         String   // "Consultoria de Imagem, Coloração Pessoal"
+  bio               String   // Short bio for Jarvis to use
+  credentials       String   // "15+ anos de experiência"
+  instagram         String?  // "@jessicapassinato"
+  website           String?  // "jessicapassinato.com"
+  contactLink       String?  // Direct premium booking link
+  freeServices      String   // JSON array of free AI-powered services
+  premiumServices   String   // JSON array of paid human services
+  triggerKeywords   String   // JSON array of detection keywords
+  triggerContexts   String   // JSON array of intent contexts
+  aiKnowledgePrompt String   @db.Text // Expert knowledge for AI consultations
+  introMessage      String   @db.Text // Template for friend-style intro
+  maxFreePerUser    Int      @default(3)
+  revenueSharePct   Float    @default(15)
+  active            Boolean  @default(true)
+  createdAt         DateTime @default(now())
+
+  interactions InnerCircleInteraction[]
+
+  @@map("inner_circle_specialists")
+}
+
+model InnerCircleInteraction {
+  id           String   @id @default(cuid())
+  userId       String
+  specialistId String
+  type         String   // "free_consultation", "premium_referral", "intro_shown", "declined"
+  context      String?  // What the user was doing
+  converted    Boolean  @default(false)
+  revenue      Float?
+  createdAt    DateTime @default(now())
+
+  specialist InnerCircleSpecialist @relation(fields: [specialistId], references: [id])
+
+  @@index([userId, specialistId])
+  @@index([userId, createdAt])
+  @@map("inner_circle_interactions")
+}
+
+// ─── Skyfire Purchase Transactions ───
+
+model PurchaseTransaction {
+  id              String   @id @default(cuid())
+  userId          String
+  provider        String   @default("SKYFIRE") // SKYFIRE, VISA_TAP (future)
+  productName     String
+  price           Float
+  currency        String   @default("USD")
+  merchant        String
+  merchantUrl     String?
+  orderNumber     String?
+  trackingNumber  String?
+  status          String   @default("COMPLETED") // PENDING, COMPLETED, FAILED, REFUNDED
+  skyfireTokenJti String?  // Skyfire PAY token JTI
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([userId, status])
+  @@map("purchase_transactions")
+}
+
+model SpendingLimit {
+  id             String   @id @default(cuid())
+  userId         String   @unique
+  perTransaction Float    @default(100)
+  daily          Float    @default(500)
+  monthly        Float    @default(2000)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@map("spending_limits")
 }

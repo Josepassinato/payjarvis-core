@@ -55,7 +55,7 @@ export async function paymentMethodRoutes(app: FastifyInstance) {
 
     await prisma.paymentMethod.upsert({
       where: {
-        userId_provider: { userId: user.id, provider: "STRIPE" },
+        userId_provider_accountId: { userId: user.id, provider: "STRIPE", accountId: validation.accountName ?? "Stripe Account" },
       },
       create: {
         userId: user.id,
@@ -150,7 +150,7 @@ export async function paymentMethodRoutes(app: FastifyInstance) {
     // Save as payment method
     await prisma.paymentMethod.upsert({
       where: {
-        userId_provider: { userId: user.id, provider: "STRIPE" },
+        userId_provider_accountId: { userId: user.id, provider: "STRIPE", accountId: card ? `${card.brand} ****${card.last4}` : "Card" },
       },
       create: {
         userId: user.id,
@@ -217,7 +217,7 @@ export async function paymentMethodRoutes(app: FastifyInstance) {
 
     await prisma.paymentMethod.upsert({
       where: {
-        userId_provider: { userId: user.id, provider: "PAYPAL" },
+        userId_provider_accountId: { userId: user.id, provider: "PAYPAL", accountId: `PayPal (${validation.environment})` },
       },
       create: {
         userId: user.id,

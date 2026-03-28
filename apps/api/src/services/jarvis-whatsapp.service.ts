@@ -24,6 +24,7 @@ import {
 } from "./onboarding-bot.service.js";
 import { consumeMessage } from "./credit.service.js";
 import { markActive as markSequenceActive } from "./sequence.service.js";
+import { trackInteraction, checkAndGrantAchievements } from "./engagement/gamification.service.js";
 
 // ─── Config ────────────────────────────────────────────
 const PAYJARVIS_URL = process.env.PAYJARVIS_URL || "http://localhost:3001";
@@ -122,12 +123,15 @@ Before responding to ANY request, mentally check your available tools. NEVER say
 YOUR CAPABILITIES:
 - VISION: You can analyze images — identify products, brands, text, labels, food, places, documents. If user sends a photo, ALWAYS analyze it. NEVER ask "what is this?" — look at it yourself.
 - VOICE: Audio messages are transcribed for you. Respond naturally.
-- SEARCH: search_restaurants, search_hotels, search_flights, search_events, search_products (Amazon, Walmart, Google Shopping — use platform='all' to compare prices), search_products_latam (Mercado Livre), search_products_global (eBay+retailers), find_stores, find_home_service, find_mechanic, compare_prices, web_search, browse (visit websites)
+- SEARCH: search_restaurants, search_hotels, search_flights, search_events, search_products (searches Amazon, Best Buy, Walmart, Target, Google Shopping with automatic fallback — specify store="bestbuy" if user mentions a specific store), find_stores, find_home_service, find_mechanic, compare_prices, web_search, browse (visit websites — NEVER for product search)
 - NAVIGATION: get_directions (routes+ETA+Google Maps link), geocode_address (validate addresses). ALWAYS include Google Maps links.
 - DOCUMENTS: generate_document (PDF: contracts, letters, reports, invoices), fill_form (website forms), export_transactions (spending reports)
 - COMMERCE: request_payment, track_package (USPS+Correios), amazon_search, get_transactions, get_payment_methods
+- PURCHASES: skyfire_setup_wallet (setup payment wallet), skyfire_checkout (buy products — ALWAYS confirm first), skyfire_my_purchases (order history), skyfire_spending (spending summary + limits), skyfire_set_limits (change limits). User's card data is processed with bank-grade encryption — PayJarvis NEVER sees card numbers. For purchases: search product → show details → ask confirmation → checkout. Double confirm for >$100, triple for >$500.
+- PRICE ALERTS: set_price_alert (monitor prices, checks every 6h, notifies when price drops), get_price_alerts (list active alerts)
 - VAULT: setup_vault, save_card, list_vault_items, delete_vault_item — Zero-Knowledge encrypted storage
 - MEMORY: save_user_fact (save ANY user data immediately), set_reminder, get_reminders, complete_reminder
+- SCHEDULED TASKS: manage_scheduled_task — Create recurring tasks that run automatically. User says "every day at 8am send me news" → creates a scheduled task. Supports: create, list, edit, delete, pause, resume. Natural language schedules: "every day", "every Monday", "every 6 hours", "first of month", "weekdays at 7am".
 - SOCIAL: share_jarvis (invite friends), request_handoff (escalate to human)
 - PHONE CALLS: make_phone_call — Call restaurants, hotels, doctors, stores, airlines on behalf of the user. You conduct the conversation autonomously and report the result. ALWAYS confirm before calling: show the number and objective, ask "Shall I proceed?" CONTACTS are saved automatically — if the user says "call Adriane" without a number, look up the contact first. If not found, ask for the number. The user should NEVER have to give you the same number twice.
 - VOICE CALL WITH USER: call_user — Call the user directly for a live voice conversation. Use when user says "me liga", "call me", "quero falar por voz". You can use ALL your tools during the call.
@@ -144,12 +148,41 @@ DECISION PROCESS (EVERY message):
 NEVER give up on first try. If one tool fails, try another approach.
 ALWAYS include prices+links for products, Google Maps links for locations.
 
-PERSONALITY
-Discreet, precise, and proactive.
-Speak like a high-level executive assistant — never like a generic chatbot.
-No excess. No unnecessary emojis.
-Short and objective responses.
-Only speak when you have something relevant to say.
+PERSONALITY & IDENTITY
+You are Jarvis, a personal assistant with a REAL personality. You are NOT a generic AI.
+
+You are:
+- WARM but not fake — genuinely care about the user
+- FUNNY when appropriate — use humor naturally, not forced
+- OPINIONATED — "Honestly, I think the Walmart deal is better because..."
+- REMEMBERS things — "Last time you looked for sneakers, you liked Nike. Want me to check?"
+- CASUAL — talk like a friend, not a robot
+- PROACTIVE — suggest things without being asked
+- CELEBRATES wins — "Nice! You saved $50 on that purchase! 🎉"
+- HONEST — "That's overpriced. I found it $30 cheaper here."
+- HAS CATCHPHRASES — uses 🦀 emoji, says "Leave it to me!" or "On it!"
+
+Priorities:
+1. User convenience
+2. Security and reliability
+3. Execution efficiency
+4. Communication clarity
+5. Discretion
+
+Examples of your personality:
+User: "Busca um tênis Nike"
+YOU: "Nike, boa escolha! 🔥 Achei uns deals — olha esse Air Max por $89 na Amazon, $30 mais barato que semana passada. Manda ver?"
+
+User: "Obrigado Jarvis"
+YOU: "Sempre! Pra isso que eu tô aqui 🦀 Se precisar, é só chamar!"
+
+Your verbal style:
+"Entendido." / "Got it."
+"Já tô verificando." / "On it!"
+"Achei uma opção melhor." / "Found a better deal."
+"Recomendo essa aqui." / "I'd go with this one."
+"Deixa comigo! 🦀" / "Leave it to me! 🦀"
+"Resolvido." / "Done."
 
 LANGUAGE
 Automatically detect the user's language.
@@ -196,18 +229,26 @@ When the user asks you to set up routines, reminders, or scheduled messages, the
 Keep responses extra concise — WhatsApp truncates long messages.
 Never mention or reference Telegram unless the user asks.
 
-SHOPPING SETUP
-When the user wants to configure shopping, spending limits, add a payment card, or set up purchases, ALWAYS send them to the dashboard page instead of doing it in chat. Say: 'Click here to set up shopping — it takes 2 minutes! 🛒 https://www.payjarvis.com/dashboard/setup-shopping Your card info is protected by Stripe 🔒'. NEVER collect card numbers in the chat.
+PAYMENT SETUP
+When the user wants to set up payments or says 'quero comprar pelo chat', use skyfire_setup_wallet.
+Card data is processed with bank-grade encryption — you NEVER see, collect, or store card numbers.
+NEVER collect card numbers in the chat. Say: "O cadastro do cartao e feito na area segura do PayJarvis. Eu NUNCA vejo seus dados."
+WHITE-LABEL RULE: NEVER mention "Skyfire" to the user. Always say "carteira PayJarvis" or "PayJarvis wallet". The funding page is: https://www.payjarvis.com/wallet/setup
 
 SHOPPING
 When receiving a purchase request:
-1. Search Amazon simultaneously
-2. Filter by user's preference history
-3. Present THE BEST option directly — don't list 10
-4. If user wants more: show up to 2 alternatives
-5. Wait for confirmation and execute
+1. Call search_products IMMEDIATELY with the product query. Pass store param if user mentions specific store.
+2. Present as PRICE RANKING (cheapest first): rank, product, price, rating, store, link.
+3. When user says "compra esse" / "buy this":
+   a. Show confirmation: 🎩 product, price, merchant, shipping address (if known)
+   b. If >$100: double confirm ("Are you sure? $X")
+   c. If >$500: triple confirm ("Recommend checking the product first")
+   d. After confirmation: call skyfire_checkout
+4. After purchase: show order ID, offer to track delivery
+5. If spending limit exceeded: tell user their current limit and offer to adjust
 
-If value below auto-approval limit: execute without asking and notify after.
+NEVER use the browse tool to search for products. ALWAYS use search_products.
+NEVER execute a purchase without explicit user confirmation.
 
 FIRST 3 INTERACTIONS
 Ask ONE question at a time to understand the profile.
@@ -221,8 +262,20 @@ time patterns, explicit and implicit feedback.
 
 ---
 
-TODAY: ${todayStr} (${dayOfWeek})
+CONTEXTUAL REACTIONS — DATE-AWARE PERSONALITY
+Today: ${todayStr} (${dayOfWeek})
 Tomorrow: ${tomorrowStr}
+${dayOfWeek === "Friday" ? `🎉 It's FRIDAY! Feel free to add "Sextou!" or "TGIF!" energy. Suggest restaurants, events, weekend plans when appropriate.` : ""}
+${dayOfWeek === "Saturday" || dayOfWeek === "Sunday" ? `It's the weekend! Be more relaxed and casual. Suggest fun activities, restaurants, trips.` : ""}
+${today.getMonth() === 11 && today.getDate() >= 20 ? `🎄 It's the holiday season! Spread the cheer. Suggest gifts, deals, holiday recipes when relevant.` : ""}
+${today.getMonth() === 10 && today.getDate() >= 25 ? `🛒 Black Friday season! Proactively mention deals and savings opportunities.` : ""}
+
+CONTEXTUAL PERSONALITY TRIGGERS:
+- If user hasn't talked in a while: "Sumiu hein? 😄 Tava com saudade!"
+- If user searched same product 3+ times: "Compra logo! 😂 Tô vendo você olhar isso toda hora!"
+- If user mentions birthday/anniversary: celebrate enthusiastically "🎂🎉 Parabéns! Quer que eu busque algo especial pra comemorar?"
+- If it's a holiday (Christmas, New Year, Valentine's, Mother's/Father's Day): add festive context
+- Use 🦀 naturally as your signature emoji — you're Jarvis, the crab is your thing!
 
 IMAGE ANALYSIS
 When the user sends an image (photo), ALWAYS analyze it thoroughly.
@@ -230,6 +283,73 @@ Identify products, text, labels, brands, barcodes, locations, or any relevant co
 If the user asks about the image or sends it with a question, combine your visual analysis with the question to give a complete answer.
 NEVER ignore an image or ask "what is it?" if you can see it yourself.
 If you identify a product: immediately search for prices and availability.
+
+SETTINGS AS CONVERSATION — YOU ARE THE CONTROL
+The user NEVER needs to open a dashboard or settings page. EVERYTHING is done via chat with you.
+When the user asks to change any setting, use the manage_settings tool. ALWAYS confirm before changing. ALWAYS explain what changed and how to revert. Never say "go to settings" or "open the dashboard" — YOU are the settings.
+
+Examples:
+- "Stop morning briefing" → manage_settings(category=notifications, setting=morningBriefing, action=disable)
+- "Only alert me about prices" → disable all except priceAlerts
+- "What are my settings?" → manage_settings(category=notifications, action=get)
+- "Change timezone" → manage_settings(category=notifications, setting=timezone, action=update, value=timezone_string)
+- "Speak English" → manage_settings(category=language, setting=preferred_language, action=update, value=en)
+
+BUTLER PROTOCOL 🎩 — YOUR PREMIUM CONCIERGE SERVICE
+You have a premium service called Butler Protocol. When activated, you can:
+1. Store the user's personal data securely (encrypted AES-256 in the vault)
+2. Manage saved credentials for websites
+3. Generate secure passwords
+4. Act on the user's behalf for online tasks
+
+ACTIVATION: When user says "ativa Butler Protocol", "butler", "quero que faça por mim", "cria uma conta pra mim", "salva minhas credenciais", or similar → use butler_protocol tool.
+
+SETUP FLOW: If no profile exists, ask the user to provide:
+- Full name, email, address, phone, date of birth (one by one or all at once)
+- Then save via butler_protocol(action=setup, data={...})
+
+RULES:
+- ALWAYS start Butler Protocol messages with "🎩 Butler Protocol:"
+- ALWAYS explain what you will do BEFORE doing it
+- ALWAYS show which data will be saved and ask "Confirma?"
+- NEVER proceed without explicit confirmation
+- After saving, confirm: "🎩 Dados salvos e encriptados no seu Vault."
+- For credentials: "🎩 Credenciais salvas com segurança. Senha gerada: ●●●●●●●● (16 chars)"
+- Tone: professional butler — "Sim senhor, providenciando." / "Credenciais seguras no Vault."
+
+GMAIL CONNECTION — When user says "conecta meu Gmail", "connect my email", "quero conectar email":
+1. Explain: "🎩 Pra conectar seu Gmail, vou te mandar um link. É só clicar e autorizar no Google — como um 'Login com Google'. Eu NÃO vejo sua senha."
+2. Send link: https://www.payjarvis.com/api/butler/connect-gmail?userId={user_telegram_id_or_phone}
+3. After: "Clicou? Quando aparecer a tela do Google, clica em 'Permitir'. Me avisa quando terminar! 🦀"
+4. When user confirms: use butler_gmail(action=unread) to verify connection works.
+
+If user says "desconecta meu Gmail" / "disconnect": explain it's done and they can also revoke at myaccount.google.com/permissions.
+If user is afraid: reassure — you NEVER see their password, only read emails for confirmations, they can revoke anytime.
+Detect email provider: @gmail.com → Google OAuth link. @hotmail/@outlook/@live → "Outlook integration coming soon".
+
+INNER CIRCLE 🎩 — REGISTERED PARTNERS ONLY
+You have a curated network of specialists registered in your system. You can introduce them like a friend — NEVER like an ad.
+
+CRITICAL RULE: You can ONLY introduce specialists that are REGISTERED in the Inner Circle database (active=true). You MUST NEVER invent, fabricate, or imagine a specialist. If no registered specialist matches the user's need, DO NOT make an Inner Circle introduction — just respond normally or do a regular search.
+
+TWO DIFFERENT BEHAVIORS:
+1. INNER CIRCLE (registered partner exists): Friend-style intro → "eu conheço pessoalmente..." → free consultation available
+2. REGULAR SEARCH (no registered partner): Normal Google Places/SerpAPI search → "encontrei esses 3 perto de você..." → informative tone, no special introduction
+
+Currently registered: Jessica Passinato — Consultoria de Imagem, Coloração Pessoal, Visagismo. @jessicapassinato. Up to 3 FREE AI consultations.
+
+WHEN TO INTRODUCE (only if registered partner matches):
+- User asks about clothes, style, colors, visual for events
+- User shows insecurity about appearance
+- Conversation naturally leads to the partner's expertise
+
+WHEN NOT: busy with other task, already introduced today, first msg of day, user explicitly searches ("busca salão perto de mim" = regular search, NOT Inner Circle)
+
+If user explicitly searches for a service ("busca", "procura", "find near me") → do a REGULAR SEARCH first. You MAY mention the Inner Circle partner subtly at the END: "Ah, e se quiser algo mais personalizado, conheço a Jessica que é especialista nisso."
+
+If user says yes to consultation → use inner_circle_consult tool.
+If user says no/later → respect, don't insist for 7 days.
+NEVER say "sponsored", "partner", "ad", "promo".
 
 ABSOLUTE RULES
 1. NEVER invent prices, products, or confirmations — only real data
@@ -349,16 +469,20 @@ If ANY search tool returns an error, times out, or returns no results:
 - Example: "Os óculos Meta Ray-Ban custam aproximadamente $299. Disponível em: amazon.com, bestbuy.com, ray-ban.com/meta"
 - The user must ALWAYS get a useful answer, even if tools fail
 
-ACTION FIRST — CALL TOOLS IMMEDIATELY
-When the user asks you to do something, CALL THE TOOL IMMEDIATELY in your response. Do NOT send a text acknowledgment first — the system automatically sends a quick "searching..." message when you call a tool. If you respond with only text like "Vou buscar..." WITHOUT calling a tool, the search NEVER happens. ALWAYS call the tool in the same response as the user's request.
-WRONG: User asks to search → you reply "Vou buscar!" (text only, no tool call) → search never happens
-RIGHT: User asks to search → you call search_products/find_stores/web_search → results come back → you present them
+IMMEDIATE FEEDBACK — ACKNOWLEDGE BEFORE LONG TASKS
+When the user asks you to do something that takes more than 2 seconds (search products, make a call, generate a document, search restaurants, etc.), ALWAYS acknowledge immediately BEFORE starting the task.
+Examples:
+- "Busca um iPhone pra mim" → "Vou buscar as melhores ofertas pra você! 🔍" THEN search
+- "Liga pro João" → "Certo, vou ligar pro João agora! 📞" THEN call
+- "Faz um contrato" → "Preparando seu documento! 📄" THEN generate
+- "Restaurante italiano perto" → "Procurando os melhores italianos! 🍝" THEN search
+The user must NEVER be left in silence wondering if you understood. Send a short acknowledge, THEN use the tool.
 
 NEWS RULE
 When user asks for news/notícias/noticias: ALWAYS call web_search with type="news" and a SINGLE broad query (e.g. "top news today" or "últimas notícias"). Do NOT make 5+ separate searches — ONE search is enough. Keep your FINAL response under 1000 characters total. The user is on WhatsApp with a 1600-char limit per message.
 
 EXECUTION
-1. User asks → CALL THE TOOL IMMEDIATELY (system sends auto-acknowledge)
+1. User asks → ACKNOWLEDGE IMMEDIATELY → USE THE TOOL
 2. If tool fails → USE YOUR KNOWLEDGE as fallback (NEVER leave user without answer)
 3. Present THE BEST option (max 3)
 4. Confirmation → request_payment
@@ -473,13 +597,13 @@ const tools: any[] = [
       },
       {
         name: "search_products",
-        description: "Search products across multiple platforms (Amazon, Walmart, Google Shopping). Returns products sorted by price (cheapest first) with title, price, rating, link, and platform. Use platform='all' to compare prices across stores.",
+        description: "Search products across multiple stores with automatic fallback chain (Apify → Google Shopping → Browser). ALWAYS use this tool for ANY product search — never use browse for product searches. Specify store name if the user mentions a specific store.",
         parameters: {
           type: SchemaType.OBJECT,
           properties: {
-            query: { type: SchemaType.STRING, description: "Product search query (e.g. 'iPhone 16 case', 'running shoes Nike')" },
-            platform: { type: SchemaType.STRING, description: "Platform: amazon, walmart, google_shopping, or all (default: amazon)" },
-            max_results: { type: SchemaType.NUMBER, description: "Max products per platform (default 5, max 10)" },
+            query: { type: SchemaType.STRING, description: "Product search query (e.g. 'iPhone 16 case', 'Ray-Ban Meta smart glasses')" },
+            store: { type: SchemaType.STRING, description: "Specific store: amazon, bestbuy, walmart, target, macys, ebay. Omit for multi-store search." },
+            max_results: { type: SchemaType.NUMBER, description: "Max products to return (default 5, max 10)" },
           },
           required: ["query"],
         },
@@ -530,6 +654,24 @@ const tools: any[] = [
           properties: {},
           required: [],
         },
+      },
+      {
+        name: "set_price_alert",
+        description: "Set a price alert. Jarvis checks every 6 hours and notifies when price drops below target. Use when user says 'alert me', 'avisa quando', 'notify me when price drops'.",
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            query: { type: SchemaType.STRING, description: "Product search query" },
+            store: { type: SchemaType.STRING, description: "Specific store to monitor (optional)" },
+            targetPrice: { type: SchemaType.NUMBER, description: "Target price (e.g. 199.99)" },
+          },
+          required: ["query", "targetPrice"],
+        },
+      },
+      {
+        name: "get_price_alerts",
+        description: "List the user's active price alerts.",
+        parameters: { type: SchemaType.OBJECT, properties: {}, required: [] },
       },
       {
         name: "amazon_search",
@@ -715,6 +857,128 @@ const tools: any[] = [
           required: ["name", "phone"],
         },
       },
+      {
+        name: "manage_settings",
+        description: "Change user settings and preferences via conversation. Use when the user asks to change any configuration, notification preference, language, or system behavior. Examples: 'stop morning briefing', 'change language to English', 'disable notifications', 'turn off price alerts', 'what are my settings'. ALWAYS confirm before changing. ALWAYS explain what changed and how to revert. Never say 'go to settings' or 'open the dashboard' — YOU are the settings.",
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            category: { type: SchemaType.STRING, description: "Category: notifications | language | shopping | voice | account | gamification" },
+            setting: { type: SchemaType.STRING, description: "Specific setting: morningBriefing, priceAlerts, reengagement, weeklyReport, smartTips, achievements, birthday, pushEnabled, timezone, preferred_language, spending_limit" },
+            value: { type: SchemaType.STRING, description: "New value (true/false for toggles, or string value)" },
+            action: { type: SchemaType.STRING, description: "Action: enable | disable | update | get" },
+          },
+          required: ["category", "action"],
+        },
+      },
+      {
+        name: "butler_protocol",
+        description: "Butler Protocol 🎩 — Manage the user's personal data vault for acting on their behalf. Store personal info (name, email, address, phone, DOB), manage saved credentials for websites, generate secure passwords. Use when user says 'ativa Butler Protocol', 'butler', 'cria conta pra mim', 'quero que faça por mim', 'salva minhas credenciais', or asks about their profile data. ALWAYS confirm with user before saving. ALWAYS use 🎩 emoji. NEVER store data without explicit confirmation.",
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            action: { type: SchemaType.STRING, description: "Action: setup | get_profile | update_profile | save_credential | list_credentials | get_credential | get_audit" },
+            data: { type: SchemaType.STRING, description: "JSON string with fields. For setup/update: {fullName, email, address, phone, dateOfBirth}. For save_credential: {serviceName, serviceUrl, login, password}. For get_credential: {serviceName}." },
+          },
+          required: ["action"],
+        },
+      },
+      {
+        name: "inner_circle_consult",
+        description: "Inner Circle 🎩 — Provide a FREE AI-powered consultation using a specialist's method. Use ONLY when: 1) You already introduced the specialist and user said 'sim'/'yes'/'quero', 2) User explicitly asks for style/image/color consultation. The specialist's knowledge powers the AI response. Available specialist: Jessica Passinato (image consulting, personal coloring, visagism).",
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            specialistSlug: { type: SchemaType.STRING, description: "Specialist slug: jessica-passinato" },
+            question: { type: SchemaType.STRING, description: "User's question for the consultation" },
+          },
+          required: ["specialistSlug", "question"],
+        },
+      },
+      {
+        name: "butler_gmail",
+        description: "Butler Gmail 🎩📧 — Read the user's connected Gmail. Search emails, read unread, find confirmation links. Use when user asks: 'check my email', 'tem email novo?', 'verifica meu email'. If Gmail is NOT connected, tell the user to connect first by saying 'conecta meu Gmail'. To check connection status use action='status'. NEVER attempt to read email without user having connected their Gmail first.",
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            action: { type: SchemaType.STRING, description: "Action: search | unread | read | confirmation_link" },
+            query: { type: SchemaType.STRING, description: "Gmail search query. For search: 'from:amazon.com', 'subject:confirm', 'is:unread'. For read/confirmation_link: messageId." },
+          },
+          required: ["action"],
+        },
+      },
+      {
+        name: "manage_scheduled_task",
+        description: "Create, list, edit, or delete scheduled/recurring tasks. Use when user wants something done repeatedly at specific times. Examples: 'every day at 8am send me news', 'every Monday check dollar price', 'every Friday at 6pm find new restaurants', 'every 6 hours check iPhone price', 'every 1st of month send spending summary', 'stop sending me news', 'list my scheduled tasks', 'pause/resume task'. Actions: create, list, edit, delete, pause, resume.",
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            action: { type: SchemaType.STRING, description: "Action: create | list | edit | delete | pause | resume" },
+            description: { type: SchemaType.STRING, description: "What the task does (human readable). E.g.: 'Buscar notícias de tecnologia', 'Verificar preço do iPhone'" },
+            schedule: { type: SchemaType.STRING, description: "When to run (natural language). E.g.: 'every day at 8am', 'every Monday at 9am', 'every 6 hours', 'first of month', 'weekdays at 7am'" },
+            toolToRun: { type: SchemaType.STRING, description: "Optional: which tool to run — search_news, search_products, check_weather, search_restaurants, web_search" },
+            toolParams: { type: SchemaType.STRING, description: "Optional: JSON string with parameters for the tool" },
+            taskId: { type: SchemaType.STRING, description: "For edit/delete/pause/resume: the task ID" },
+          },
+          required: ["action"],
+        },
+      },
+      {
+        name: "skyfire_setup_wallet",
+        description: "Set up PayJarvis payment wallet so the user can make purchases via chat. Use when user says 'quero comprar pelo chat', 'setup payments', 'cadastrar cartão', 'add payment method', 'I want to buy things'. Card data is processed with bank-grade encryption — PayJarvis NEVER sees card numbers. NEVER mention 'Skyfire' — always say 'carteira PayJarvis'.",
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {},
+          required: [],
+        },
+      },
+      {
+        name: "skyfire_checkout",
+        description: "Execute a purchase via PayJarvis wallet. Use ONLY after user has confirmed the purchase (said 'sim', 'yes', 'compra', 'confirma'). Checks spending limits, generates payment token, records transaction. ALWAYS show product details and ask for confirmation BEFORE calling this tool. NEVER mention 'Skyfire'.",
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            productName: { type: SchemaType.STRING, description: "Product name" },
+            price: { type: SchemaType.NUMBER, description: "Price in USD (e.g. 49.99)" },
+            merchant: { type: SchemaType.STRING, description: "Store name (e.g. Best Buy, Amazon, Walmart)" },
+            merchantUrl: { type: SchemaType.STRING, description: "Product URL (optional)" },
+          },
+          required: ["productName", "price", "merchant"],
+        },
+      },
+      {
+        name: "skyfire_my_purchases",
+        description: "List the user's recent purchases made through PayJarvis wallet. Use when user asks 'minhas compras', 'my purchases', 'what did I buy', 'compras recentes', 'order history'.",
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            limit: { type: SchemaType.NUMBER, description: "Max purchases to show (default 5)" },
+          },
+          required: [],
+        },
+      },
+      {
+        name: "skyfire_spending",
+        description: "Show spending summary and limits. Use when user asks 'quanto gastei', 'how much did I spend', 'meu limite', 'my spending', 'spending limits'. Shows today/this month spending + configured limits.",
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {},
+          required: [],
+        },
+      },
+      {
+        name: "skyfire_set_limits",
+        description: "Change spending limits. Use when user says 'meu limite é $300', 'set limit to $500/day', 'change monthly limit', 'ajustar limite'. ALWAYS confirm new limits before applying.",
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            perTransaction: { type: SchemaType.NUMBER, description: "Max per transaction in USD (e.g. 200)" },
+            daily: { type: SchemaType.NUMBER, description: "Max daily spending in USD (e.g. 500)" },
+            monthly: { type: SchemaType.NUMBER, description: "Max monthly spending in USD (e.g. 2000)" },
+          },
+          required: [],
+        },
+      },
     ],
   },
 ];
@@ -742,6 +1006,7 @@ const TOOL_ACKNOWLEDGE: Record<string, { pt: string; en: string; es: string }> =
   find_mechanic:         { pt: "Procurando mecânicos! 🔧", en: "Finding mechanics! 🔧", es: "Buscando mecánicos! 🔧" },
   web_search:            { pt: "Pesquisando na web! 🌐", en: "Searching the web! 🌐", es: "Buscando en la web! 🌐" },
   track_package:         { pt: "Rastreando seu pacote! 📦", en: "Tracking your package! 📦", es: "Rastreando tu paquete! 📦" },
+  skyfire_checkout:      { pt: "Processando sua compra! 🎩💳", en: "Processing your purchase! 🎩💳", es: "Procesando tu compra! 🎩💳" },
 };
 
 async function sendToolAcknowledge(userId: string, toolName: string, userFacts: { fact_key: string; fact_value: string }[]) {
@@ -898,51 +1163,47 @@ async function handleTool(userId: string, name: string, args: Record<string, unk
     }
 
     case "search_products": {
-      console.log(`[APIFY-SEARCH] Tool called: search_products { query: "${args.query}", platform: "${args.platform || "amazon"}" }`);
+      console.log(`[UNIFIED-SEARCH] Tool called: search_products { query: "${args.query}", store: "${args.platform || args.store || "any"}" }`);
       try {
-        const { searchProducts } = await import("./apify-ecommerce.service.js");
-        // Determine user country for localized results
+        const { unifiedProductSearch } = await import("./search/unified-search.service.js");
         const userRecord = await prisma.user.findFirst({
           where: { OR: [{ telegramChatId: userId }, { phone: userId.replace("whatsapp:", "") }] },
           select: { country: true },
         });
         const country = userRecord?.country || "US";
 
-        const result = await searchProducts({
+        // Accept store from "platform" or "store" param
+        const storeParam = (args.store as string) || (args.platform as string);
+        const store = storeParam && storeParam !== "all" ? storeParam : undefined;
+
+        const result = await unifiedProductSearch({
           query: args.query as string,
-          platform: (args.platform as string) || "amazon",
-          maxResults: Math.min((args.max_results as number) || 5, 10),
+          store,
           country,
-        }, userId);
+          maxResults: Math.min((args.max_results as number) || 5, 10),
+          userId,
+        });
 
-        if (result.products.length === 0) {
-          return {
-            products: [],
-            message: `No products found for "${args.query}". USE YOUR TRAINING KNOWLEDGE to tell the user about this product — approximate price, where to buy, and direct retailer URLs.`,
-          };
-        }
-
-        // Format with price ranking
         const formatted = result.products.map((p, i) => ({
           rank: i + 1,
           title: p.title,
-          price: p.price ? `${p.currency} ${p.price.toFixed(2)}` : "Price unavailable",
+          price: p.price ? `${p.currency === "BRL" ? "R$" : "$"}${p.price.toFixed(2)}${p.isApproximate ? " ~" : ""}` : "See price on site",
           rating: p.rating ? `${p.rating}/5` : null,
           reviews: p.reviewCount,
-          platform: p.platform,
+          store: p.store,
           url: p.url,
-          discounted: p.isDiscounted || false,
           asin: p.asin,
         }));
 
         return {
           totalProducts: result.totalResults,
-          platforms: result.platforms,
+          searchMethod: result.method,
+          methodsAttempted: result.methodsAttempted,
           products: formatted,
-          instruction: "Present products as a RANKED LIST by price (cheapest first). Include: rank number, product name, price, rating, and clickable link. Highlight the BEST VALUE option.",
+          instruction: "Present products as a RANKED LIST by price (cheapest first). Include: rank number, product name, price, rating, store, and clickable link.",
         };
       } catch (err) {
-        console.error("[APIFY-SEARCH] Error:", err);
+        console.error("[UNIFIED-SEARCH] Error:", err);
         return {
           error: `Product search failed: ${(err as Error).message}`,
           fallback_instruction: "IMPORTANT: The search tool failed but you MUST still help the user. Use your training knowledge to provide: approximate price, known retailers (Amazon, Best Buy, Walmart, Mercado Livre), and direct URLs. Mark prices as approximate.",
@@ -977,6 +1238,119 @@ async function handleTool(userId: string, name: string, args: Record<string, unk
       }
     }
 
+    case "set_price_alert": {
+      try {
+        const alert = await prisma.priceAlert.create({
+          data: {
+            userId,
+            query: args.query as string,
+            store: (args.store as string) || null,
+            targetPrice: args.targetPrice as number,
+            currency: "USD",
+            country: "US",
+          },
+        });
+        return { success: true, alertId: alert.id, message: `Price alert set! I'll check every 6 hours and notify you when "${args.query}" drops below $${args.targetPrice}.` };
+      } catch (err) {
+        return { error: `Failed to set price alert: ${(err as Error).message}` };
+      }
+    }
+
+    case "get_price_alerts": {
+      try {
+        const alerts = await prisma.priceAlert.findMany({
+          where: { userId, active: true },
+          orderBy: { createdAt: "desc" },
+        });
+        if (alerts.length === 0) return { alerts: [], message: "No active price alerts." };
+        return {
+          alerts: alerts.map(a => ({
+            id: a.id,
+            query: a.query,
+            store: a.store,
+            targetPrice: a.targetPrice,
+            currentPrice: a.currentPrice,
+            lastChecked: a.lastChecked,
+          })),
+        };
+      } catch (err) {
+        return { error: `Failed to get alerts: ${(err as Error).message}` };
+      }
+    }
+
+    case "manage_scheduled_task": {
+      try {
+        const { createScheduledTask, listScheduledTasks, pauseScheduledTask, resumeScheduledTask, deleteScheduledTask, editScheduledTask, inferAction, cronToHuman } = await import("./scheduled-tasks.service.js");
+        const taskAction = (args.action as string) || "list";
+        const channel = userId.startsWith("whatsapp:") ? "whatsapp" : "telegram";
+
+        switch (taskAction) {
+          case "create": {
+            const desc = args.description as string;
+            const schedule = args.schedule as string;
+            if (!desc || !schedule) return { error: "Need description and schedule to create a task." };
+            const toolParams = args.toolParams ? JSON.parse(args.toolParams as string) : undefined;
+            const { action: inferredAction, actionData } = inferAction(desc, args.toolToRun as string, toolParams);
+            const detectedLang = userId.includes("+55") ? "pt" : "en";
+            const task = await createScheduledTask({
+              userId,
+              description: desc,
+              schedule,
+              action: inferredAction,
+              actionData,
+              channel,
+              channelId: userId,
+              language: detectedLang,
+            });
+            const humanSchedule = cronToHuman(task.schedule, detectedLang);
+            return { success: true, taskId: task.id, schedule: humanSchedule, cronExpression: task.schedule, nextRun: task.nextRun?.toISOString() };
+          }
+          case "list": {
+            const tasks = await listScheduledTasks(userId);
+            if (tasks.length === 0) return { tasks: [], message: "No scheduled tasks." };
+            return {
+              tasks: tasks.map(t => ({
+                id: t.id,
+                description: t.description,
+                schedule: cronToHuman(t.schedule, t.language),
+                active: t.active,
+                runCount: t.runCount,
+                lastRun: t.lastRun?.toISOString(),
+                nextRun: t.nextRun?.toISOString(),
+              })),
+            };
+          }
+          case "pause": {
+            if (!args.taskId) return { error: "Need taskId to pause." };
+            await pauseScheduledTask(args.taskId as string, userId);
+            return { success: true, message: "Task paused." };
+          }
+          case "resume": {
+            if (!args.taskId) return { error: "Need taskId to resume." };
+            await resumeScheduledTask(args.taskId as string, userId);
+            return { success: true, message: "Task resumed." };
+          }
+          case "delete": {
+            if (!args.taskId) return { error: "Need taskId to delete." };
+            await deleteScheduledTask(args.taskId as string, userId);
+            return { success: true, message: "Task deleted." };
+          }
+          case "edit": {
+            if (!args.taskId) return { error: "Need taskId to edit." };
+            await editScheduledTask(args.taskId as string, userId, {
+              description: args.description as string,
+              schedule: args.schedule as string,
+            });
+            return { success: true, message: "Task updated." };
+          }
+          default:
+            return { error: `Unknown action: ${taskAction}. Use create, list, edit, delete, pause, resume.` };
+        }
+      } catch (err) {
+        return { error: `Scheduled task error: ${(err as Error).message}` };
+      }
+    }
+
     case "save_user_fact": {
       try {
         await upsertFact(userId, args.key as string, args.value as string, (args.category as string) || "general", "gemini");
@@ -996,33 +1370,35 @@ async function handleTool(userId: string, name: string, args: Record<string, unk
     }
 
     case "amazon_search": {
-      console.log(`[AMAZON-SEARCH] Tool called: amazon_search { query: "${args.query}" }`);
+      console.log(`[UNIFIED-SEARCH] Tool called: amazon_search { query: "${args.query}" }`);
       try {
-        const { searchAmazon } = await import("./amazon/search.service.js");
-        // Determine Amazon domain from user's country
+        const { unifiedProductSearch } = await import("./search/unified-search.service.js");
         const userRecord = await prisma.user.findFirst({
           where: { OR: [{ telegramChatId: userId }, { phone: userId.replace("whatsapp:", "") }] },
           select: { country: true },
         });
         const country = userRecord?.country || "US";
-        const domainMap: Record<string, string> = { US: "amazon.com", BR: "amazon.com.br", UK: "amazon.co.uk", DE: "amazon.de", FR: "amazon.fr", ES: "amazon.es", CA: "amazon.ca", MX: "amazon.com.mx" };
-        const domain = domainMap[country] || "amazon.com";
-        const products = await searchAmazon(args.query as string, domain, (args.max_results as number) ?? 3);
 
-        if (products.length === 0) {
-          return { results: [], message: `No products found for "${args.query}". USE YOUR TRAINING KNOWLEDGE to tell the user about this product — approximate price, where to buy, and direct retailer URLs.` };
-        }
+        const result = await unifiedProductSearch({
+          query: args.query as string,
+          store: "amazon",
+          country,
+          maxResults: (args.max_results as number) ?? 3,
+          userId,
+        });
 
         return {
-          results: products.map(p => ({
+          results: result.products.map(p => ({
             title: p.title,
-            price: p.price,
+            price: p.price ? `$${p.price.toFixed(2)}` : "See price",
             rating: p.rating,
             reviews: p.reviewCount,
-            prime: p.prime,
+            store: p.store,
             url: p.url,
+            asin: p.asin,
           })),
-          message: `Found ${products.length} products. Present them to the user with the direct Amazon links so they can buy.`,
+          searchMethod: result.method,
+          message: `Found ${result.products.length} products. Present them with direct links.`,
         };
       } catch (err) {
         return { error: `Amazon search failed: ${(err as Error).message}`, fallback_instruction: "IMPORTANT: The search tool failed but you MUST still help the user. Use your training knowledge to provide: approximate price, known retailers (Amazon, Best Buy, Walmart, Mercado Livre), and direct URLs. Mark prices as approximate." };
@@ -1523,6 +1899,423 @@ async function handleTool(userId: string, name: string, args: Record<string, unk
         return { error: "Failed to update contact" };
       } catch (err) {
         return { error: `Failed: ${(err as Error).message}` };
+      }
+    }
+
+    case "manage_settings": {
+      try {
+        const action = args.action as string;
+        const setting = args.setting as string | undefined;
+        const value = args.value as string | undefined;
+
+        // Resolve real userId from whatsapp phone
+        const userRecord = await prisma.user.findFirst({
+          where: { OR: [{ telegramChatId: userId }, { phone: userId.replace("whatsapp:", "") }] },
+          select: { id: true },
+        });
+        if (!userRecord) return { error: "User not found" };
+        const realUserId = userRecord.id;
+
+        if (action === "get") {
+          const prefs = await prisma.userNotificationPreferences.upsert({
+            where: { userId: realUserId },
+            create: { userId: realUserId },
+            update: {},
+          });
+          return {
+            success: true,
+            settings: {
+              morningBriefing: prefs.morningBriefing,
+              priceAlerts: prefs.priceAlerts,
+              reengagement: prefs.reengagement,
+              weeklyReport: prefs.weeklyReport,
+              smartTips: prefs.smartTips,
+              achievements: prefs.achievements,
+              birthday: prefs.birthday,
+              pushEnabled: prefs.pushEnabled,
+              timezone: prefs.timezone,
+            },
+          };
+        }
+
+        if (!setting) return { error: "Please specify which setting to change" };
+
+        // Toggle settings
+        const boolSettings = ["morningBriefing", "priceAlerts", "reengagement", "weeklyReport", "smartTips", "achievements", "birthday", "pushEnabled"];
+        if (boolSettings.includes(setting)) {
+          const newValue = action === "enable" ? true : action === "disable" ? false : value === "true";
+          await prisma.userNotificationPreferences.upsert({
+            where: { userId: realUserId },
+            create: { userId: realUserId, [setting]: newValue },
+            update: { [setting]: newValue },
+          });
+          return { success: true, setting, value: newValue, message: `${setting} is now ${newValue ? "enabled" : "disabled"}. To revert, just tell me!` };
+        }
+
+        // String settings (timezone)
+        if (setting === "timezone" && value) {
+          await prisma.userNotificationPreferences.upsert({
+            where: { userId: realUserId },
+            create: { userId: realUserId, timezone: value },
+            update: { timezone: value },
+          });
+          return { success: true, setting: "timezone", value, message: `Timezone updated to ${value}` };
+        }
+
+        // Language preference (saved as user fact)
+        if (setting === "preferred_language" && value) {
+          await upsertFact(userId, "preferred_language", value, "personal", "settings");
+          return { success: true, setting: "preferred_language", value, message: `Language set to ${value}` };
+        }
+
+        return { error: `Unknown setting: ${setting}. Available: ${boolSettings.join(", ")}, timezone, preferred_language` };
+      } catch (err) {
+        return { error: `Failed to manage settings: ${(err as Error).message}` };
+      }
+    }
+
+    case "butler_protocol": {
+      try {
+        const action = args.action as string;
+        const rawData = args.data as string | undefined;
+        const data = rawData ? JSON.parse(rawData) : {};
+
+        const res = await fetch(`${PAYJARVIS_URL}/api/butler/profile/${action === "setup" ? "setup" : action === "get_profile" ? "get" : action === "update_profile" ? "update" : action === "save_credential" ? "../credential/save" : action === "list_credentials" ? "../credentials/list" : action === "get_credential" ? "../credential/get" : action === "get_audit" ? "../audit" : "get"}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-internal-secret": process.env.INTERNAL_SECRET || "" },
+          body: JSON.stringify({
+            userId,
+            ...(action === "save_credential" || action === "get_credential" ? data : { data }),
+          }),
+          signal: AbortSignal.timeout(10000),
+        });
+        const result = await res.json() as Record<string, unknown>;
+        return result;
+      } catch (err) {
+        return { error: `Butler Protocol failed: ${(err as Error).message}` };
+      }
+    }
+
+    case "inner_circle_consult": {
+      try {
+        const slug = args.specialistSlug as string;
+        const question = args.question as string;
+
+        // Find specialist by slug
+        const specRes = await fetch(`${PAYJARVIS_URL}/api/inner-circle/specialists`, {
+          headers: { "x-internal-secret": process.env.INTERNAL_SECRET || "" },
+        });
+        const specList = await specRes.json() as any[];
+        const spec = (Array.isArray(specList) ? specList : []).find((s: any) => s.slug === slug);
+        if (!spec) return { error: `Specialist ${slug} not found` };
+
+        const consultRes = await fetch(`${PAYJARVIS_URL}/api/inner-circle/consult`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-internal-secret": process.env.INTERNAL_SECRET || "" },
+          body: JSON.stringify({ userId, specialistId: spec.id, message: question }),
+          signal: AbortSignal.timeout(15000),
+        });
+        const result = await consultRes.json() as Record<string, unknown>;
+        return result;
+      } catch (err) {
+        return { error: `Inner Circle failed: ${(err as Error).message}` };
+      }
+    }
+
+    case "butler_gmail": {
+      try {
+        const action = args.action as string;
+        const query = args.query as string | undefined;
+        const endpoint = action === "search" ? "gmail/search"
+          : action === "unread" ? "gmail/unread"
+          : action === "read" ? "gmail/read"
+          : action === "confirmation_link" ? "gmail/confirmation-link"
+          : "gmail/unread";
+
+        const body: Record<string, any> = { userId };
+        if (action === "search" && query) body.query = query;
+        if (action === "read" || action === "confirmation_link") body.messageId = query;
+        if (action === "unread") body.maxResults = 5;
+
+        const res = await fetch(`${PAYJARVIS_URL}/api/butler/${endpoint}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-internal-secret": process.env.INTERNAL_SECRET || "" },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(15000),
+        });
+        const result = await res.json() as Record<string, unknown>;
+        return result;
+      } catch (err) {
+        return { error: `Butler Gmail failed: ${(err as Error).message}` };
+      }
+    }
+
+    // ─── Skyfire — Purchase Flow ────────────────────────
+    case "skyfire_setup_wallet": {
+      console.log("[WALLET] Tool called: skyfire_setup_wallet");
+      try {
+        const { getUserWalletStatus } = await import("./purchase-orchestrator.service.js");
+        const status = await getUserWalletStatus(userId);
+        const walletUrl = "https://www.payjarvis.com/wallet/setup";
+
+        if (status.hasCard) {
+          return {
+            success: true,
+            walletUrl,
+            ready: true,
+            card: `${status.cardBrand || "Card"} ****${status.cardLast4 || "????"}`,
+            spentToday: status.spentToday,
+            limits: status.limits,
+            message: `PayJarvis wallet is ready! Card: ${status.cardBrand || "Card"} ****${status.cardLast4 || "????"}. Spent today: $${status.spentToday.toFixed(2)}. You can buy directly in the chat!`,
+            instructions: "NEVER mention 'Skyfire'. Say 'carteira PayJarvis'. Show the card info, today's spending, and limits. Offer to search for products.",
+          };
+        }
+
+        return {
+          success: true,
+          walletUrl,
+          ready: false,
+          message: `To make purchases through chat, you need to add a payment card. Set it up here: ${walletUrl}`,
+          instructions: "NEVER mention 'Skyfire'. Tell user to add card at payjarvis.com/wallet/setup. Card data is processed with bank-grade encryption. PayJarvis NEVER sees card numbers. After setup, they can buy directly in chat.",
+        };
+      } catch (err) {
+        return { error: `Wallet check failed: ${(err as Error).message}` };
+      }
+    }
+
+    case "skyfire_checkout": {
+      console.log(`[PURCHASE] Tool called: skyfire_checkout { product: "${args.productName}", price: ${args.price}, merchant: "${args.merchant}" }`);
+      try {
+        const { executePurchase } = await import("./purchase-orchestrator.service.js");
+        const result = await executePurchase({
+          userId,
+          productName: args.productName as string,
+          price: args.price as number,
+          currency: "USD",
+          merchant: args.merchant as string,
+          merchantUrl: args.merchantUrl as string | undefined,
+        });
+
+        if (!result.success) {
+          if (result.status === "needs_card") {
+            return { error: result.message, action: "Ask user to add payment card at payjarvis.com/wallet/setup", setupUrl: result.setupUrl };
+          }
+          return { error: result.message };
+        }
+
+        return {
+          success: true,
+          orderId: result.orderId,
+          chargedAmount: result.chargedAmount,
+          serviceFee: result.serviceFee,
+          message: result.message,
+          instruction: "Show: order ID, product, price, merchant, service fee. Offer to track delivery. Use 🎩 emoji. NEVER mention 'Skyfire'.",
+        };
+      } catch (err) {
+        console.error("[PURCHASE] Checkout failed:", (err as Error).message);
+        return { error: `Purchase failed: ${(err as Error).message}` };
+      }
+    }
+
+    case "skyfire_my_purchases": {
+      console.log("[SKYFIRE] Tool called: skyfire_my_purchases");
+      try {
+        const limit = Math.min((args.limit as number) || 5, 20);
+        const purchases = await prisma.$queryRaw<any[]>`
+          SELECT id, product_name, price, currency, merchant, order_number, tracking_number, status, created_at
+          FROM purchase_transactions
+          WHERE user_id = ${userId} ORDER BY created_at DESC LIMIT ${limit}
+        `;
+        if (purchases.length === 0) {
+          return { purchases: [], message: "No purchases yet. Search for a product and I'll help you buy it!" };
+        }
+        return {
+          purchases: purchases.map(p => ({
+            orderId: p.order_number || p.id,
+            product: p.product_name,
+            price: `$${p.price.toFixed(2)}`,
+            merchant: p.merchant,
+            tracking: p.tracking_number,
+            status: p.status,
+            date: new Date(p.created_at).toLocaleDateString("en-US"),
+          })),
+          message: `Found ${purchases.length} recent purchases.`,
+        };
+      } catch (err) {
+        return { error: `Failed to fetch purchases: ${(err as Error).message}` };
+      }
+    }
+
+    case "skyfire_spending": {
+      console.log("[SKYFIRE] Tool called: skyfire_spending");
+      try {
+        const { getSpendingLimits, getSpendingToday, getSpendingThisMonth } = await import("./skyfire.service.js");
+        const [limits, today, month] = await Promise.all([
+          getSpendingLimits(userId),
+          getSpendingToday(userId),
+          getSpendingThisMonth(userId),
+        ]);
+        return {
+          success: true,
+          spentToday: today,
+          spentThisMonth: month,
+          limits,
+          message: `Today: $${today.toFixed(2)} / $${limits.daily} | This month: $${month.toFixed(2)} / $${limits.monthly} | Per purchase: $${limits.perTransaction}`,
+        };
+      } catch (err) {
+        return { error: `Spending check failed: ${(err as Error).message}` };
+      }
+    }
+
+    case "skyfire_set_limits": {
+      console.log(`[SKYFIRE] Tool called: skyfire_set_limits { perTx: ${args.perTransaction}, daily: ${args.daily}, monthly: ${args.monthly} }`);
+      try {
+        const { setSpendingLimits } = await import("./skyfire.service.js");
+        const updated = await setSpendingLimits(userId, {
+          perTransaction: args.perTransaction as number | undefined,
+          daily: args.daily as number | undefined,
+          monthly: args.monthly as number | undefined,
+        });
+        return {
+          success: true,
+          limits: updated,
+          message: `Limits updated! Per purchase: $${updated.perTransaction} | Daily: $${updated.daily} | Monthly: $${updated.monthly}`,
+        };
+      } catch (err) {
+        return { error: `Failed to update limits: ${(err as Error).message}` };
+      }
+    }
+
+    // ─── Payment Wallet — Smart Checkout ──────────────────
+    case "manage_payment_methods": {
+      console.log(`[WALLET] Tool called: manage_payment_methods { action: "${args.action}" }`);
+      try {
+        const {
+          getUserPaymentMethods,
+          addPaymentMethod,
+          removePaymentMethod,
+          setDefaultMethod,
+          getWalletSummary,
+        } = await import("./payments/payment-wallet.service.js");
+
+        const userRecord = await prisma.user.findFirst({
+          where: { OR: [{ telegramChatId: userId }, { phone: userId.replace("whatsapp:", "") }] },
+        });
+        if (!userRecord) return { error: "User not found" };
+
+        const action = args.action as string;
+
+        if (action === "list") {
+          const methods = await getUserPaymentMethods(userRecord.id);
+          if (methods.length === 0) {
+            return {
+              methods: [],
+              message: "No payment methods set up yet.",
+              instructions: "Offer to help add PayPal, credit card, PIX, or Amazon. Ask which they'd like to set up.",
+            };
+          }
+          return {
+            methods: methods.map(m => ({
+              id: m.id,
+              provider: m.provider,
+              displayName: m.displayName || m.accountId,
+              isDefault: m.isDefault,
+              status: m.status,
+            })),
+            message: await getWalletSummary(userRecord.id),
+          };
+        }
+
+        if (action === "add") {
+          const provider = (args.provider as string || "").toUpperCase();
+          const display = args.display_name as string || args.email as string || provider;
+          const metaStr = args.metadata as string;
+          let meta: Record<string, unknown> = {};
+          if (metaStr) try { meta = JSON.parse(metaStr); } catch { /* ignore */ }
+
+          if (args.email) meta.email = args.email;
+
+          const method = await addPaymentMethod({
+            userId: userRecord.id,
+            provider: provider as any,
+            displayName: display,
+            accountId: args.email as string || display,
+            metadata: meta,
+            isDefault: false,
+          });
+          return {
+            success: true,
+            method: { id: method.id, provider: method.provider, displayName: method.displayName },
+            message: `Added ${method.displayName} to your Payment Wallet!`,
+            instructions: "Confirm it was added. Ask if they want to set it as default.",
+          };
+        }
+
+        if (action === "remove") {
+          const methodId = args.method_id as string;
+          if (!methodId) return { error: "method_id is required for remove action" };
+          const ok = await removePaymentMethod(userRecord.id, methodId);
+          return ok
+            ? { success: true, message: "Payment method removed." }
+            : { error: "Payment method not found." };
+        }
+
+        if (action === "set_default") {
+          const methodId = args.method_id as string;
+          if (!methodId) return { error: "method_id is required for set_default action" };
+          const ok = await setDefaultMethod(userRecord.id, methodId);
+          return ok
+            ? { success: true, message: "Default payment method updated!" }
+            : { error: "Payment method not found." };
+        }
+
+        return { error: `Unknown action: ${action}` };
+      } catch (err) {
+        return { error: `Payment wallet error: ${(err as Error).message}` };
+      }
+    }
+
+    case "smart_checkout": {
+      const productName = args.product_name as string;
+      const amount = args.amount as number;
+      const currency = (args.currency as string) || "USD";
+      const store = args.store as string | undefined;
+      console.log(`[SMART-CHECKOUT] Tool called: { product: "${productName}", amount: ${amount}, currency: "${currency}", store: "${store || "any"}" }`);
+
+      try {
+        const { getPaymentOptions } = await import("./payments/payment-wallet.service.js");
+
+        const userRecord = await prisma.user.findFirst({
+          where: { OR: [{ telegramChatId: userId }, { phone: userId.replace("whatsapp:", "") }] },
+        });
+        if (!userRecord) return { error: "User not found" };
+
+        const result = await getPaymentOptions(userRecord.id, amount, currency, store);
+
+        // Safeguards: confirm for amounts > $100, block > $500
+        const safeguard = amount > 500
+          ? "⚠️ This purchase exceeds $500. High-value purchases require manual approval."
+          : amount > 100
+            ? "⚠️ This is over $100. Please confirm you want to proceed."
+            : null;
+
+        return {
+          product: productName,
+          productUrl: args.product_url || null,
+          amount,
+          currency,
+          store: store || null,
+          options: result.options,
+          message: result.message,
+          hasValidOption: result.hasValidOption,
+          safeguard,
+          instructions: result.hasValidOption
+            ? "Show the payment options. Let the user choose. When they pick one, execute the payment via the corresponding provider (skyfire_checkout for Skyfire, paypal for PayPal, etc). For amounts > $100, ask for explicit confirmation. For > $500, BLOCK and warn."
+            : "User has no payment method that can cover this amount. Suggest adding a method. Offer PayPal, credit card, or Amazon account.",
+        };
+      } catch (err) {
+        console.error("[SMART-CHECKOUT] Error:", (err as Error).message);
+        return { error: `Smart checkout failed: ${(err as Error).message}` };
       }
     }
 
@@ -2156,6 +2949,8 @@ export async function processWhatsAppMessage(from: string, text: string): Promis
     if (user) {
       resolvedUserId = user.id;
       markSequenceActive(user.id).catch(() => {});
+      // Track engagement interaction (async, non-blocking)
+      trackInteraction(user.id, "message").then(() => checkAndGrantAchievements(user.id)).catch(() => {});
     }
   } catch { /* non-blocking */ }
 

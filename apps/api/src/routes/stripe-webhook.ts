@@ -79,7 +79,7 @@ export async function stripeWebhookRoutes(app: FastifyInstance) {
 
                 if (pmId) {
                   await prisma.paymentMethod.upsert({
-                    where: { userId_provider: { userId: session.userId, provider: "STRIPE" } },
+                    where: { userId_provider_accountId: { userId: session.userId, provider: "STRIPE", accountId: "Card (via onboarding)" } },
                     create: {
                       userId: session.userId,
                       provider: "STRIPE",
