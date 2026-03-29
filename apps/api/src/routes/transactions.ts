@@ -87,7 +87,7 @@ export async function transactionRoutes(app: FastifyInstance) {
       orderBy: { createdAt: "desc" },
     });
 
-    let botName = "Todos os bots";
+    let botName = "All bots";
     let trustScore: number | null = null;
     if (botId) {
       const bot = await prisma.bot.findUnique({ where: { id: botId } });
@@ -106,14 +106,14 @@ export async function transactionRoutes(app: FastifyInstance) {
     doc.fontSize(8).font("Helvetica").fillColor("#888888").text("Bot Payment Identity", 50, 75);
     doc.fillColor("#000000");
     doc.moveDown(2);
-    doc.fontSize(14).font("Helvetica-Bold").text("Extrato de Transações");
+    doc.fontSize(14).font("Helvetica-Bold").text("Transaction Statement");
     doc.moveDown(0.5);
     doc.fontSize(9).font("Helvetica");
     doc.text(`Bot: ${botName}`);
     if (dateFrom || dateTo) {
-      doc.text(`Período: ${dateFrom ?? "início"} até ${dateTo ?? "hoje"}`);
+      doc.text(`Period: ${dateFrom ?? "start"} to ${dateTo ?? "today"}`);
     }
-    doc.text(`Gerado em: ${new Date().toLocaleDateString("pt-BR")} ${new Date().toLocaleTimeString("pt-BR")}`);
+    doc.text(`Generated: ${new Date().toLocaleDateString("en-US")} ${new Date().toLocaleTimeString("en-US")}`);
     doc.moveDown(1.5);
 
     // Table header
@@ -121,9 +121,9 @@ export async function transactionRoutes(app: FastifyInstance) {
     doc.fontSize(8).font("Helvetica-Bold");
     doc.text("Data", 50, tableTop, { width: 70 });
     doc.text("Merchant", 120, tableTop, { width: 110 });
-    doc.text("Categoria", 230, tableTop, { width: 70 });
-    doc.text("Valor", 300, tableTop, { width: 70, align: "right" });
-    doc.text("Decisão", 380, tableTop, { width: 80 });
+    doc.text("Category", 230, tableTop, { width: 70 });
+    doc.text("Amount", 300, tableTop, { width: 70, align: "right" });
+    doc.text("Decision", 380, tableTop, { width: 80 });
     doc.moveDown();
     doc.moveTo(50, doc.y).lineTo(460, doc.y).strokeColor("#cccccc").stroke();
     doc.moveDown(0.3);
@@ -138,7 +138,7 @@ export async function transactionRoutes(app: FastifyInstance) {
     for (const tx of transactions) {
       if (doc.y > 720) doc.addPage();
       const y = doc.y;
-      doc.text(new Date(tx.createdAt).toLocaleDateString("pt-BR"), 50, y, { width: 70 });
+      doc.text(new Date(tx.createdAt).toLocaleDateString("en-US"), 50, y, { width: 70 });
       doc.text(tx.merchantName.slice(0, 20), 120, y, { width: 110 });
       doc.text(tx.category, 230, y, { width: 70 });
       doc.text(`${tx.currency} ${tx.amount.toFixed(2)}`, 300, y, { width: 70, align: "right" });
@@ -156,9 +156,9 @@ export async function transactionRoutes(app: FastifyInstance) {
     doc.moveTo(50, doc.y).lineTo(460, doc.y).strokeColor("#cccccc").stroke();
     doc.moveDown(0.5);
     doc.fontSize(9).font("Helvetica-Bold");
-    doc.text(`Total Aprovado: R$ ${totalApproved.toFixed(2)} (${countApproved} transações)`, 50);
-    doc.text(`Total Bloqueado: R$ ${totalBlocked.toFixed(2)} (${countBlocked} transações)`, 50);
-    doc.text(`Total de Transações: ${transactions.length}`, 50);
+    doc.text(`Total Approved: $ ${totalApproved.toFixed(2)} (${countApproved} transactions)`, 50);
+    doc.text(`Total Blocked: $ ${totalBlocked.toFixed(2)} (${countBlocked} transactions)`, 50);
+    doc.text(`Total Transactions: ${transactions.length}`, 50);
     if (trustScore !== null) {
       doc.text(`Trust Score: ${trustScore}`, 50);
     }

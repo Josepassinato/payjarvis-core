@@ -9,6 +9,7 @@ import { redisGet, redisSet } from "../services/redis.js";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { updateAgentCounters } from "../services/agent-identity.js";
+import { dispatchWebhook } from "../services/webhook-dispatcher.js";
 
 const approvalEvents = new EventEmitter();
 approvalEvents.setMaxListeners(100);
@@ -325,6 +326,18 @@ export async function approvalRoutes(app: FastifyInstance) {
         bditToken: token,
       });
 
+      // Dispatch webhook to external platforms
+      dispatchWebhook("transaction.approved", {
+        transactionId: approval.transactionId,
+        approvalId: id,
+        botId: approval.botId,
+        amount: approval.amount,
+        category: approval.category,
+        merchantName: approval.transaction.merchantName ?? "",
+        bditToken: token,
+        timestamp: new Date().toISOString(),
+      });
+
       return {
         success: true,
         data: {
@@ -375,6 +388,18 @@ export async function approvalRoutes(app: FastifyInstance) {
       id,
       status: "REJECTED",
       transactionId: approval.transactionId,
+    });
+
+    // Dispatch webhook to external platforms
+    dispatchWebhook("transaction.rejected", {
+      transactionId: approval.transactionId,
+      approvalId: id,
+      botId: approval.botId,
+      amount: approval.amount,
+      category: approval.category,
+      merchantName: approval.transaction.merchantName ?? "",
+      reason: reason ?? "Rejected by owner",
+      timestamp: new Date().toISOString(),
     });
 
     return {

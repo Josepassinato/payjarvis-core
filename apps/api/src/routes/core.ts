@@ -215,6 +215,7 @@ export async function coreRoutes(app: FastifyInstance) {
         merchantId?: string;
         category?: string;
         transactionId?: string;
+        agentId?: string;
       };
 
       // Ensure session exists (keyed by botId + userId for multi-tenant isolation)
@@ -240,6 +241,7 @@ export async function coreRoutes(app: FastifyInstance) {
         merchantId: body.merchantId,
         category: body.category,
         transactionId: body.transactionId,
+        agentId: body.agentId,
       });
 
       if (result.awaitingApproval) {

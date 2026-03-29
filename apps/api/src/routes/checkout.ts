@@ -17,6 +17,10 @@ import {
 } from "../services/amazon/checkout.service.js";
 
 export async function checkoutRoutes(app: FastifyInstance) {
+  // DEPRECATED — BrowserBase checkout flow replaced by direct Amazon links (amazon_search tool)
+  // These endpoints still work but always fail because cookies don't transfer between browsers.
+  // Kept for backward compatibility. Will be removed in a future cleanup.
+
   // ── Check session ─────────────────────────────────
   app.post("/api/amazon/checkout/check-session", async (request, reply) => {
     const body = request.body as { userId?: string };
@@ -143,5 +147,22 @@ export async function checkoutRoutes(app: FastifyInstance) {
     }
 
     return reply.send({ success: true, data: order });
+  });
+
+  // ── Search Amazon products ──────────────────────────
+  app.post("/api/amazon/search", async (request, reply) => {
+    const body = request.body as { query?: string; maxResults?: number; domain?: string };
+    if (!body?.query) {
+      return reply.status(400).send({ success: false, error: "query is required" });
+    }
+
+    try {
+      const { searchAmazon } = await import("../services/amazon/search.service.js");
+      const products = await searchAmazon(body.query, body.domain ?? "amazon.com", body.maxResults ?? 3);
+      return reply.send({ success: true, products });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Search failed";
+      return reply.status(500).send({ success: false, error: message });
+    }
   });
 }

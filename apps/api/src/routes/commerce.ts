@@ -63,12 +63,24 @@ export async function commerceRoutes(app: FastifyInstance) {
         checkOut?: string;
         adults?: number;
         maxPrice?: number;
+        ratings?: string;
+        currency?: string;
+        radius?: number;
+        latitude?: number;
+        longitude?: number;
       };
 
-      if (!body.city || !body.checkIn || !body.checkOut) {
+      if (!body.checkIn || !body.checkOut) {
         return reply.status(400).send({
           success: false,
-          error: "city, checkIn, and checkOut are required",
+          error: "checkIn and checkOut are required",
+        });
+      }
+
+      if (!body.city && !(body.latitude && body.longitude)) {
+        return reply.status(400).send({
+          success: false,
+          error: "city or latitude/longitude is required",
         });
       }
 
@@ -76,11 +88,16 @@ export async function commerceRoutes(app: FastifyInstance) {
         botId,
         service: "hotels",
         params: {
-          city: body.city.toUpperCase(),
+          city: body.city,
           checkIn: body.checkIn,
           checkOut: body.checkOut,
           adults: body.adults ?? 1,
           maxPrice: body.maxPrice,
+          ratings: body.ratings ? body.ratings.split(",") : undefined,
+          currency: body.currency,
+          radius: body.radius,
+          latitude: body.latitude,
+          longitude: body.longitude,
         },
       });
 
@@ -97,17 +114,25 @@ export async function commerceRoutes(app: FastifyInstance) {
       const botId = (request as any).botId as string;
       const body = request.body as {
         location?: string;
+        term?: string;
+        cuisine?: string;
+        price?: string;
+        priceRange?: string;
+        sort_by?: string;
+        limit?: number;
+        open_now?: boolean;
+        radius?: number;
         date?: string;
         time?: string;
         covers?: number;
-        cuisine?: string;
-        priceRange?: string;
+        latitude?: number;
+        longitude?: number;
       };
 
-      if (!body.location) {
+      if (!body.location && !(body.latitude && body.longitude)) {
         return reply.status(400).send({
           success: false,
-          error: "location is required",
+          error: "location or latitude/longitude is required",
         });
       }
 
@@ -116,11 +141,18 @@ export async function commerceRoutes(app: FastifyInstance) {
         service: "restaurants",
         params: {
           location: body.location,
+          term: body.term,
+          cuisine: body.cuisine,
+          price: body.price || body.priceRange,
+          sort_by: body.sort_by,
+          limit: body.limit,
+          open_now: body.open_now,
+          radius: body.radius,
           date: body.date,
           time: body.time,
           covers: body.covers ?? 2,
-          cuisine: body.cuisine,
-          priceRange: body.priceRange,
+          latitude: body.latitude,
+          longitude: body.longitude,
         },
       });
 
@@ -141,12 +173,14 @@ export async function commerceRoutes(app: FastifyInstance) {
         keyword?: string;
         startDate?: string;
         endDate?: string;
+        latitude?: number;
+        longitude?: number;
       };
 
-      if (!body.city) {
+      if (!body.city && !(body.latitude && body.longitude)) {
         return reply.status(400).send({
           success: false,
-          error: "city is required",
+          error: "city or latitude/longitude is required",
         });
       }
 
@@ -159,6 +193,8 @@ export async function commerceRoutes(app: FastifyInstance) {
           keyword: body.keyword,
           startDate: body.startDate,
           endDate: body.endDate,
+          latitude: body.latitude,
+          longitude: body.longitude,
         },
       });
 

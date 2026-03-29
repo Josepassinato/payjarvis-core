@@ -12,6 +12,7 @@ import { emitApprovalEvent, emitBotApprovalEvent } from "./approvals.js";
 import { notifyApprovalCreated, notifyTransactionApproved, notifyTransactionBlocked } from "../services/notifications.js";
 import { resolveAgentId, getAgentByBotId, updateAgentCounters } from "../services/agent-identity.js";
 import { TRUST_THRESHOLD_BLOCK } from "@payjarvis/types";
+import { dispatchWebhook } from "../services/webhook-dispatcher.js";
 
 export async function paymentRoutes(app: FastifyInstance) {
   const env = process.env.BDIT_ENV ?? process.env.NODE_ENV ?? "development";
@@ -201,6 +202,17 @@ export async function paymentRoutes(app: FastifyInstance) {
         transactionId: transaction.id,
       }).catch(err => console.error("[Notification]", err));
 
+      // Fire-and-forget webhook dispatch
+      dispatchWebhook("bot.purchase.verified", {
+        transactionId: transaction.id,
+        botId: bot.id,
+        amount,
+        merchantName,
+        category,
+        decision: "APPROVED",
+        bditToken: jti,
+      });
+
       return {
         success: true,
         data: {
@@ -275,6 +287,18 @@ export async function paymentRoutes(app: FastifyInstance) {
         approvalId: approval.id,
       }).catch(err => console.error("[Notification]", err));
 
+      // Fire-and-forget webhook dispatch
+      dispatchWebhook("bot.purchase.pending", {
+        transactionId: transaction.id,
+        botId: bot.id,
+        amount,
+        merchantName,
+        category,
+        decision: "PENDING_HUMAN",
+        approvalId: approval.id,
+        reason: rulesResult.reason,
+      });
+
       await createAuditLog({
         entityType: "transaction",
         entityId: transaction.id,
@@ -328,6 +352,18 @@ export async function paymentRoutes(app: FastifyInstance) {
       reason: rulesResult.reason,
       ruleTriggered: rulesResult.ruleTriggered,
     }).catch(err => console.error("[Notification]", err));
+
+    // Fire-and-forget webhook dispatch
+    dispatchWebhook("bot.purchase.blocked", {
+      transactionId: transaction.id,
+      botId: bot.id,
+      amount,
+      merchantName,
+      category,
+      decision: "BLOCKED",
+      reason: rulesResult.reason,
+      ruleTriggered: rulesResult.ruleTriggered,
+    });
 
     return {
       success: true,

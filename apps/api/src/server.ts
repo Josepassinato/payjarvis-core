@@ -37,6 +37,7 @@ import { analyticsRoutes } from "./routes/analytics.js";
 import { handoffRoutes } from "./routes/handoffs.js";
 import { onboardingRoutes } from "./routes/onboarding.routes.js";
 import { paymentMethodRoutes } from "./routes/payment-methods.js";
+import { paymentProcessingRoutes } from "./routes/payment-processing.js";
 import { agentRoutes } from "./routes/agents.js";
 import { commerceRoutes } from "./routes/commerce.js";
 import { hotelRoutes } from "./routes/hotels.js";
@@ -147,6 +148,7 @@ await app.register(platformRoutes);
 await app.register(merchantRoutes);
 await app.register(integrationRoutes);
 await app.register(paymentMethodRoutes);
+await app.register(paymentProcessingRoutes);
 
 // Core — Layer 1: policy, approvals, audit, sessions
 await app.register(coreRoutes);

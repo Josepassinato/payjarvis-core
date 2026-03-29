@@ -800,17 +800,13 @@ Rules: Return ONLY the JSON, no explanation, no markdown fences. If a field is n
       let welcome: string;
       if (botCaps.length > 0) {
         const capsList = botCaps.map(c => `  - ${c}`).join("\n");
-        welcome = botLang.startsWith("pt")
-          ? `Olá${firstName ? ` ${firstName}` : ""}! 👋\n\nEu sou o ${botDisplayName}, seu assistente pessoal.\n\nPosso te ajudar com:\n${capsList}\n\nÉ só me mandar uma mensagem e vamos começar!`
-          : botLang.startsWith("es")
-          ? `¡Hola${firstName ? ` ${firstName}` : ""}! 👋\n\nSoy ${botDisplayName}, tu asistente personal.\n\nPuedo ayudarte con:\n${capsList}\n\n¡Solo envíame un mensaje y comencemos!`
-          : `Hi${firstName ? ` ${firstName}` : ""}! 👋\n\nI'm ${botDisplayName}, your personal assistant.\n\nI can help you with:\n${capsList}\n\nJust send me a message and let's get started!`;
+        welcome = botLang.startsWith("es")
+          ? `¡Hola${firstName ? ` ${firstName}` : ""}! 👋\n\nSoy ${botDisplayName}, tu asistente personal.\n\n🔒 Tus datos están protegidos con encriptación Zero-Knowledge. Ni siquiera nosotros podemos verlos.\n\nPuedo ayudarte con:\n${capsList}\n\n¡Solo envíame un mensaje y comencemos!`
+          : `Hi${firstName ? ` ${firstName}` : ""}! 👋\n\nI'm ${botDisplayName}, your personal assistant.\n\n🔒 Your data is protected with Zero-Knowledge encryption. Not even we can see it.\n\nI can help you with:\n${capsList}\n\nJust send me a message and let's get started!`;
       } else {
-        welcome = botLang.startsWith("pt")
-          ? `Olá${firstName ? ` ${firstName}` : ""}! 👋\n\nEu sou o ${botDisplayName}. Me manda uma mensagem e vamos conversar!`
-          : botLang.startsWith("es")
-          ? `¡Hola${firstName ? ` ${firstName}` : ""}! 👋\n\nSoy ${botDisplayName}. ¡Envíame un mensaje y conversemos!`
-          : `Hi${firstName ? ` ${firstName}` : ""}! 👋\n\nI'm ${botDisplayName}. Send me a message and let's chat!`;
+        welcome = botLang.startsWith("es")
+          ? `¡Hola${firstName ? ` ${firstName}` : ""}! 👋\n\nSoy ${botDisplayName}.\n\n🔒 Tus datos están protegidos con encriptación Zero-Knowledge.\n\n¡Envíame un mensaje y conversemos!`
+          : `Hi${firstName ? ` ${firstName}` : ""}! 👋\n\nI'm ${botDisplayName}.\n\n🔒 Your data is protected with Zero-Knowledge encryption.\n\nSend me a message and let's chat!`;
       }
 
       try {
@@ -825,6 +821,15 @@ Rules: Return ONLY the JSON, no explanation, no markdown fences. If a field is n
       }
       return { ok: true };
     }
+
+    // Send "typing" indicator so user knows bot is processing
+    try {
+      await fetch(`https://api.telegram.org/bot${botToken}/sendChatAction`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId, action: "typing" }),
+      });
+    } catch { /* non-blocking */ }
 
     // Process the message through the AI engine
     try {
@@ -861,18 +866,21 @@ Rules: Return ONLY the JSON, no explanation, no markdown fences. If a field is n
             });
 
             const lang = botLang;
+            const disclaimer_en = `\n\n🔐 *Privacy notice:* Your credentials are encrypted with AES-256 and stored securely. You can delete them anytime by saying "remove my ${displayName} login". See payjarvis.com/privacy for details.`;
+            const disclaimer_pt = `\n\n🔐 *Aviso de privacidade:* Suas credenciais são criptografadas com AES-256 e armazenadas com segurança. Você pode deletá-las a qualquer momento dizendo "remover meu login da ${displayName}". Veja payjarvis.com/privacy para detalhes.`;
+            const disclaimer_es = `\n\n🔐 *Aviso de privacidad:* Tus credenciales están cifradas con AES-256 y almacenadas de forma segura. Puedes eliminarlas en cualquier momento diciendo "eliminar mi login de ${displayName}". Consulta payjarvis.com/privacy.`;
             if (lang.startsWith("pt")) {
               confirmationMsg = known
-                ? `✅ Credenciais da ${displayName} salvas com sucesso no seu Account Vault! Agora posso fazer compras e pesquisas na ${displayName} por você. 🔒 Seus dados são criptografados e nunca compartilhados.`
-                : `✅ Salvei suas credenciais de "${displayName}" como login genérico. Quando adicionarmos suporte oficial, já estará configurado! 🔒`;
+                ? `✅ ${displayName} credentials saved successfully in your Account Vault! I can now shop and search on ${displayName} for you.` + disclaimer_pt
+                : `✅ Saved your "${displayName}" credentials as generic login. When we add official support, it will already be set up!` + disclaimer_pt;
             } else if (lang.startsWith("es")) {
               confirmationMsg = known
-                ? `✅ Credenciales de ${displayName} guardadas en tu Account Vault. Ahora puedo hacer compras en ${displayName} por ti. 🔒`
-                : `✅ Guardé tus credenciales de "${displayName}" como login genérico. 🔒`;
+                ? `✅ Credenciales de ${displayName} guardadas en tu Account Vault. Ahora puedo hacer compras en ${displayName} por ti.` + disclaimer_es
+                : `✅ Guardé tus credenciales de "${displayName}" como login genérico.` + disclaimer_es;
             } else {
               confirmationMsg = known
-                ? `✅ ${displayName} credentials saved to your Account Vault! I can now shop and search ${displayName} for you. 🔒 Your data is encrypted and never shared.`
-                : `✅ Saved your "${displayName}" credentials as a generic login. When we add official support, you'll be all set! 🔒`;
+                ? `✅ ${displayName} credentials saved to your Account Vault! I can now shop and search ${displayName} for you.` + disclaimer_en
+                : `✅ Saved your "${displayName}" credentials as a generic login. When we add official support, you'll be all set!` + disclaimer_en;
             }
           }
         } else if (fc.name === "remove_store_credentials") {
@@ -890,6 +898,111 @@ Rules: Return ONLY the JSON, no explanation, no markdown fences. If a field is n
             : lang.startsWith("es")
             ? `✅ Login de ${displayName} eliminado.`
             : `✅ ${displayName} login removed successfully.`;
+        } else if (fc.name === "amazon_search") {
+          const args = fc.args as { query: string; max_results?: number };
+          const { searchAmazon } = await import("../services/amazon/search.service.js");
+          const amazonDomain = getAmazonDomain(bot?.owner?.country) || "amazon.com";
+          const products = await searchAmazon(args.query, amazonDomain, args.max_results ?? 3);
+
+          if (products.length === 0) {
+            confirmationMsg = botLang.startsWith("pt")
+              ? `Não encontrei produtos para "${args.query}" na Amazon. Tente outra busca.`
+              : `No products found for "${args.query}" on Amazon. Try a different search.`;
+          } else {
+            // Format products with links
+            const lines = products.map((p, i) => {
+              const stars = p.rating ? ` ⭐ ${p.rating}` : "";
+              const reviews = p.reviewCount ? ` (${p.reviewCount})` : "";
+              const prime = p.prime ? " 🚀 Prime" : "";
+              return `${i + 1}. *${p.title}*\n💰 ${p.price || "Price not available"}${stars}${reviews}${prime}\n👉 ${p.url}`;
+            });
+
+            const header = botLang.startsWith("pt")
+              ? `🛒 Encontrei ${products.length} produto(s) para "${args.query}":\n\n`
+              : `🛒 Found ${products.length} product(s) for "${args.query}":\n\n`;
+            const footer = botLang.startsWith("pt")
+              ? `\n\n_Clique no link para comprar direto na Amazon._`
+              : `\n\n_Click the link to buy directly on Amazon._`;
+
+            confirmationMsg = header + lines.join("\n\n") + footer;
+
+            // Send top product image
+            const topProduct = products[0];
+            if (topProduct.imageUrl) {
+              try {
+                await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    chat_id: chatId,
+                    photo: topProduct.imageUrl,
+                    caption: `⭐ ${topProduct.title?.slice(0, 100)}\n💰 ${topProduct.price}\n👉 ${topProduct.url}`,
+                  }),
+                });
+              } catch { /* image optional */ }
+            }
+          }
+        } else if (fc.name === "share_bot") {
+          const args = fc.args as { platform?: string };
+          const platform = (args.platform || "telegram").toLowerCase();
+          const INTERNAL_SECRET = process.env.INTERNAL_SECRET || "";
+
+          try {
+            const shareRes = await fetch(
+              `${process.env.WEB_URL || "https://www.payjarvis.com"}/api/bots/${botId}/share/generate?telegramId=${chatId}&platform=${platform}`,
+              {
+                headers: { "x-internal-secret": INTERNAL_SECRET },
+                signal: AbortSignal.timeout(10_000),
+              },
+            );
+            const shareData = (await shareRes.json()) as { success: boolean; data?: any; error?: string };
+
+            if (!shareData.success || !shareData.data) {
+              confirmationMsg = botLang.startsWith("pt")
+                ? `❌ Não consegui gerar o link. Tente novamente.`
+                : `❌ Could not generate share link. Try again.`;
+            } else {
+              const { code, qrCodeBase64 } = shareData.data;
+              const botUsername = (config as any).telegramBotUsername || "Jarvis12Brain_bot";
+              const link = platform === "telegram"
+                ? `https://t.me/${botUsername}?start=${code}`
+                : `https://wa.me/17547145921?text=${encodeURIComponent("START " + code)}`;
+
+              // Send QR code as photo
+              if (qrCodeBase64) {
+                try {
+                  const base64Data = qrCodeBase64.replace(/^data:image\/png;base64,/, "");
+                  const qrBuffer = Buffer.from(base64Data, "base64");
+                  const FormData = (await import("node:buffer")).Buffer;
+                  // Send via multipart (Telegram requires file upload for buffer)
+                  const boundary = "----FormBoundary" + Date.now();
+                  const body = [
+                    `--${boundary}\r\nContent-Disposition: form-data; name="chat_id"\r\n\r\n${chatId}`,
+                    `--${boundary}\r\nContent-Disposition: form-data; name="caption"\r\n\r\n📱 QR Code para indicar amigo!\n\nOu envie o link: ${link}`,
+                    `--${boundary}\r\nContent-Disposition: form-data; name="photo"; filename="qrcode.png"\r\nContent-Type: image/png\r\n\r\n`,
+                  ].join("\r\n");
+                  const bodyEnd = `\r\n--${boundary}--\r\n`;
+                  const bodyBuffer = Buffer.concat([Buffer.from(body), qrBuffer, Buffer.from(bodyEnd)]);
+
+                  await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
+                    method: "POST",
+                    headers: { "Content-Type": `multipart/form-data; boundary=${boundary}` },
+                    body: bodyBuffer,
+                  });
+                } catch (qrErr) {
+                  request.log.error(qrErr, "[SHARE] QR send failed");
+                }
+              }
+
+              confirmationMsg = botLang.startsWith("pt")
+                ? `🔗 Link de indicação:\n${link}\n\nQuando seu amigo clicar, o bot vai recepcionar automaticamente! 🎉`
+                : `🔗 Referral link:\n${link}\n\nWhen your friend clicks, the bot will welcome them automatically! 🎉`;
+            }
+          } catch (err) {
+            confirmationMsg = botLang.startsWith("pt")
+              ? `❌ Erro ao gerar link. Tente novamente.`
+              : `❌ Error generating link. Try again.`;
+          }
         } else {
           confirmationMsg = geminiResult.text || "Done.";
         }
@@ -898,7 +1011,7 @@ Rules: Return ONLY the JSON, no explanation, no markdown fences. If a field is n
         await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ chat_id: chatId, text: confirmationMsg }),
+          body: JSON.stringify({ chat_id: chatId, text: confirmationMsg, parse_mode: "Markdown", disable_web_page_preview: false }),
         });
 
         // Security: delete the user's message that contained the password
@@ -913,7 +1026,7 @@ Rules: Return ONLY the JSON, no explanation, no markdown fences. If a field is n
               });
               // Notify user about deletion
               const deletionNote = botLang.startsWith("pt")
-                ? "🔒 Sua mensagem com a senha foi apagada por segurança."
+                ? "🔒 Your message with the password was deleted for security."
                 : botLang.startsWith("es")
                 ? "🔒 Tu mensaje con la contraseña fue eliminado por seguridad."
                 : "🔒 Your message containing the password was deleted for security.";

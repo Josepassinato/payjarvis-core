@@ -19,6 +19,15 @@ import {
   listSessions,
   verifySession,
 } from "../services/vault/vault.service.js";
+import {
+  deriveKey,
+  generateSalt,
+  encrypt as zkEncrypt,
+  decrypt as zkDecrypt,
+  hashPin,
+  validatePin,
+  maskCard,
+} from "../services/vault/zero-knowledge.js";
 
 const VAULT_LINK_SECRET =
   process.env.VAULT_ENCRYPTION_KEY ?? crypto.randomBytes(32).toString("hex");
@@ -220,51 +229,78 @@ export async function vaultRoutes(app: FastifyInstance) {
   app.get("/api/vault/amazon/check-live-login/:bbContextId", async (request, reply) => {
     const { bbContextId } = request.params as { bbContextId: string };
     const userId = (request.query as any).userId as string | undefined;
+    const bbSessionId = (request.query as any).bbSessionId as string | undefined;
 
     if (!userId) {
       return reply.status(400).send({ success: false, error: "userId query param required" });
     }
 
     try {
-      // Open a quick verification session with the same context
-      const verifyRes = await fetch(`${BROWSER_AGENT_URL}/bb/open-session`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          bbContextId,
-          storeUrl: "https://www.amazon.com",
-          purpose: "verify",
-        }),
-        signal: AbortSignal.timeout(60_000),
-      });
-      const verifyData = (await verifyRes.json()) as {
-        success: boolean;
-        bbSessionId?: string;
-        loggedIn?: boolean;
-        userName?: string;
-        error?: string;
-      };
+      let loggedIn = false;
+      let userName: string | undefined;
 
-      // Close verify session
-      if (verifyData.bbSessionId) {
-        fetch(`${BROWSER_AGENT_URL}/bb/close-session`, {
+      if (bbSessionId) {
+        // PREFERRED: Reconnect to the SAME keepAlive session to check login
+        // This avoids opening a new session (which can't see cookies from the active one)
+        console.log(`[CONNECT-AMAZON] Verifying via keepAlive session ${bbSessionId.slice(0, 8)}`);
+        const verifyRes = await fetch(`${BROWSER_AGENT_URL}/bb/verify-session`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ bbSessionId: verifyData.bbSessionId }),
-        }).catch(() => {});
+          body: JSON.stringify({ bbSessionId }),
+          signal: AbortSignal.timeout(60_000),
+        });
+        const verifyData = (await verifyRes.json()) as {
+          success: boolean;
+          loggedIn?: boolean;
+          userName?: string;
+          sessionClosed?: boolean;
+          error?: string;
+        };
+        loggedIn = !!verifyData.loggedIn;
+        userName = verifyData.userName;
+      } else {
+        // FALLBACK: Open a new session with the context (legacy behavior)
+        console.log(`[CONNECT-AMAZON] No bbSessionId — falling back to new session verify`);
+        const verifyRes = await fetch(`${BROWSER_AGENT_URL}/bb/open-session`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            bbContextId,
+            storeUrl: "https://www.amazon.com",
+            purpose: "verify",
+          }),
+          signal: AbortSignal.timeout(60_000),
+        });
+        const verifyData = (await verifyRes.json()) as {
+          success: boolean;
+          bbSessionId?: string;
+          loggedIn?: boolean;
+          userName?: string;
+          error?: string;
+        };
+
+        // Close verify session
+        if (verifyData.bbSessionId) {
+          fetch(`${BROWSER_AGENT_URL}/bb/close-session`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ bbSessionId: verifyData.bbSessionId }),
+          }).catch(() => {});
+        }
+
+        loggedIn = !!(verifyData.success && verifyData.loggedIn);
+        userName = verifyData.userName;
       }
 
-      if (verifyData.success && verifyData.loggedIn) {
-        console.log(`[CONNECT-AMAZON] Live login verified! userName=${verifyData.userName}`);
-        // Mark as authenticated
-  
+      if (loggedIn) {
+        console.log(`[CONNECT-AMAZON] Live login verified! userName=${userName}`);
         await prisma.storeContext.updateMany({
           where: { userId, store: "amazon" },
           data: { status: "authenticated", authenticatedAt: new Date(), updatedAt: new Date() },
         });
         return reply.send({
           success: true,
-          data: { loggedIn: true, userName: verifyData.userName },
+          data: { loggedIn: true, userName },
         });
       }
 
@@ -274,6 +310,89 @@ export async function vaultRoutes(app: FastifyInstance) {
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Login check failed";
+      return reply.status(500).send({ success: false, error: message });
+    }
+  });
+
+  // ── BrowserBase-native Amazon login (cookies stay in BB context) ─
+  app.post("/api/vault/amazon/bb-login", async (request, reply) => {
+    const body = request.body as { userId?: string; email?: string; password?: string };
+
+    if (!body?.userId || !body?.email || !body?.password) {
+      return reply.status(400).send({ success: false, error: "userId, email, and password required" });
+    }
+
+    console.log(`[CONNECT-AMAZON] BB-login for userId=${body.userId}`);
+
+    try {
+      // Get or create BB context
+      let ctx = await prisma.storeContext.findFirst({
+        where: { userId: body.userId, store: "amazon" },
+        select: { id: true, bbContextId: true },
+      });
+
+      let bbContextId = ctx?.bbContextId;
+      if (!bbContextId) {
+        const createRes = await fetch(`${BROWSER_AGENT_URL}/bb/create-context`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+          signal: AbortSignal.timeout(30_000),
+        });
+        const createData = (await createRes.json()) as { success: boolean; bbContextId?: string };
+        if (!createData.success || !createData.bbContextId) {
+          return reply.status(500).send({ success: false, error: "Failed to create BB context" });
+        }
+        bbContextId = createData.bbContextId;
+
+        await prisma.storeContext.upsert({
+          where: { userId_store: { userId: body.userId, store: "amazon" } },
+          create: { userId: body.userId, store: "amazon", storeUrl: "https://www.amazon.com", storeLabel: "Amazon", bbContextId, status: "configured" },
+          update: { bbContextId, updatedAt: new Date() },
+        });
+      }
+
+      // Login inside BrowserBase
+      const loginRes = await fetch(`${BROWSER_AGENT_URL}/bb/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bbContextId, email: body.email, password: body.password }),
+        signal: AbortSignal.timeout(180_000),
+      });
+      const loginData = (await loginRes.json()) as {
+        success: boolean;
+        loggedIn?: boolean;
+        userName?: string;
+        status?: string;
+        bbSessionId?: string;
+        message?: string;
+        error?: string;
+      };
+
+      if (loginData.loggedIn) {
+        console.log(`[CONNECT-AMAZON] BB-login success! userName=${loginData.userName}`);
+        await prisma.storeContext.updateMany({
+          where: { userId: body.userId, store: "amazon" },
+          data: { status: "authenticated", authenticatedAt: new Date(), updatedAt: new Date() },
+        });
+        return reply.send({
+          success: true,
+          data: { loggedIn: true, userName: loginData.userName, message: "Amazon connected via BrowserBase!" },
+        });
+      }
+
+      if (loginData.status === "NEEDS_HUMAN") {
+        return reply.status(202).send({
+          success: false,
+          status: "NEEDS_HUMAN",
+          bbSessionId: loginData.bbSessionId,
+          message: loginData.message,
+        });
+      }
+
+      return reply.status(400).send({ success: false, error: loginData.error ?? loginData.message ?? "Login failed" });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "BB login failed";
       return reply.status(500).send({ success: false, error: message });
     }
   });
@@ -665,5 +784,205 @@ export async function vaultRoutes(app: FastifyInstance) {
         expiresAt: s.expiresAt,
       })),
     });
+  });
+
+  // ═══════════════════════════════════════════════════════
+  // Zero-Knowledge Vault Endpoints
+  // ═══════════════════════════════════════════════════════
+
+  // POST /api/vault/zk/setup — Configure PIN for the first time
+  app.post("/api/vault/zk/setup", async (request, reply) => {
+    const { userId, pin } = request.body as { userId: string; pin: string };
+    if (!userId || !pin) return reply.status(400).send({ success: false, error: "userId and pin are required" });
+
+    const check = validatePin(pin);
+    if (!check.valid) return reply.status(400).send({ success: false, error: check.error });
+
+    // Check if vault already exists
+    const existing = await prisma.userZkVault.findUnique({ where: { userId } });
+    if (existing) return reply.status(409).send({ success: false, error: "Vault already configured. Use /api/vault/zk/change-pin to change." });
+
+    const salt = generateSalt();
+    const pinHashValue = hashPin(pin, salt);
+
+    await prisma.userZkVault.create({
+      data: {
+        userId,
+        salt: salt.toString("hex"),
+        pinHash: pinHashValue,
+      },
+    });
+
+    return reply.send({ success: true, message: "Vault configured" });
+  });
+
+  // POST /api/vault/zk/verify — Verify PIN
+  app.post("/api/vault/zk/verify", async (request, reply) => {
+    const { userId, pin } = request.body as { userId: string; pin: string };
+    if (!userId || !pin) return reply.status(400).send({ success: false, error: "userId and pin are required" });
+
+    const vault = await prisma.userZkVault.findUnique({ where: { userId } });
+    if (!vault) return reply.status(404).send({ success: false, error: "Vault not configured" });
+
+    const salt = Buffer.from(vault.salt, "hex");
+    const valid = hashPin(pin, salt) === vault.pinHash;
+    return reply.send({ success: true, valid });
+  });
+
+  // POST /api/vault/zk/store — Save encrypted item
+  app.post("/api/vault/zk/store", async (request, reply) => {
+    const { userId, pin, itemType, label, data } = request.body as {
+      userId: string;
+      pin: string;
+      itemType: string;
+      label: string;
+      data: Record<string, unknown>;
+    };
+    if (!userId || !pin || !itemType || !data) {
+      return reply.status(400).send({ success: false, error: "userId, pin, itemType, and data are required" });
+    }
+
+    // Verify PIN
+    const vault = await prisma.userZkVault.findUnique({ where: { userId } });
+    if (!vault) return reply.status(404).send({ success: false, error: "Vault not configured. Call /api/vault/zk/setup first." });
+
+    const salt = Buffer.from(vault.salt, "hex");
+    if (hashPin(pin, salt) !== vault.pinHash) {
+      return reply.status(403).send({ success: false, error: "Invalid PIN" });
+    }
+
+    // Derive key and encrypt
+    const key = deriveKey(pin, salt);
+    const plaintext = JSON.stringify(data);
+    const { encrypted, iv, tag } = zkEncrypt(plaintext, key);
+
+    // Auto-generate label for cards
+    const finalLabel = itemType === "card" && !label && (data as any).number
+      ? maskCard((data as any).number as string)
+      : (label || itemType);
+
+    const item = await prisma.secureItem.create({
+      data: {
+        userId,
+        itemType,
+        label: finalLabel,
+        encryptedData: encrypted,
+        iv,
+        authTag: tag,
+      },
+    });
+
+    return reply.send({ success: true, itemId: item.id, label: finalLabel });
+  });
+
+  // POST /api/vault/zk/retrieve — Retrieve and decrypt item
+  app.post("/api/vault/zk/retrieve", async (request, reply) => {
+    const { userId, pin, itemId } = request.body as { userId: string; pin: string; itemId: string };
+    if (!userId || !pin || !itemId) {
+      return reply.status(400).send({ success: false, error: "userId, pin, and itemId are required" });
+    }
+
+    // Verify PIN
+    const vault = await prisma.userZkVault.findUnique({ where: { userId } });
+    if (!vault) return reply.status(404).send({ success: false, error: "Vault not configured" });
+
+    const salt = Buffer.from(vault.salt, "hex");
+    if (hashPin(pin, salt) !== vault.pinHash) {
+      return reply.status(403).send({ success: false, error: "Invalid PIN" });
+    }
+
+    // Fetch item
+    const item = await prisma.secureItem.findFirst({ where: { id: itemId, userId } });
+    if (!item) return reply.status(404).send({ success: false, error: "Item not found" });
+
+    // Decrypt
+    try {
+      const key = deriveKey(pin, salt);
+      const plaintext = zkDecrypt(item.encryptedData, key, item.iv, item.authTag);
+      const data = JSON.parse(plaintext);
+      return reply.send({ success: true, data, itemType: item.itemType, label: item.label });
+    } catch {
+      return reply.status(403).send({ success: false, error: "Decryption failed — invalid PIN or corrupted data" });
+    }
+  });
+
+  // GET /api/vault/zk/items/:userId — List items (no sensitive data)
+  app.get("/api/vault/zk/items/:userId", async (request, reply) => {
+    const { userId } = request.params as { userId: string };
+
+    const items = await prisma.secureItem.findMany({
+      where: { userId },
+      select: { id: true, itemType: true, label: true, createdAt: true },
+      orderBy: { createdAt: "desc" },
+    });
+
+    const hasVault = !!(await prisma.userZkVault.findUnique({ where: { userId } }));
+
+    return reply.send({ success: true, hasVault, items });
+  });
+
+  // DELETE /api/vault/zk/items/:itemId — Delete item
+  app.delete("/api/vault/zk/items/:itemId", async (request, reply) => {
+    const { itemId } = request.params as { itemId: string };
+    const { userId } = request.query as { userId: string };
+
+    if (!userId) return reply.status(400).send({ success: false, error: "userId query param required" });
+
+    const item = await prisma.secureItem.findFirst({ where: { id: itemId, userId } });
+    if (!item) return reply.status(404).send({ success: false, error: "Item not found" });
+
+    await prisma.secureItem.delete({ where: { id: itemId } });
+    return reply.send({ success: true, message: "Item deleted" });
+  });
+
+  // POST /api/vault/zk/change-pin — Change PIN (re-encrypt all items)
+  app.post("/api/vault/zk/change-pin", async (request, reply) => {
+    const { userId, currentPin, newPin } = request.body as {
+      userId: string;
+      currentPin: string;
+      newPin: string;
+    };
+    if (!userId || !currentPin || !newPin) {
+      return reply.status(400).send({ success: false, error: "userId, currentPin, and newPin are required" });
+    }
+
+    const check = validatePin(newPin);
+    if (!check.valid) return reply.status(400).send({ success: false, error: check.error });
+
+    // Verify current PIN
+    const vault = await prisma.userZkVault.findUnique({ where: { userId } });
+    if (!vault) return reply.status(404).send({ success: false, error: "Vault not configured" });
+
+    const oldSalt = Buffer.from(vault.salt, "hex");
+    if (hashPin(currentPin, oldSalt) !== vault.pinHash) {
+      return reply.status(403).send({ success: false, error: "Invalid current PIN" });
+    }
+
+    // Decrypt all items with old key, re-encrypt with new key
+    const items = await prisma.secureItem.findMany({ where: { userId } });
+    const oldKey = deriveKey(currentPin, oldSalt);
+
+    const newSalt = generateSalt();
+    const newKey = deriveKey(newPin, newSalt);
+    const newPinHash = hashPin(newPin, newSalt);
+
+    // Re-encrypt each item in a transaction
+    await prisma.$transaction(async (tx) => {
+      for (const item of items) {
+        const plaintext = zkDecrypt(item.encryptedData, oldKey, item.iv, item.authTag);
+        const { encrypted, iv, tag } = zkEncrypt(plaintext, newKey);
+        await tx.secureItem.update({
+          where: { id: item.id },
+          data: { encryptedData: encrypted, iv, authTag: tag },
+        });
+      }
+
+      await tx.userZkVault.update({
+        where: { userId },
+        data: { salt: newSalt.toString("hex"), pinHash: newPinHash },
+      });
+    });
+
+    return reply.send({ success: true, message: `PIN changed. ${items.length} items re-encrypted.` });
   });
 }

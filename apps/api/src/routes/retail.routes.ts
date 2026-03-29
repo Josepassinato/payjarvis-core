@@ -32,8 +32,145 @@ import {
 } from "../services/retail/retail-service.js";
 import * as cvs from "../services/pharmacy/cvs-client.js";
 import * as walgreens from "../services/pharmacy/walgreens-client.js";
+import { unifiedProductSearch } from "../services/search/unified-search.service.js";
+import { searchFlightsSerpApi, searchHotelsSerpApi, searchEventsSerpApi } from "../services/search/serpapi-travel.service.js";
 
 export async function retailRoutes(app: FastifyInstance) {
+  // ── SerpAPI Flights ─────────────────────────────────
+  app.post("/api/serpapi/flights", async (request, reply) => {
+    const body = request.body as { from?: string; to?: string; date?: string; returnDate?: string; passengers?: number };
+    if (!body?.from || !body?.to || !body?.date) {
+      return reply.status(400).send({ success: false, error: "from, to, and date are required" });
+    }
+    try {
+      const result = await searchFlightsSerpApi({ from: body.from!, to: body.to!, date: body.date!, returnDate: body.returnDate, passengers: body.passengers });
+      return reply.send({ success: true, data: result });
+    } catch (err) {
+      return reply.status(500).send({ success: false, error: (err as Error).message });
+    }
+  });
+
+  // ── SerpAPI Hotels ──────────────────────────────────
+  app.post("/api/serpapi/hotels", async (request, reply) => {
+    const body = request.body as { location?: string; checkIn?: string; checkOut?: string; guests?: number };
+    if (!body?.location || !body?.checkIn || !body?.checkOut) {
+      return reply.status(400).send({ success: false, error: "location, checkIn, and checkOut are required" });
+    }
+    try {
+      const result = await searchHotelsSerpApi({ location: body.location!, checkIn: body.checkIn!, checkOut: body.checkOut!, guests: body.guests });
+      return reply.send({ success: true, data: result });
+    } catch (err) {
+      return reply.status(500).send({ success: false, error: (err as Error).message });
+    }
+  });
+
+  // ── SerpAPI Events ──────────────────────────────────
+  app.post("/api/serpapi/events", async (request, reply) => {
+    const body = request.body as { query?: string; location?: string };
+    if (!body?.query) {
+      return reply.status(400).send({ success: false, error: "query is required" });
+    }
+    try {
+      const result = await searchEventsSerpApi({ query: body.query!, location: body.location });
+      return reply.send({ success: true, data: result });
+    } catch (err) {
+      return reply.status(500).send({ success: false, error: (err as Error).message });
+    }
+  });
+
+  // ── Unified Product Search (fallback chain) ───────────
+  app.post("/api/retail/unified-search", async (request, reply) => {
+    const body = request.body as {
+      query?: string;
+      store?: string;
+      country?: string;
+      zipCode?: string;
+      maxResults?: number;
+      userId?: string;
+    };
+
+    if (!body?.query) {
+      return reply.status(400).send({ success: false, error: "query is required" });
+    }
+
+    try {
+      const result = await unifiedProductSearch({
+        query: body.query,
+        store: body.store,
+        country: body.country || "US",
+        zipCode: body.zipCode,
+        maxResults: body.maxResults || 5,
+        userId: body.userId,
+      });
+      return reply.send({ success: true, data: result });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Search failed";
+      request.log.error(err, "[UNIFIED-SEARCH] error");
+      return reply.status(500).send({ success: false, error: message });
+    }
+  });
+
+  // ── Price Alerts: Create ─────────────────────────────
+  app.post("/api/retail/price-alerts", async (request, reply) => {
+    const body = request.body as {
+      userId?: string;
+      query?: string;
+      store?: string;
+      targetPrice?: number;
+      currency?: string;
+      country?: string;
+    };
+
+    if (!body?.userId || !body?.query || !body?.targetPrice) {
+      return reply.status(400).send({ success: false, error: "userId, query, and targetPrice are required" });
+    }
+
+    try {
+      const { prisma } = await import("@payjarvis/database");
+      const alert = await prisma.priceAlert.create({
+        data: {
+          userId: body.userId,
+          query: body.query,
+          store: body.store || null,
+          targetPrice: body.targetPrice,
+          currency: body.currency || "USD",
+          country: body.country || "US",
+        },
+      });
+      return reply.send({ success: true, data: alert });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to create price alert";
+      return reply.status(500).send({ success: false, error: message });
+    }
+  });
+
+  // ── Price Alerts: List ──────────────────────────────
+  app.get("/api/retail/price-alerts/:userId", async (request, reply) => {
+    const { userId } = request.params as { userId: string };
+    try {
+      const { prisma } = await import("@payjarvis/database");
+      const alerts = await prisma.priceAlert.findMany({
+        where: { userId, active: true },
+        orderBy: { createdAt: "desc" },
+      });
+      return reply.send({ success: true, data: alerts });
+    } catch (err) {
+      return reply.status(500).send({ success: false, error: "Failed to list alerts" });
+    }
+  });
+
+  // ── Price Alerts: Delete ────────────────────────────
+  app.delete("/api/retail/price-alerts/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    try {
+      const { prisma } = await import("@payjarvis/database");
+      await prisma.priceAlert.update({ where: { id }, data: { active: false } });
+      return reply.send({ success: true });
+    } catch (err) {
+      return reply.status(500).send({ success: false, error: "Failed to delete alert" });
+    }
+  });
+
   // ── Search products across selected platforms ─────────
   app.post("/api/retail/search", async (request, reply) => {
     const body = request.body as {

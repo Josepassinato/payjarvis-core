@@ -19,6 +19,7 @@ export interface ActionRequest {
   merchantId?: string;
   category?: string;
   transactionId?: string;
+  agentId?: string;
 }
 
 export interface ActionResult {
