@@ -1,5 +1,151 @@
 # HISTORICO.md — PayJarvis
 
+## 2026-03-28 — Indicador de Processamento + Treinamento LLM
+
+### Implementado:
+- **Indicador ⏳ no WhatsApp** — Envia emoji ⏳ imediatamente quando recebe mensagem (texto, áudio, imagem). Usuário sabe que o bot está processando.
+- **Typing indicator no Telegram** (custom bots) — `sendChatAction("typing")` antes de chamar Gemini. Aparece "Bot está digitando..." no topo.
+- **OpenClaw Telegram** — Já tinha typing em todos os handlers (sem alteração necessária).
+- **System prompt dedicado para Grok** — Antes usava o mesmo prompt do Gemini (com 47 tools que não pode executar). Agora tem prompt próprio que sabe todas as capacidades, oferece-as naturalmente, mas NUNCA finge executar.
+- **Router Grok/Gemini melhorado** — Adicionados 10+ novos padrões: "mais barato", "perto de mim", "nearby", "news", "notícias", "price alert", "onde tá", "best deal", etc.
+- **`chatWithGrok()` recebe userContext** — Permite construir prompt personalizado com nome, idioma, perfil.
+
+### Arquivos alterados:
+- `apps/api/src/routes/whatsapp-webhook.ts` — sendProcessingIndicator()
+- `apps/api/src/routes/onboarding.routes.ts` — sendChatAction("typing")
+- `/root/openclaw/grok-client.js` — buildGrokSystemPrompt(), router expandido
+- `/root/openclaw/gemini.js` — chatWithGrok() agora passa userFacts e options
+
+### Estado: Produção, deploy feito
+### Integracoes ativas: WhatsApp (Twilio), Telegram (@Jarvis12Brain_bot), Grok (xAI), Gemini 2.5 Flash
+
+## 2026-03-27 — Modelo Híbrido de Compras (Stripe + Skyfire)
+
+### Problema resolvido
+Skyfire NÃO suporta sub-wallets. Todos os usuários usavam a mesma wallet ($30.30).
+
+### Solução: Charge-on-Purchase (cobrar no ato)
+1. Usuário cadastra cartão no Stripe (via /wallet/setup)
+2. Quando compra: Stripe cobra cartão do usuário ($49.99 + 5% = $52.49)
+3. Skyfire master wallet paga a loja via token KYA+PAY ($49.99)
+4. PayJarvis fica com $2.50 de taxa (5%)
+5. Se Skyfire falhar: Stripe refund automático
+
+### Novo service: purchase-orchestrator.service.ts
+- `executePurchase()` — orquestra Stripe charge → Skyfire token → record
+- `getUserWalletStatus()` — verifica cartão Stripe do usuário
+- Spending limits, daily/monthly tracking
+- Refund automático se Skyfire falhar
+
+### Página /wallet/setup atualizada
+- Mostra cartão Stripe do usuário (não balance Skyfire)
+- Formulário Stripe Elements para adicionar cartão
+- Seção "Como funciona" com 4 passos
+- Gastos hoje/mês + limites
+
+### Endpoints atualizados
+- `GET /api/wallet/status?userId=xxx` — status do cartão + gastos
+- `POST /api/wallet/setup-card` — cria Stripe SetupIntent
+- `GET /api/wallet/balance` — health check do sistema (master wallet)
+
+### White-label completo
+- 0 menções a "Skyfire" em user-facing code
+- Tool handlers reescritos para usar purchase-orchestrator
+- System prompt: "carteira PayJarvis", nunca "Skyfire"
+
+### DB: colunas adicionadas
+- `purchase_transactions.stripe_payment_intent` (TEXT)
+- `purchase_transactions.service_fee` (DOUBLE PRECISION)
+
+### Smoke test: 17/17 passed
+
+---
+
+## 2026-03-27 — Skyfire Wallet White-Label + Integração Completa
+
+### Skyfire API Conectada
+- API Key `05cd2d0b-...` configurada em `.env` e `.env.production`
+- Wallet balance: **$30.295** disponível
+- Token KYA gerado com sucesso
+- Path de balance corrigido: `/api/v1/agents/balance` (era `/api/v1/agents/wallet-balance`)
+- Fix ESM: SKYFIRE_API_KEY agora lido lazily (era const top-level, avaliado antes do .env loader)
+
+### Página White-Label: /wallet/setup
+- **Criada:** `apps/web/src/app/(dashboard)/wallet/setup/page.tsx`
+- Design: dark gradient card, cores PayJarvis, 🦀
+- Features: saldo atual, gastos hoje/mês, limites, compras recentes, botão "Adicionar Fundos"
+- Segurança: texto sobre encriptação bancária
+- Sidebar: link "Carteira" adicionado ao nav core (EN/PT/ES)
+
+### API Endpoints
+- `GET /api/wallet/balance` → saldo Skyfire (white-label, sem mencionar Skyfire)
+- `POST /api/wallet/fund-url` → URL de funding (redirect pro app.skyfire.xyz)
+
+### White-Label Rules
+- System prompt do WhatsApp: removidas menções a "Skyfire", substituídas por "carteira PayJarvis"
+- Regra adicionada: "NEVER mention Skyfire to the user"
+- Link de funding: `payjarvis.com/wallet/setup` (nunca `app.skyfire.xyz` direto)
+
+### Testes
+- `curl /api/wallet/balance` → `{"balance": 30.295, "status": "funded"}` ✅
+- `curl /api/wallet/fund-url` → URL gerada ✅
+- `/wallet/setup` → 307 redirect to sign-in (correto) ✅
+- Smoke test: 17/17 passed ✅
+
+---
+
+## 2026-03-27 — AUDIT: Status das 4 Prioridades + Fix de Dados
+
+### Audit das 4 prioridades solicitadas:
+
+**P1 — Inner Circle (Jessica Passinato):** ✅ JÁ IMPLEMENTADO
+- Service: `inner-circle.service.ts` (detectNeed, generateIntroduction, provideFreeConsultation)
+- Routes: `inner-circle.ts` (detect, introduce, consult, declined, referral, stats)
+- Admin CRUD: `admin-inner-circle.ts` (list, create, update, delete, metrics, interactions)
+- Gemini tool: `inner_circle_consult` em `gemini.js`
+- OpenClaw handler: case 'inner_circle_consult' em `index.js`
+- System prompt: regras Inner Circle no `gemini.js` (linhas 240-246)
+- Jessica cadastrada no banco: `inner_circle_specialists` (slug: jessica-passinato, 31 keywords, knowledge prompt completo)
+- Guardrails: cooldown 24h, max 2/dia, 7 dias se recusou, anti mid-task
+
+**P2 — Morning Briefing + Notícias (cron):** ✅ JÁ IMPLEMENTADO
+- Cron: `engagement-cron.ts` com node-cron (5 schedules: 8AM briefing, 2PM reeng, dom weekly, ter/qui tips, birthday)
+- Service: `proactive-messages.service.ts` (489 linhas, weather via Gemini, news via SerpAPI, dólar, reminders)
+- Preferences: `user_notification_preferences` (opt-in/out por tipo)
+- Importado no `server.ts` (linha 88)
+
+**P3 — Voz Real-Time no PWA:** ✅ JÁ IMPLEMENTADO (com Gemini Live, não Grok)
+- Backend: `realtime-session.service.ts` (Gemini Live API WebSocket, billing/min)
+- Frontend: `VoiceChat.tsx` (PCM 16kHz, AudioContext, VAD server-side)
+- Routes: POST `/api/voice/realtime-session`, `/tick`, `/end`
+- Modelo: `gemini-2.5-flash-native-audio-preview-12-2025`
+
+**P4 — Corrigir 6 com ressalvas:**
+
+| Item | Status | Detalhe |
+|------|--------|---------|
+| Skyfire | ⚠️ | SKYFIRE_API_KEY vazia. Sem wallet fundada. 0 purchase_transactions |
+| Amazon | ⚠️ | 2 vaults (isValid=false). Sessões expiradas. 3 store_contexts existem |
+| Criar conta | ⚠️ | Butler Protocol funciona, Stagehand form-fill parcial |
+| Notícias push | ✅ | Coberto pelo cron de engagement (P2) |
+| Briefing push | ✅ | Coberto pelo cron de engagement (P2) |
+| Voz PWA | ✅ | Coberto pela implementação Gemini Live (P3) |
+
+### Fix de dados aplicado:
+- José Passinato (`cmmwp38tf000112xsd260qo6h`): notificationChannel corrigido "whatsapp" → "telegram"
+- Arilson (`cmmwi1j4v0000wd179lytgcln`): notificationChannel corrigido "none" → "telegram"
+- Usuário duplicado (`cmmnz1os700002o9sbsjmea0f`): removido (sem telegramChatId, duplicata do José)
+
+### Razão do Morning Briefing nunca ter disparado:
+Os 2 usuários ativos tinham `notificationChannel` incorreto. Briefing precisa de `telegramChatId` preenchido para enviar. Corrigido — próximo briefing às 8AM EST (12:00 UTC).
+
+### Integrações ativas:
+- WhatsApp (Twilio), Telegram (Grammy), Stripe, Clerk, Sentinel, Google Places ✅
+- SerpAPI, Apify, BrowserBase, ElevenLabs, Gemini ✅
+- Skyfire ❌ (sem API key)
+
+---
+
 ## 2026-03-21 — FIX: Location Awareness + Immediate Feedback (2 UX bugs)
 
 ### BUG 1: Bot pedia CEP/localização mesmo tendo os dados salvos
@@ -2582,3 +2728,46 @@ Merge de duas sandboxes independentes em um deploy unificado:
 ### Estado: Produção, 4+ usuários beta ativos
 ### Smoke test: 16/16 passed, 0 failed, 2 warnings não-críticos
 ### Próximos: Contas Amadeus/Yelp/Ticketmaster, React Native app, billing ativo
+
+## 2026-03-24 — Unified Product Search + Price Alerts
+
+### Implementado:
+- **Unified Search Service** (unified-search.service.ts) — ponto único de entrada para TODAS buscas de produto
+- **Busca em PARALELO** — todas as fontes rodam simultaneamente via Promise.allSettled:
+  1. SerpAPI Google Shopping (quando configurado) — 6s timeout
+  2. Mercado Livre API (Brasil) — 6s timeout
+  3. Apify Amazon Scraper — 15s timeout
+  4. Google Search Grounding (Gemini) — 22s timeout
+  5. Browser Agent — 20s timeout, último recurso
+- **Redis cache** — TTL 1 hora, segunda busca idêntica é instantânea
+- **Merge + dedup** — resultados de múltiplas fontes combinados, ordenados por preço
+- **NUNCA retorna vazio** — sempre tem pelo menos link do Google Shopping
+- **Price Alerts** — nova tabela `price_alerts`, 3 endpoints REST, cron 6h
+  - `POST /api/retail/price-alerts` — criar alerta
+  - `GET /api/retail/price-alerts/:userId` — listar alertas
+  - `DELETE /api/retail/price-alerts/:id` — desativar
+  - Cron verifica a cada 6h e notifica via WhatsApp/Telegram
+- **Tools `set_price_alert` e `get_price_alerts`** — disponíveis no Gemini (WhatsApp + Telegram)
+- **Tool `search_products` atualizada** — aceita `store` param, usa unified search
+- **Tool `amazon_search` atualizada** — usa unified search como backend
+- **System prompts atualizados** — "NEVER use browse for products", multi-store support
+- **Prisma migration**: `20260324_add_price_alerts`
+- **Rota `/api/retail/unified-search`** — endpoint REST para o unified search
+
+### Testes:
+- Smoke test: 17/17 passed
+- Busca "Ray-Ban Meta smart glasses" na Best Buy: retornou produtos reais com preços via Grounding
+- Cache Redis: segunda busca idêntica retorna instantaneamente
+- Price alerts: CRUD completo funcionando
+- Busca paralela: todas as fontes rodam simultaneamente
+
+### Próximo passo recomendado:
+- Configurar SerpAPI key ($50/mo) para eliminar dependência do Grounding (mais rápido e confiável)
+- SERPAPI_KEY no .env.production ativa automaticamente como fonte prioritária
+
+### Integracoes ativas:
+- WhatsApp: +17547145921 (Twilio)
+- Telegram: @Jarvis12Brain_bot
+- Stripe: ativo
+- Price Alerts Cron: ativo (6h)
+- Redis Cache: ativo (1h TTL)
