@@ -28,35 +28,74 @@ function getClient() {
 }
 
 /**
+ * Split a long message into chunks that fit Twilio's 1600-char WhatsApp limit.
+ * Splits on paragraph breaks first, then sentence boundaries, then hard-cuts.
+ */
+function splitMessage(text: string, maxLen = 1400): string[] {
+  if (text.length <= maxLen) return [text];
+
+  const chunks: string[] = [];
+  let remaining = text;
+
+  while (remaining.length > maxLen) {
+    // Try to split at double newline (paragraph)
+    let splitIdx = remaining.lastIndexOf("\n\n", maxLen);
+    // Try single newline
+    if (splitIdx < maxLen * 0.3) splitIdx = remaining.lastIndexOf("\n", maxLen);
+    // Try sentence boundary
+    if (splitIdx < maxLen * 0.3) {
+      const sentenceMatch = remaining.substring(0, maxLen).match(/.*[.!?]\s/s);
+      splitIdx = sentenceMatch ? sentenceMatch[0].length : -1;
+    }
+    // Hard cut as last resort
+    if (splitIdx < maxLen * 0.3) splitIdx = maxLen;
+
+    chunks.push(remaining.substring(0, splitIdx).trimEnd());
+    remaining = remaining.substring(splitIdx).trimStart();
+  }
+  if (remaining) chunks.push(remaining);
+  return chunks;
+}
+
+/**
  * Send a free-form WhatsApp message via Twilio REST API.
  * Only works within the 24h session window (user must have messaged first).
+ * Automatically splits messages that exceed Twilio's 1600-char limit.
  */
-export async function sendWhatsAppMessage(to: string, body: string): Promise<string> {
+export async function sendWhatsAppMessage(to: string, body: string, replyFrom?: string): Promise<string> {
   const client = getClient();
 
   // Ensure whatsapp: prefix
   const toNumber = to.startsWith("whatsapp:") ? to : `whatsapp:${to}`;
+  const sender = replyFrom || FROM_NUMBER;
 
-  const message = await client.messages.create({
-    from: FROM_NUMBER,
-    to: toNumber,
-    body,
-  });
+  const chunks = splitMessage(body);
+  let lastSid = "";
 
-  console.log(`[Twilio WA] Sent message ${message.sid} to ${toNumber}`);
-  return message.sid;
+  for (const chunk of chunks) {
+    const message = await client.messages.create({
+      from: sender,
+      to: toNumber,
+      body: chunk,
+    });
+    lastSid = message.sid;
+    console.log(`[Twilio WA] Sent message ${message.sid} to ${toNumber}${chunks.length > 1 ? ` (part ${chunks.indexOf(chunk) + 1}/${chunks.length})` : ""}`);
+  }
+
+  return lastSid;
 }
 
 /**
  * Send a WhatsApp audio message via Twilio REST API.
  * Uses mediaUrl to send an OGG audio file hosted at a public URL.
  */
-export async function sendWhatsAppAudio(to: string, audioUrl: string): Promise<string> {
+export async function sendWhatsAppAudio(to: string, audioUrl: string, replyFrom?: string): Promise<string> {
   const client = getClient();
   const toNumber = to.startsWith("whatsapp:") ? to : `whatsapp:${to}`;
+  const sender = replyFrom || FROM_NUMBER;
 
   const message = await client.messages.create({
-    from: FROM_NUMBER,
+    from: sender,
     to: toNumber,
     mediaUrl: [audioUrl],
     body: "",
@@ -64,6 +103,53 @@ export async function sendWhatsAppAudio(to: string, audioUrl: string): Promise<s
 
   console.log(`[Twilio WA] Sent audio ${message.sid} to ${toNumber}`);
   return message.sid;
+}
+
+/**
+ * Send a WhatsApp document (PDF, etc.) via Twilio REST API.
+ * Uses mediaUrl to send a document hosted at a public URL.
+ */
+export async function sendWhatsAppDocument(to: string, documentUrl: string, caption?: string, replyFrom?: string): Promise<string> {
+  const client = getClient();
+  const toNumber = to.startsWith("whatsapp:") ? to : `whatsapp:${to}`;
+  const sender = replyFrom || FROM_NUMBER;
+
+  const message = await client.messages.create({
+    from: sender,
+    to: toNumber,
+    mediaUrl: [documentUrl],
+    body: caption || "",
+  });
+
+  console.log(`[Twilio WA] Sent document ${message.sid} to ${toNumber}`);
+  return message.sid;
+}
+
+/**
+ * Send a WhatsApp reaction emoji on a specific message.
+ * Uses Twilio's reaction API (persistentAction).
+ * Non-blocking — fire-and-forget, errors are swallowed.
+ */
+export async function sendWhatsAppReaction(
+  to: string,
+  messageSid: string,
+  emoji: string,
+  replyFrom?: string,
+): Promise<void> {
+  try {
+    const client = getClient();
+    const toNumber = to.startsWith("whatsapp:") ? to : `whatsapp:${to}`;
+    const sender = replyFrom || FROM_NUMBER;
+
+    await client.messages.create({
+      from: sender,
+      to: toNumber,
+      body: emoji,
+      persistentAction: [`react/${messageSid}`],
+    });
+  } catch {
+    // Non-blocking — swallow errors silently
+  }
 }
 
 /**

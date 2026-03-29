@@ -14,12 +14,12 @@
  */
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import { processWhatsAppMessage } from "../services/jarvis-whatsapp.service.js";
+import { processWhatsAppMessage, processWhatsAppImageMessage } from "../services/jarvis-whatsapp.service.js";
 import twilio from "twilio";
 const { validateRequest } = twilio;
-import { sendWhatsAppMessage, sendWhatsAppAudio, getTwilioCredentials } from "../services/twilio-whatsapp.service.js";
+import { sendWhatsAppMessage, sendWhatsAppAudio, sendWhatsAppDocument, sendWhatsAppReaction, getTwilioCredentials } from "../services/twilio-whatsapp.service.js";
 import { transcribeAudio, textToSpeech, cleanupFiles } from "../services/audio/index.js";
-import { downloadAudio, convertToWav, cleanupFile } from "../services/audio/index.js";
+import { downloadAudio, downloadAudioAsBase64, convertToWav, cleanupFile } from "../services/audio/index.js";
 import { readFileSync, existsSync } from "fs";
 
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN || "";
@@ -29,7 +29,10 @@ const BASE_URL = process.env.PAYJARVIS_PUBLIC_URL || "https://www.payjarvis.com"
 // ─── Temp audio file store (in-memory, short-lived) ───
 const audioStore = new Map<string, { path: string; createdAt: number }>();
 
-// Cleanup expired audio files every 60s
+// ─── Temp document file store (in-memory, 5 min TTL) ───
+const docStore = new Map<string, { path: string; mimeType: string; filename: string; createdAt: number }>();
+
+// Cleanup expired audio + doc files every 60s
 setInterval(() => {
   const now = Date.now();
   for (const [id, entry] of audioStore) {
@@ -38,7 +41,16 @@ setInterval(() => {
       audioStore.delete(id);
     }
   }
+  for (const [id, entry] of docStore) {
+    if (now - entry.createdAt > 300_000) { // 5 min TTL
+      cleanupFile(entry.path);
+      docStore.delete(id);
+    }
+  }
 }, 60_000);
+
+// Export docStore for use by other services
+export { docStore };
 
 /**
  * Detect language from WhatsApp phone number (heuristic).
@@ -49,6 +61,50 @@ function detectLangFromPhone(from: string): string {
   if (from.includes("+33")) return "fr";
   return "en";
 }
+
+// ─── Greeting detection for instant cached responses ───
+const GREETING_PATTERNS: Record<string, RegExp> = {
+  pt: /^(oi|ol[áa]|bom dia|boa tarde|boa noite|e a[íi]|fala|salve|hey|opa)[\s!?.]*$/i,
+  en: /^(hi|hello|hey|good morning|good afternoon|good evening|yo|sup|what'?s up)[\s!?.]*$/i,
+  es: /^(hola|buenos d[íi]as|buenas tardes|buenas noches|hey|qu[ée] tal)[\s!?.]*$/i,
+};
+
+const GREETING_RESPONSES: Record<string, string> = {
+  pt: "Olá! Sou o Jarvis, seu assistente pessoal. Como posso te ajudar hoje?",
+  en: "Hello! I'm Jarvis, your personal assistant. How can I help you today?",
+  es: "¡Hola! Soy Jarvis, tu asistente personal. ¿En qué puedo ayudarte hoy?",
+};
+
+// Pre-generated greeting audio cache (populated lazily on first use)
+const greetingAudioCache = new Map<string, string>(); // lang → oggPath
+let greetingCacheReady = false;
+
+async function ensureGreetingCache() {
+  if (greetingCacheReady) return;
+  greetingCacheReady = true; // Set immediately to prevent concurrent init
+  for (const [lang, text] of Object.entries(GREETING_RESPONSES)) {
+    try {
+      const oggPath = await textToSpeech(text, lang);
+      if (oggPath) greetingAudioCache.set(lang, oggPath);
+    } catch { /* non-blocking — will just skip cache for this lang */ }
+  }
+  console.log(`[WhatsApp Audio] Greeting cache ready: ${greetingAudioCache.size} languages`);
+}
+
+function isGreeting(text: string, lang: string): boolean {
+  const pattern = GREETING_PATTERNS[lang] || GREETING_PATTERNS.en;
+  return pattern.test(text.trim());
+}
+
+// ─── Content-type to MIME type map for Gemini STT ───
+const AUDIO_MIME_MAP: Record<string, string> = {
+  "audio/ogg": "audio/ogg",
+  "audio/opus": "audio/ogg",
+  "audio/mpeg": "audio/mpeg",
+  "audio/mp4": "audio/mp4",
+  "audio/amr": "audio/amr",
+  "audio/aac": "audio/aac",
+};
 
 export async function whatsappWebhookRoutes(app: FastifyInstance) {
   app.register(async function whatsappPlugin(fastify) {
@@ -70,6 +126,23 @@ export async function whatsappWebhookRoutes(app: FastifyInstance) {
       }
     );
 
+    // GET /api/docs/temp/:id — serve temporary document files for Twilio mediaUrl
+    fastify.get("/api/docs/temp/:id", async (request: FastifyRequest, reply: FastifyReply) => {
+      const { id } = request.params as { id: string };
+      const entry = docStore.get(id);
+
+      if (!entry || !existsSync(entry.path)) {
+        return reply.status(404).send({ error: "Document not found or expired" });
+      }
+
+      const buffer = readFileSync(entry.path);
+      return reply
+        .header("Content-Type", entry.mimeType)
+        .header("Content-Disposition", `inline; filename="${entry.filename}"`)
+        .header("Content-Length", buffer.length)
+        .send(buffer);
+    });
+
     // GET /api/audio/temp/:id — serve temporary audio files for Twilio mediaUrl
     fastify.get("/api/audio/temp/:id", async (request: FastifyRequest, reply: FastifyReply) => {
       const { id } = request.params as { id: string };
@@ -83,10 +156,41 @@ export async function whatsappWebhookRoutes(app: FastifyInstance) {
       return reply.header("Content-Type", "audio/ogg").header("Content-Length", buffer.length).send(buffer);
     });
 
+    // POST /api/whatsapp/send — internal endpoint for sending WhatsApp messages (reminders, proactive)
+    fastify.post("/api/whatsapp/send", async (request: FastifyRequest, reply: FastifyReply) => {
+      const apiKey = request.headers["x-bot-api-key"] as string;
+      const internalSecret = request.headers["x-internal-secret"] as string;
+      const validApiKey = process.env.BOT_API_KEY || process.env.PAYJARVIS_API_KEY || "";
+      const validSecret = process.env.INTERNAL_SECRET || "";
+
+      if (apiKey !== validApiKey && internalSecret !== validSecret) {
+        return reply.status(401).send({ error: "unauthorized" });
+      }
+
+      const { to, body: messageBody } = request.body as { to: string; body: string };
+      if (!to || !messageBody) {
+        return reply.status(400).send({ error: "missing 'to' and 'body'" });
+      }
+
+      try {
+        const sid = await sendWhatsAppMessage(to, messageBody);
+        return reply.send({ success: true, sid });
+      } catch (err) {
+        console.error("[WA SEND] Error:", (err as Error).message);
+        return reply.status(500).send({ error: (err as Error).message });
+      }
+    });
+
     // POST /webhook/whatsapp — receives messages from Twilio
     fastify.post("/webhook/whatsapp", async (request: FastifyRequest, reply: FastifyReply) => {
+      // Rate limit: 30 messages per minute per phone number
+      const { webhookRateLimiter } = await import("../middleware/rate-limiter.js");
+      await webhookRateLimiter(request, reply);
+      if (reply.sent) return;
+
       const body = request.body as Record<string, string>;
       const from = body.From || "";       // e.g. "whatsapp:+19546432431"
+      const botNumber = body.To || "";    // e.g. "whatsapp:+17547145921" — which Jarvis number received
       const text = (body.Body || "").trim();
       const profileName = body.ProfileName || "";
       const messageSid = body.MessageSid || "";
@@ -104,24 +208,94 @@ export async function whatsappWebhookRoutes(app: FastifyInstance) {
       }
 
       const isAudio = numMedia > 0 && mediaContentType0.startsWith("audio/");
+      const isImage = numMedia > 0 && mediaContentType0.startsWith("image/");
+      const latitude = body.Latitude || "";
+      const longitude = body.Longitude || "";
+      const isLocation = !!(latitude && longitude);
+
+      // Check for a second media item (e.g. photo + audio in same message)
+      const mediaUrl1 = body.MediaUrl1 || "";
+      const mediaContentType1 = body.MediaContentType1 || "";
 
       request.log.info(
-        { from, profileName, messageSid, text: text.substring(0, 80), numMedia, isAudio, mediaContentType0 },
+        { from, profileName, messageSid, text: text.substring(0, 80), numMedia, isAudio, isImage, isLocation, mediaContentType0 },
         "[WhatsApp] Incoming message"
       );
 
       // Respond 200 immediately to Twilio (prevents 15s timeout retry)
       reply.status(200).send({ status: "processing" });
 
+      // ─── Location message handling ───
+      if (isLocation) {
+        try {
+          const { saveWhatsAppLocation } = await import("../services/jarvis-whatsapp.service.js");
+          await saveWhatsAppLocation(from, parseFloat(latitude), parseFloat(longitude));
+          const lang = detectLangFromPhone(from);
+          const msgs: Record<string, string> = {
+            pt: "📍 Localização salva! Agora posso buscar restaurantes, hotéis e eventos perto de você.",
+            es: "📍 ¡Ubicación guardada! Ahora puedo buscar restaurantes, hoteles y eventos cerca de ti.",
+            en: "📍 Location saved! Now I can search for restaurants, hotels, and events near you.",
+          };
+          await sendWhatsAppMessage(from, msgs[lang] || msgs.en, botNumber);
+        } catch (err) {
+          request.log.error({ err: (err as Error).message, from }, "[WhatsApp] Location save error");
+        }
+        return;
+      }
+
+      // ─── Send reaction emoji on the original message (non-blocking) ───
+      const sendProcessingReaction = () => {
+        if (messageSid) {
+          sendWhatsAppReaction(from, messageSid, "🎧", botNumber).catch(() => {});
+        }
+      };
+
+      // ─── Image message handling (with optional audio or caption) ───
+      if (isImage && mediaUrl0) {
+        sendProcessingReaction();
+        try {
+          await processImageMessage(from, mediaUrl0, mediaContentType0, text, request, {
+            audioUrl: isAudio ? mediaUrl0 : (mediaContentType1.startsWith("audio/") ? mediaUrl1 : ""),
+            audioContentType: isAudio ? mediaContentType0 : (mediaContentType1.startsWith("audio/") ? mediaContentType1 : ""),
+          }, botNumber);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Unknown error";
+          request.log.error({ err: msg, from }, "[WhatsApp Image] Processing error");
+          try {
+            await sendWhatsAppMessage(from, "Erro ao processar imagem. Tente novamente.", botNumber);
+          } catch { /* silent */ }
+        }
+        return;
+      }
+
+      // ─── Audio + Image combo (audio is first media, image is second) ───
+      if (isAudio && mediaContentType1.startsWith("image/") && mediaUrl1) {
+        sendProcessingReaction();
+        try {
+          await processImageMessage(from, mediaUrl1, mediaContentType1, text, request, {
+            audioUrl: mediaUrl0,
+            audioContentType: mediaContentType0,
+          }, botNumber);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Unknown error";
+          request.log.error({ err: msg, from }, "[WhatsApp Image+Audio] Processing error");
+          try {
+            await sendWhatsAppMessage(from, "Erro ao processar. Tente novamente.", botNumber);
+          } catch { /* silent */ }
+        }
+        return;
+      }
+
       // ─── Audio message handling ───
       if (isAudio && mediaUrl0) {
+        sendProcessingReaction();
         try {
-          await processAudioMessage(from, mediaUrl0, mediaContentType0, request);
+          await processAudioMessage(from, mediaUrl0, mediaContentType0, request, botNumber);
         } catch (err) {
           const msg = err instanceof Error ? err.message : "Unknown error";
           request.log.error({ err: msg, from }, "[WhatsApp Audio] Processing error");
           try {
-            await sendWhatsAppMessage(from, "Erro ao processar áudio. Tente novamente.");
+            await sendWhatsAppMessage(from, "Erro ao processar áudio. Tente novamente.", botNumber);
           } catch { /* silent */ }
         }
         return;
@@ -130,16 +304,17 @@ export async function whatsappWebhookRoutes(app: FastifyInstance) {
       // ─── Text message handling (original flow) ───
       if (!text) return;
 
+      sendProcessingReaction();
       try {
         const responseText = await processWhatsAppMessage(from, text);
         if (responseText) {
-          await sendWhatsAppMessage(from, responseText);
+          await sendWhatsAppMessage(from, responseText, botNumber);
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Unknown error";
         request.log.error({ err: msg, from }, "[WhatsApp] Processing error");
         try {
-          await sendWhatsAppMessage(from, "Erro ao processar. Tente novamente.");
+          await sendWhatsAppMessage(from, "Erro ao processar. Tente novamente.", botNumber);
         } catch { /* silent */ }
       }
     });
@@ -168,85 +343,163 @@ export async function whatsappWebhookRoutes(app: FastifyInstance) {
   });
 }
 
-// ─── Audio processing pipeline ───
+// ─── Optimized Audio processing pipeline ───
+// Improvements over original:
+// 1. Skip WAV conversion — send OGG/native format directly to Gemini STT
+// 2. Download as buffer (no temp file for STT path)
+// 3. Greeting cache — instant response for "oi", "hello", etc.
+// 4. Detailed per-stage metrics
 
 async function processAudioMessage(
   from: string,
   mediaUrl: string,
   contentType: string,
-  request: FastifyRequest
+  request: FastifyRequest,
+  botNumber?: string,
 ) {
-  const startTime = Date.now();
+  const t0 = Date.now();
+  const { accountSid, authToken } = getTwilioCredentials();
+  const lang = detectLangFromPhone(from);
+  const mimeType = AUDIO_MIME_MAP[contentType] || "audio/ogg";
+
+  // Ensure greeting cache is ready (lazy init, non-blocking after first call)
+  ensureGreetingCache();
+
+  request.log.info({ from, contentType, mimeType }, "[WhatsApp Audio] Processing...");
+
+  // ─── Step 1: Download audio directly as buffer (skip temp file + WAV conversion) ───
+  const audioBuffer = await downloadAudioAsBase64(mediaUrl, accountSid, authToken);
+  const audioBase64 = audioBuffer.toString("base64");
+  const tDownload = Date.now();
+
+  // ─── Step 2: Transcribe via Gemini (native format — no WAV conversion needed) ───
+  const transcription = await transcribeAudio(audioBase64, mimeType);
+  const tSTT = Date.now();
+
+  if (!transcription) {
+    await sendWhatsAppMessage(from, "Não consegui entender o áudio. Pode repetir?", botNumber);
+    request.log.warn({ from, downloadMs: tDownload - t0, sttMs: tSTT - tDownload }, "[WhatsApp Audio] STT failed");
+    return;
+  }
+
+  request.log.info(
+    { from, transcription: transcription.substring(0, 100), downloadMs: tDownload - t0, sttMs: tSTT - tDownload },
+    "[WhatsApp Audio] Transcribed"
+  );
+
+  // ─── Step 2.5: Greeting shortcut — instant cached response ───
+  if (isGreeting(transcription, lang)) {
+    const cachedOgg = greetingAudioCache.get(lang);
+    if (cachedOgg && existsSync(cachedOgg)) {
+      const audioId = `greet_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      // Copy cached file reference (don't delete — it's permanent cache)
+      audioStore.set(audioId, { path: cachedOgg, createdAt: Date.now() + 600_000 }); // Long TTL for cache
+      const audioUrl = `${BASE_URL}/api/audio/temp/${audioId}`;
+      await sendWhatsAppAudio(from, audioUrl, botNumber);
+      const totalMs = Date.now() - t0;
+      request.log.info(
+        { from, totalMs, downloadMs: tDownload - t0, sttMs: tSTT - tDownload, cached: true },
+        "[WhatsApp Audio] Greeting — cached response sent"
+      );
+      return;
+    }
+  }
+
+  // ─── Step 3: Process transcription through Jarvis LLM ───
+  const responseText = await processWhatsAppMessage(from, `[voice] ${transcription}`);
+  const tLLM = Date.now();
+
+  if (!responseText) return;
+
+  // ─── Step 4: TTS — convert response to audio ───
+  let audioSent = false;
+  const oggPath = await textToSpeech(responseText, lang);
+  const tTTS = Date.now();
+
+  if (oggPath) {
+    try {
+      const audioId = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      audioStore.set(audioId, { path: oggPath, createdAt: Date.now() });
+
+      const audioUrl = `${BASE_URL}/api/audio/temp/${audioId}`;
+      await sendWhatsAppAudio(from, audioUrl, botNumber);
+      audioSent = true;
+
+      const tSend = Date.now();
+      request.log.info(
+        {
+          from, lang, totalMs: tSend - t0,
+          downloadMs: tDownload - t0,
+          sttMs: tSTT - tDownload,
+          llmMs: tLLM - tSTT,
+          ttsMs: tTTS - tLLM,
+          sendMs: tSend - tTTS,
+        },
+        "[WhatsApp Audio] Complete — audio sent"
+      );
+    } catch (err) {
+      request.log.warn({ err: (err as Error).message }, "[WhatsApp Audio] TTS send failed, falling back to text");
+      cleanupFiles(oggPath);
+    }
+  }
+
+  // Fallback: send text only if audio failed
+  if (!audioSent) {
+    request.log.info({ from }, "[WhatsApp Audio] TTS unavailable — sending text fallback");
+    await sendWhatsAppMessage(from, responseText, botNumber);
+  }
+}
+
+// ─── Image processing pipeline ───
+
+async function processImageMessage(
+  from: string,
+  imageMediaUrl: string,
+  imageContentType: string,
+  caption: string,
+  request: FastifyRequest,
+  audio: { audioUrl: string; audioContentType: string },
+  botNumber?: string,
+) {
   const { accountSid, authToken } = getTwilioCredentials();
 
-  // 1. Determine file extension from content type
-  const extMap: Record<string, string> = {
-    "audio/ogg": "ogg",
-    "audio/opus": "ogg",
-    "audio/mpeg": "mp3",
-    "audio/mp4": "m4a",
-    "audio/amr": "amr",
-    "audio/aac": "aac",
-  };
-  const ext = extMap[contentType] || "ogg";
+  request.log.info({ from, imageContentType, hasCaption: !!caption, hasAudio: !!audio.audioUrl }, "[WhatsApp Image] Processing...");
 
-  request.log.info({ from, contentType, ext }, "[WhatsApp Audio] Downloading...");
+  // 1. Download image from Twilio
+  const headers: Record<string, string> = {};
+  if (accountSid && authToken) {
+    headers["Authorization"] = `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString("base64")}`;
+  }
+  const imgRes = await fetch(imageMediaUrl, { headers, signal: AbortSignal.timeout(30000) });
+  if (!imgRes.ok) {
+    throw new Error(`Failed to download image: HTTP ${imgRes.status}`);
+  }
+  const imgBuffer = Buffer.from(await imgRes.arrayBuffer());
+  const imageBase64 = imgBuffer.toString("base64");
 
-  // 2. Download audio from Twilio
-  const audioPath = await downloadAudio(mediaUrl, ext, accountSid, authToken);
+  request.log.info({ from, imageSize: imgBuffer.length }, "[WhatsApp Image] Downloaded");
 
-  try {
-    // 3. Convert to WAV for STT
-    const wavPath = await convertToWav(audioPath);
-    cleanupFile(audioPath);
-
+  // 2. If audio accompanies the image, transcribe it (optimized — skip WAV)
+  let userText = caption || "";
+  if (audio.audioUrl) {
     try {
-      // 4. Transcribe via Gemini
-      const wavBase64 = readFileSync(wavPath).toString("base64");
-      cleanupFile(wavPath);
-
-      const transcription = await transcribeAudio(wavBase64, "audio/wav");
-      if (!transcription) {
-        await sendWhatsAppMessage(from, "Não consegui entender o áudio. Pode repetir?");
-        return;
-      }
-
-      const sttMs = Date.now() - startTime;
-      request.log.info({ from, transcription: transcription.substring(0, 100), sttMs }, "[WhatsApp Audio] Transcribed");
-
-      // 5. Process transcription through normal Jarvis flow
-      const responseText = await processWhatsAppMessage(from, `[voice] ${transcription}`);
-      if (!responseText) return;
-
-      // 6. Send text response
-      await sendWhatsAppMessage(from, responseText);
-
-      // 7. Generate TTS and send audio response
-      const lang = detectLangFromPhone(from);
-      const oggPath = await textToSpeech(responseText, lang);
-      if (oggPath) {
-        try {
-          // Store audio temporarily and serve via public URL
-          const audioId = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
-          audioStore.set(audioId, { path: oggPath, createdAt: Date.now() });
-
-          const audioUrl = `${BASE_URL}/api/audio/temp/${audioId}`;
-          await sendWhatsAppAudio(from, audioUrl);
-
-          const totalMs = Date.now() - startTime;
-          request.log.info({ from, sttMs, totalMs, lang }, "[WhatsApp Audio] Complete — text + audio sent");
-        } catch (err) {
-          // Audio send failed — text was already sent, just log
-          request.log.warn({ err: (err as Error).message }, "[WhatsApp Audio] TTS send failed (text was sent)");
-          cleanupFiles(oggPath);
-        }
+      const audioBuf = await downloadAudioAsBase64(audio.audioUrl, accountSid, authToken);
+      const audioMime = AUDIO_MIME_MAP[audio.audioContentType] || "audio/ogg";
+      const transcription = await transcribeAudio(audioBuf.toString("base64"), audioMime);
+      if (transcription) {
+        userText = userText ? `${userText} — ${transcription}` : transcription;
+        request.log.info({ from, transcription: transcription.substring(0, 100) }, "[WhatsApp Image] Audio transcribed");
       }
     } catch (err) {
-      cleanupFile(wavPath);
-      throw err;
+      request.log.warn({ err: (err as Error).message }, "[WhatsApp Image] Audio transcription failed, proceeding with image only");
     }
-  } catch (err) {
-    cleanupFile(audioPath);
-    throw err;
+  }
+
+  // 3. Process image through Gemini Vision via jarvis-whatsapp service
+  const mimeType = imageContentType || "image/jpeg";
+  const responseText = await processWhatsAppImageMessage(from, imageBase64, mimeType, userText);
+
+  if (responseText) {
+    await sendWhatsAppMessage(from, responseText, botNumber);
   }
 }

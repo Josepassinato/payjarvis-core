@@ -63,3 +63,26 @@ export async function downloadAudio(
   writeFileSync(filePath, buffer);
   return filePath;
 }
+
+/**
+ * Download audio from URL and return as Buffer directly.
+ * Skips writing to disk — useful when sending straight to Gemini STT
+ * (Gemini accepts audio/ogg natively, no WAV conversion needed).
+ */
+export async function downloadAudioAsBase64(
+  url: string,
+  accountSid?: string,
+  authToken?: string
+): Promise<Buffer> {
+  const headers: Record<string, string> = {};
+  if (accountSid && authToken) {
+    headers["Authorization"] = `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString("base64")}`;
+  }
+
+  const res = await fetch(url, { headers, signal: AbortSignal.timeout(30000) });
+  if (!res.ok) {
+    throw new Error(`Failed to download audio: HTTP ${res.status}`);
+  }
+
+  return Buffer.from(await res.arrayBuffer());
+}

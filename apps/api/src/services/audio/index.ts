@@ -7,4 +7,4 @@
 
 export { transcribeAudio } from "./stt.service.js";
 export { textToSpeech, cleanupFiles, readAudioAsBase64 } from "./tts.service.js";
-export { convertToWav, downloadAudio, cleanupFile } from "./converter.service.js";
+export { convertToWav, downloadAudio, downloadAudioAsBase64, cleanupFile } from "./converter.service.js";
