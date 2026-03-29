@@ -1046,6 +1046,125 @@ await app.register(scrapeRoutes);
 await app.register(amazonLoginRoutes);
 await app.register(storeActionRoutes);
 
+// ─── BrowserBase checkout routes ─────────────────────
+import { bbCheckoutRoutes } from "./routes/bb-checkout.js";
+await app.register(bbCheckoutRoutes);
+
+// ─── Fill Form endpoint ─────────────────────────────
+
+app.post("/fill-form", async (request, reply) => {
+  const body = request.body as {
+    url: string;
+    fields: Record<string, string>;
+    instructions?: string;
+  };
+
+  if (!body.url || !body.fields) {
+    return reply.status(400).send({
+      success: false,
+      error: "url and fields are required",
+    });
+  }
+
+  try {
+    // Try using Browserbase (cloud Playwright)
+    const { chromium } = await import("playwright-core");
+    const {
+      createSession,
+      isConfigured,
+    } = await import("./services/browserbase-client.js");
+
+    if (!isConfigured()) {
+      return reply.status(503).send({
+        success: false,
+        error: "Browserbase not configured — form filling requires cloud browser",
+      });
+    }
+
+    const session = await createSession();
+    let browser;
+    try {
+      browser = await chromium.connectOverCDP(session.connectUrl, { timeout: 30000 });
+      const context = browser.contexts()[0] || await browser.newContext();
+      const page = context.pages()[0] || await context.newPage();
+
+      // Navigate to URL
+      await page.goto(body.url, { waitUntil: "domcontentloaded", timeout: 30000 });
+      await page.waitForTimeout(2000);
+
+      // Fill fields
+      const filledFields: string[] = [];
+      const failedFields: string[] = [];
+
+      for (const [key, value] of Object.entries(body.fields)) {
+        try {
+          // Try multiple strategies to find and fill the field
+          const selectors = [
+            `input[name="${key}"]`,
+            `textarea[name="${key}"]`,
+            `select[name="${key}"]`,
+            `input[id="${key}"]`,
+            `textarea[id="${key}"]`,
+            `input[placeholder*="${key}" i]`,
+            `textarea[placeholder*="${key}" i]`,
+            `input[aria-label*="${key}" i]`,
+            `label:has-text("${key}") + input`,
+            `label:has-text("${key}") + textarea`,
+            `label:has-text("${key}") + select`,
+          ];
+
+          let filled = false;
+          for (const selector of selectors) {
+            try {
+              const el = page.locator(selector).first();
+              if (await el.isVisible({ timeout: 1000 })) {
+                const tagName = await el.evaluate((e: Element) => e.tagName.toLowerCase());
+                if (tagName === "select") {
+                  await el.selectOption({ label: value }).catch(() => el.selectOption(value));
+                } else {
+                  await el.fill(value);
+                }
+                filledFields.push(key);
+                filled = true;
+                break;
+              }
+            } catch {
+              continue;
+            }
+          }
+
+          if (!filled) {
+            failedFields.push(key);
+          }
+        } catch {
+          failedFields.push(key);
+        }
+      }
+
+      const currentUrl = page.url();
+
+      await browser.close().catch(() => {});
+
+      return {
+        success: true,
+        url: currentUrl,
+        filledFields,
+        failedFields,
+        message: failedFields.length > 0
+          ? `Filled ${filledFields.length} fields. Could not find: ${failedFields.join(", ")}`
+          : `All ${filledFields.length} fields filled successfully. Form NOT submitted — waiting for user confirmation.`,
+      };
+    } catch (err) {
+      if (browser) await browser.close().catch(() => {});
+      throw err;
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Form filling failed";
+    app.log.error({ err, url: body.url }, "Fill form error");
+    return reply.status(500).send({ success: false, error: message });
+  }
+});
+
 // ─── Start ───────────────────────────────────────────
 
 const port = parseInt(

@@ -302,6 +302,204 @@ export async function bbCheckoutRoutes(app: FastifyInstance) {
     }
   });
 
+  // ── POST /bb/login — Login to Amazon directly inside BrowserBase ──
+  app.post("/bb/login", async (request, reply) => {
+    const body = request.body as {
+      bbContextId?: string;
+      email?: string;
+      password?: string;
+    };
+
+    if (!body?.bbContextId || !body?.email || !body?.password) {
+      return reply.status(400).send({ success: false, error: "bbContextId, email, and password required" });
+    }
+
+    const t0 = Date.now();
+    console.log(`[BB-LOGIN] Starting BB login for context ${body.bbContextId.slice(0, 8)}`);
+
+    let stagehand: Stagehand | null = null;
+    try {
+      stagehand = new Stagehand({
+        env: "BROWSERBASE",
+        model: STAGEHAND_MODEL,
+        browserbaseSessionCreateParams: {
+          browserSettings: {
+            context: { id: body.bbContextId, persist: true },
+          },
+          timeout: 1800,
+        },
+        verbose: 1,
+      });
+
+      await stagehand.init();
+      const page = stagehand.context.pages()[0];
+
+      // Navigate to Amazon sign-in
+      console.log(`[BB-LOGIN] Navigating to Amazon sign-in...`);
+      await page.goto("https://www.amazon.com/ap/signin?openid.pape.max_auth_age=0&openid.return_to=https%3A%2F%2Fwww.amazon.com%2F&openid.identity=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.assoc_handle=usflex&openid.mode=checkid_setup&openid.claimed_id=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.ns=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0", {
+        waitUntil: "domcontentloaded",
+        timeoutMs: 30_000,
+      });
+      await page.waitForTimeout(2000);
+
+      await page.waitForTimeout(1000 + Math.random() * 1000);
+
+      // Step 1: Type email using Stagehand act (uses AI to find & fill fields naturally)
+      console.log(`[BB-LOGIN] Step 1: Entering email...`);
+      await stagehand.act(`Click on the email input field and type "${body.email}"`);
+      await page.waitForTimeout(800 + Math.random() * 500);
+      await stagehand.act("Click the Continue button");
+      await page.waitForTimeout(4000 + Math.random() * 1000);
+
+      let pageUrl = page.url();
+      const pageTitle = await page.title();
+      console.log(`[BB-LOGIN] After email — URL: ${pageUrl.slice(0, 80)}, title: ${pageTitle}`);
+
+      // Step 2: Check page state — CAPTCHA, password, or challenge?
+      const pageState = await stagehand.extract(
+        "What is on this page? Check for: (1) a password input field, (2) a CAPTCHA challenge asking to type characters, (3) a verification/security challenge, (4) an error message. Describe what you see.",
+        z.object({
+          hasPasswordField: z.boolean().describe("true if there is a password input field"),
+          hasCaptcha: z.boolean().describe("true if there is a CAPTCHA image with text to type"),
+          hasChallenge: z.boolean().describe("true if Amazon is asking for verification (2FA, phone, email)"),
+          hasError: z.boolean().describe("true if there is an error message"),
+          description: z.string().describe("Brief description of what is on the page"),
+        }),
+      );
+      console.log(`[BB-LOGIN] Page state: ${JSON.stringify(pageState)}`);
+
+      // Handle CAPTCHA
+      if (pageState.hasCaptcha) {
+        console.log(`[BB-LOGIN] CAPTCHA detected — attempting AI solve...`);
+        try {
+          await stagehand.act("Look at the CAPTCHA image, read the characters, type them into the text input field, and click the Continue or Submit button");
+          await page.waitForTimeout(3000);
+        } catch (e) { console.error(`[BB-LOGIN] CAPTCHA failed: ${(e as Error).message}`); }
+      }
+
+      // Step 3: Type password if field exists
+      if (pageState.hasPasswordField || await page.locator('#ap_password').count() > 0) {
+        console.log(`[BB-LOGIN] Step 3: Entering password...`);
+        await stagehand.act(`Click on the password input field and type "${body.password}"`);
+        await page.waitForTimeout(800 + Math.random() * 500);
+        await stagehand.act("Click the Sign in button");
+        await page.waitForTimeout(5000 + Math.random() * 2000);
+      } else {
+        console.log(`[BB-LOGIN] No password field found — ${pageState.description}`);
+      }
+
+      let finalUrl = page.url();
+      console.log(`[BB-LOGIN] After login — URL: ${finalUrl.slice(0, 80)}`);
+
+      // Handle /ax/claim — navigate to homepage to check actual login
+      if (finalUrl.includes('/ax/claim') || finalUrl.includes('/ax/get')) {
+        console.log(`[BB-LOGIN] On claim page — navigating to Amazon homepage to verify...`);
+        await page.goto('https://www.amazon.com', { waitUntil: 'domcontentloaded', timeoutMs: 15_000 });
+        await page.waitForTimeout(3000);
+        finalUrl = page.url();
+        console.log(`[BB-LOGIN] After homepage redirect — URL: ${finalUrl.slice(0, 80)}`);
+      }
+
+      // Check if we need 2FA
+      if (finalUrl.includes("/ap/mfa") || finalUrl.includes("/ap/cvf") || finalUrl.includes("/ap/challenge")) {
+        console.log(`[BB-LOGIN] 2FA/verification required`);
+        // Keep session alive for user to complete verification
+        const sessionId = stagehand.browserbaseSessionID;
+        // Don't close stagehand — keep session alive
+        return {
+          success: false,
+          status: "NEEDS_HUMAN",
+          bbSessionId: sessionId,
+          message: "Amazon requires verification. Complete it and try again.",
+        };
+      }
+
+      // Check login status
+      const loginCheck = await stagehand.extract(
+        "Check if the user is logged into Amazon. Look for 'Hello, [Name]' in the nav bar.",
+        z.object({
+          loggedIn: z.boolean(),
+          userName: z.string().optional(),
+        }),
+      );
+
+      console.log(`[BB-LOGIN] Login result: loggedIn=${loginCheck.loggedIn}, userName=${loginCheck.userName ?? 'N/A'}, took ${Date.now() - t0}ms`);
+
+      // Close session to persist cookies to context
+      await stagehand.close();
+      stagehand = null;
+
+      return {
+        success: loginCheck.loggedIn,
+        loggedIn: loginCheck.loggedIn,
+        userName: loginCheck.userName,
+        message: loginCheck.loggedIn ? "Amazon login successful" : "Login failed — check credentials",
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "BB login failed";
+      console.error(`[BB-LOGIN] ERROR — ${message}`);
+      if (stagehand) {
+        try { await stagehand.close(); } catch { /* ignore */ }
+      }
+      return reply.status(500).send({ success: false, error: message });
+    }
+  });
+
+  // ── POST /bb/verify-session — Reconnect to keepAlive session and check login ──
+  app.post("/bb/verify-session", async (request, reply) => {
+    const body = request.body as { bbSessionId?: string };
+    if (!body?.bbSessionId) {
+      return reply.status(400).send({ success: false, error: "bbSessionId required" });
+    }
+
+    const t0 = Date.now();
+    console.log(`[BB-CHECKOUT] verify-session: Reconnecting to keepAlive session ${body.bbSessionId.slice(0, 8)}`);
+
+    try {
+      const stagehand = new Stagehand({
+        env: "BROWSERBASE",
+        browserbaseSessionID: body.bbSessionId,
+        model: STAGEHAND_MODEL,
+        verbose: 0,
+      });
+
+      await stagehand.init();
+      const page = stagehand.context.pages()[0];
+
+      // Navigate to Amazon homepage to check login
+      const currentUrl = page.url();
+      if (!currentUrl.includes("amazon.com") || currentUrl.includes("/ap/")) {
+        await page.goto("https://www.amazon.com", { waitUntil: "domcontentloaded", timeoutMs: 20_000 });
+      }
+
+      // Check login status using AI
+      const loginCheck = await stagehand.extract(
+        "Check if the user is logged into Amazon. Look for a greeting like 'Hello, [Name]' in the navigation bar, or a 'Sign in' button. If on a sign-in page, the user is NOT logged in.",
+        z.object({
+          loggedIn: z.boolean().describe("true if user is logged in"),
+          userName: z.string().optional().describe("The user's name if visible"),
+        }),
+      );
+
+      console.log(`[BB-CHECKOUT] verify-session: loggedIn=${loginCheck.loggedIn}, userName=${loginCheck.userName ?? 'N/A'}, took ${Date.now() - t0}ms`);
+
+      if (loginCheck.loggedIn) {
+        // Close session so cookies persist to BB Context
+        console.log(`[BB-CHECKOUT] verify-session: Login confirmed — closing to persist cookies`);
+        await stagehand.close();
+        return { success: true, loggedIn: true, userName: loginCheck.userName, sessionClosed: true };
+      }
+
+      // Not logged in — disconnect CDP but keep session alive
+      try { await stagehand.close(); } catch { /* ignore */ }
+      return { success: true, loggedIn: false };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Session verification failed";
+      console.error(`[BB-CHECKOUT] verify-session: ERROR — ${message}`);
+      return { success: true, loggedIn: false, error: message };
+    }
+  });
+
   // ── POST /bb/close-session ────────────────────────
   app.post("/bb/close-session", async (request, reply) => {
     const body = request.body as { bbSessionId?: string };
