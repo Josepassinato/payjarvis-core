@@ -1,0 +1,164 @@
+{
+  "metadata": {
+    "generated": "2026-03-18T19:30:00Z",
+    "auditor": "Claude Opus 4.6",
+    "codebase_total_lines": 56160,
+    "prisma_models": 44,
+    "prisma_schema_lines": 1044
+  },
+  "summary": {
+    "source_files": 233,
+    "http_endpoints": 178,
+    "gemini_tools_openclaw": 31,
+    "gemini_tools_api": 4,
+    "database_tables": 55,
+    "pm2_services": 12,
+    "env_variables": 84,
+    "env_unused": 29,
+    "cron_jobs": 12,
+    "external_integrations": 10,
+    "dead_code_files": 13,
+    "dead_code_lines": 1710,
+    "unused_exports": 14,
+    "critical_issues": 3,
+    "warning_issues": 8,
+    "info_issues": 5
+  },
+  "critical_issues": [
+    {
+      "id": "C1",
+      "severity": "CRITICAL",
+      "title": "Telegram webhook secret empty",
+      "location": ".env.production:TELEGRAM_WEBHOOK_SECRET",
+      "impact": "Webhook endpoint unsecured against spoofed requests",
+      "fix": "Set TELEGRAM_WEBHOOK_SECRET to a random string and update webhook"
+    },
+    {
+      "id": "C2",
+      "severity": "CRITICAL",
+      "title": "Telegram bot tokens identical",
+      "location": ".env.production:TELEGRAM_BOT_TOKEN = ADMIN_TELEGRAM_BOT_TOKEN",
+      "impact": "No isolation between user bot and admin bot",
+      "fix": "Create separate bot via BotFather for admin, update ADMIN_TELEGRAM_BOT_TOKEN"
+    },
+    {
+      "id": "C3",
+      "severity": "CRITICAL",
+      "title": "OpenClaw 286 restarts",
+      "location": "PM2 process openclaw",
+      "impact": "Crash loop instability, possible service interruptions",
+      "fix": "Investigate root cause, reset restart counter after fix"
+    }
+  ],
+  "warning_issues": [
+    {"id": "W1", "title": "ZOHO_PASSWORD empty for jarvis@payjarvis.com", "location": ".env.production"},
+    {"id": "W2", "title": "ElevenLabs TTS unconfigured", "location": ".env.production"},
+    {"id": "W3", "title": "29/84 env vars unused (34.5%)", "location": ".env.production"},
+    {"id": "W4", "title": "behavioral-signals.js 0 imports from index.js", "location": "/root/openclaw/"},
+    {"id": "W5", "title": "DB password payjarvis123", "location": "PostgreSQL"},
+    {"id": "W6", "title": "Nickname validation inconsistent", "location": "onboarding-bot.service.ts:186"},
+    {"id": "W7", "title": "Language inconsistency in prompts", "location": "gemini.js vs jarvis-whatsapp"},
+    {"id": "W8", "title": "Amazon checkout endpoints active but broken", "location": "routes/checkout.ts"}
+  ],
+  "dead_code": {
+    "openclaw_skills": [
+      {"file": "skills/rentcar.js", "lines": 238, "recommendation": "DELETE"},
+      {"file": "skills/supermarket.js", "lines": 231, "recommendation": "DELETE"},
+      {"file": "skills/amadeus.js", "lines": 200, "recommendation": "DELETE"},
+      {"file": "skills/homeservices.js", "lines": 187, "recommendation": "DELETE"},
+      {"file": "skills/fashion.js", "lines": 160, "recommendation": "DELETE"},
+      {"file": "skills/pricecompare.js", "lines": 136, "recommendation": "DELETE"},
+      {"file": "skills/opentable.js", "lines": 130, "recommendation": "DELETE"},
+      {"file": "skills/google-places.js", "lines": 127, "recommendation": "DELETE"},
+      {"file": "skills/yelp.js", "lines": 95, "recommendation": "DELETE"},
+      {"file": "skills/ticketmaster.js", "lines": 77, "recommendation": "DELETE"}
+    ],
+    "api_services": [
+      {"file": "services/referral.service.ts", "lines": 77, "recommendation": "DELETE"},
+      {"file": "services/payments/providers/apple-pay.provider.ts", "lines": 26, "recommendation": "KEEP_STUB"},
+      {"file": "services/payments/providers/google-pay.provider.ts", "lines": 26, "recommendation": "KEEP_STUB"}
+    ],
+    "unused_exports": [
+      "ensureAgentForBot (agent-identity.ts)",
+      "getUserShareLinks (bot-share.service.ts)",
+      "templateDailySummary (email.ts)",
+      "templateOnboardingConfirm (email.ts)",
+      "findAvailableInstance (instance-manager.ts)",
+      "updateInstanceStatus (instance-manager.ts)",
+      "generateStripeSetupLink (onboarding-bot.service.ts)",
+      "getReferralStats (referral.service.ts)",
+      "recordChargeback (reputation.ts)",
+      "resumeSequence (sequence.service.ts)",
+      "getAgentScoreDelta (trust-score.ts)",
+      "getScoreDelta (trust-score.ts)",
+      "sendWelcomeTemplate (twilio-whatsapp.service.ts)",
+      "helloWorld (visa.service.ts)"
+    ]
+  },
+  "integrations": [
+    {"service": "Twilio WhatsApp", "status": "OPERATIONAL", "credentials_set": true, "files_using": 10},
+    {"service": "Telegram Bot API", "status": "OPERATIONAL", "credentials_set": true, "files_using": 21, "issues": ["empty webhook secret", "shared token"]},
+    {"service": "Stripe", "status": "OPERATIONAL", "credentials_set": true, "files_using": 7},
+    {"service": "Google Gemini", "status": "OPERATIONAL", "credentials_set": true, "files_using": 6},
+    {"service": "Clerk Auth", "status": "OPERATIONAL", "credentials_set": true, "files_using": 20},
+    {"service": "BrowserBase", "status": "CONFIGURED", "credentials_set": true, "files_using": 3, "issues": ["low usage", "Amazon checkout broken"]},
+    {"service": "Zoho SMTP", "status": "OPERATIONAL", "credentials_set": true, "files_using": 1, "issues": ["secondary account jarvis@ has empty password"]},
+    {"service": "Amazon", "status": "PARTIAL", "credentials_set": true, "files_using": 7, "issues": ["search works", "checkout broken via BrowserBase"]},
+    {"service": "ElevenLabs TTS", "status": "NOT_CONFIGURED", "credentials_set": false, "files_using": 0},
+    {"service": "Resend Email", "status": "DEPRECATED", "credentials_set": false, "files_using": 0}
+  ],
+  "pm2_services": [
+    {"name": "openclaw", "port": 4000, "memory_mb": 63, "restarts": 286, "status": "UNSTABLE", "purpose": "Bot Telegram @Jarvis12Brain_bot"},
+    {"name": "payjarvis-api", "port": 3001, "memory_mb": 140, "restarts": 17, "status": "OK", "purpose": "Main API + custom bot webhooks"},
+    {"name": "payjarvis-web", "port": 3000, "memory_mb": 102, "restarts": 4, "status": "OK", "purpose": "Next.js frontend"},
+    {"name": "browser-agent", "port": 3003, "memory_mb": 190, "restarts": 10, "status": "OK", "purpose": "Chrome CDP + BrowserBase"},
+    {"name": "admin-bot", "port": null, "memory_mb": 78, "restarts": 5, "status": "OK", "purpose": "Admin Telegram bot @JPvisionIA_bot"},
+    {"name": "sentinel", "port": null, "memory_mb": 90, "restarts": 0, "status": "STABLE", "purpose": "Service monitoring + alerts"},
+    {"name": "cfo-agent", "port": null, "memory_mb": 80, "restarts": 0, "status": "STABLE", "purpose": "CFO daily reports"},
+    {"name": "payjarvis-rules", "port": null, "memory_mb": 73, "restarts": 0, "status": "STABLE", "purpose": "Rules/policy engine"},
+    {"name": "payjarvis-kyc", "port": null, "memory_mb": 49, "restarts": 0, "status": "STABLE", "purpose": "KYC verification"},
+    {"name": "payjarvis-admin", "port": null, "memory_mb": 4, "restarts": 0, "status": "STABLE", "purpose": "Admin dashboard"},
+    {"name": "botfriendly-mcp", "port": null, "memory_mb": 82, "restarts": 0, "status": "STABLE", "purpose": "BotReady MCP server"},
+    {"name": "pm2-logrotate", "port": null, "memory_mb": 67, "restarts": 0, "status": "STABLE", "purpose": "Log rotation"}
+  ],
+  "database_active_tables": {
+    "sentinel_logs": 5591,
+    "sentinel_incidents": 168,
+    "audit_logs": 108,
+    "llm_usage_logs": 51,
+    "cfo_snapshots": 30,
+    "openclaw_conversations": 22,
+    "transactions": 12,
+    "onboarding_sessions": 11,
+    "agents": 8,
+    "bots": 1,
+    "users": 1,
+    "llm_credits": 4,
+    "openclaw_user_facts": 3,
+    "store_contexts": 3
+  },
+  "gemini_tools": {
+    "openclaw_31_tools": ["search_flights","search_hotels","search_restaurants","search_events","browse","web_search","request_payment","get_transactions","request_handoff","set_reminder","get_reminders","complete_reminder","track_package","search_products","compare_prices","find_stores","check_prescription","search_transit","compare_transit","train_status","search_rental_cars","find_home_service","find_mechanic","save_user_fact","amazon_search","paypal_create_order","paypal_capture_order","paypal_get_order_status","get_payment_methods","stripe_charge_on_file","stripe_create_payment_link"],
+    "api_4_tools": ["save_store_credentials","remove_store_credentials","amazon_search","share_bot"]
+  },
+  "spec_compliance": {
+    "onboarding_10_steps": "COMPLIANT",
+    "english_only_onboarding": "COMPLIANT",
+    "referrer_greeting": "COMPLIANT",
+    "email_6digit_zoho": "COMPLIANT",
+    "beta_choice_skip": "COMPLIANT",
+    "stripe_setup_intent": "COMPLIANT",
+    "nickname_validation": "PARTIAL",
+    "adaptive_memory": "COMPLIANT",
+    "user_model": "COMPLIANT",
+    "behavioral_signals": "COMPLIANT",
+    "reflection": "COMPLIANT",
+    "anticipation": "COMPLIANT",
+    "initiative_4_levels": "COMPLIANT",
+    "task_manager": "COMPLIANT",
+    "smart_reorder": "COMPLIANT",
+    "premium_pipeline_10_step": "COMPLIANT",
+    "engagement_8_banners": "COMPLIANT",
+    "sequence_cron_hourly": "COMPLIANT"
+  }
+}

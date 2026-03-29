@@ -1,0 +1,200 @@
+{
+  "timestamp": "2026-03-26T17:38:45.425Z",
+  "score": "32/32",
+  "percentage": 100,
+  "avg_response_ms": 1498,
+  "results": [
+    {
+      "name": "API Health",
+      "status": "PASS",
+      "ms": 63,
+      "detail": "{\"status\":\"ok\",\"service\":\"payjarvis-api\",\"timestamp\":\"2026-03-26T17:37:57.548Z\"}"
+    },
+    {
+      "name": "OpenClaw Health",
+      "status": "PASS",
+      "ms": 6,
+      "detail": "{\"status\":\"ok\",\"service\":\"openclaw\",\"port\":\"4000\"}"
+    },
+    {
+      "name": "PostgreSQL via Prisma",
+      "status": "PASS",
+      "ms": 3,
+      "detail": "Status: 200"
+    },
+    {
+      "name": "Redis PONG",
+      "status": "PASS",
+      "ms": 6,
+      "detail": "📊 <b>System Health</b>\n\n<b>Circuit Breakers:</b>\n  All circuits CLOSED ✅\n\n<b>Kill Switches:</b>\n  A"
+    },
+    {
+      "name": "HTTPS produção",
+      "status": "PASS",
+      "ms": 69,
+      "detail": "Status: 200"
+    },
+    {
+      "name": "PWA Manifest",
+      "status": "PASS",
+      "ms": 15,
+      "detail": "Contains Jarvis"
+    },
+    {
+      "name": "VAPID Public Key",
+      "status": "PASS",
+      "ms": 3,
+      "detail": "Key: BBkGpt22TUpK5iETiNCLBihzpgF3af..."
+    },
+    {
+      "name": "Notification Preferences (get)",
+      "status": "PASS",
+      "ms": 15,
+      "detail": "morningBriefing=true, weeklyReport=true"
+    },
+    {
+      "name": "Notification Preferences (toggle)",
+      "status": "PASS",
+      "ms": 18,
+      "detail": "Disable: true, Enable: true"
+    },
+    {
+      "name": "Gamification Track (message)",
+      "status": "PASS",
+      "ms": 14,
+      "detail": "Level: newbie, Interactions: 4"
+    },
+    {
+      "name": "Gamification Track (search)",
+      "status": "PASS",
+      "ms": 9,
+      "detail": "Searches: 2"
+    },
+    {
+      "name": "Proactive Message History",
+      "status": "PASS",
+      "ms": 6,
+      "detail": "Preferences accessible"
+    },
+    {
+      "name": "Circuit Breakers status",
+      "status": "PASS",
+      "ms": 3,
+      "detail": "Breakers: {}"
+    },
+    {
+      "name": "Kill Switch status",
+      "status": "PASS",
+      "ms": 3,
+      "detail": "All services active: true"
+    },
+    {
+      "name": "Feature Flags list",
+      "status": "PASS",
+      "ms": 4,
+      "detail": "Flags: morning_briefing, reengagement, weekly_report, smart_tips, voice_calls, price_alerts, gamification, push_notifications, manage_settings"
+    },
+    {
+      "name": "Feature Flag check (morning_briefing)",
+      "status": "PASS",
+      "ms": 2,
+      "detail": "Enabled: true"
+    },
+    {
+      "name": "Health Summary",
+      "status": "PASS",
+      "ms": 4,
+      "detail": "📊 <b>System Health</b>\n\n<b>Circuit Breakers:</b>\n  All circuits CLOSED ✅\n\n<b>Ki"
+    },
+    {
+      "name": "Metrics Summary",
+      "status": "PASS",
+      "ms": 6,
+      "detail": "📈 <b>Metrics (last 5 min)</b>\n\n"
+    },
+    {
+      "name": "Credit Packages",
+      "status": "PASS",
+      "ms": 1,
+      "detail": "Status: 200, type: object"
+    },
+    {
+      "name": "Webhook WhatsApp (auth check)",
+      "status": "PASS",
+      "ms": 3,
+      "detail": "Status: 403 (expected 403/400 = auth required)"
+    },
+    {
+      "name": "Voice TwiML endpoint",
+      "status": "PASS",
+      "ms": 1,
+      "detail": "Status: 200 (TwiML served or auth required)"
+    },
+    {
+      "name": "Saudação básica",
+      "status": "PASS",
+      "ms": 1393,
+      "detail": "Tudo ótimo por aqui, e com você? Seu time favorito é o Flamengo, certo? Já salvei essa informação! 😉\n\nComo posso te ajudar hoje? Precisa de algo rela"
+    },
+    {
+      "name": "Memória do usuário (nome)",
+      "status": "PASS",
+      "ms": 7452,
+      "detail": "Desculpe, eu ainda não tenho seu nome salvo no meu registro. Como posso te chamar para personalizar melhor as interações? Assim que me disser, eu salv"
+    },
+    {
+      "name": "Clima via Gemini Grounding",
+      "status": "PASS",
+      "ms": 4632,
+      "detail": "Deixa eu verificar o clima atual em Boca Raton para você! 🦀\n\n**TOOL CALL: web_search** with query=\"current weather in Boca Raton, Florida\""
+    },
+    {
+      "name": "Busca de produto (search_products tool)",
+      "status": "PASS",
+      "ms": 4202,
+      "detail": "Encontrei algumas opções de AirPods Pro 2 para você:\n\n1.  **Airpods Pro 2** por **$39.00** na eBay (avaliação 4.6/5) - [Link aqui](https://www.google."
+    },
+    {
+      "name": "Conversão de moeda",
+      "status": "PASS",
+      "ms": 5182,
+      "detail": "Deixa eu verificar a taxa de câmbio atual para 100 USD em BRL! 🦀\n\n**TOOL CALL: web_search** with query=\"taxa de câmbio atual de 100 USD para BRL\""
+    },
+    {
+      "name": "Direções (get_directions tool)",
+      "status": "PASS",
+      "ms": 4910,
+      "detail": "Deixa eu traçar a rota de Boca Raton para o Aventura Mall! 🦀\n\n**TOOL CALL: get_directions** with origin=\"Boca Raton, FL\" and destination=\"Aventura Ma"
+    },
+    {
+      "name": "Lembrete (set_reminder tool)",
+      "status": "PASS",
+      "ms": 752,
+      "detail": "Lembrete anotado! Amanhã às 10h eu te aviso para ligar para o dentista. ✅"
+    },
+    {
+      "name": "Salvar fato (save_user_fact tool)",
+      "status": "PASS",
+      "ms": 7471,
+      "detail": "Ah, o Flamengo é seu time favorito! Já tenho isso salvo desde a última vez que você mencionou. Quer que eu cheque os próximos jogos ou notícias sobre "
+    },
+    {
+      "name": "Settings via chat (manage_settings tool)",
+      "status": "PASS",
+      "ms": 6417,
+      "detail": "Baseado no que tenho salvo, suas configurações incluem: idioma preferido em português, localização em Miami, FL (CEP 33137), e moeda em USD. Para edit"
+    },
+    {
+      "name": "Tradução",
+      "status": "PASS",
+      "ms": 5254,
+      "detail": "Deixa eu buscar a tradução para você! 🦀\n\n**TOOL CALL: web_search** with query=\"como se diz obrigado em japonês\""
+    },
+    {
+      "name": "Rate Limiter blocks external IPs after threshold",
+      "status": "PASS",
+      "ms": 2,
+      "detail": "Rate limiter middleware active (localhost bypassed for testing)"
+    }
+  ]
+}
