@@ -145,9 +145,19 @@ export async function commerceSearch(options: CommerceSearchOptions): Promise<{
 }
 
 // Re-export types for route usage
-export type { FlightSearchParams } from "./flights.js";
-export type { HotelSearchParams } from "./hotels.js";
-export type { RestaurantSearchParams } from "./restaurants.js";
-export type { EventSearchParams } from "./events.js";
+export type { FlightSearchParams, FlightResult } from "./flights.js";
+export { formatFlightResults } from "./flights.js";
+export type { HotelSearchParams, HotelResult } from "./hotels.js";
+export { getHotelOffer, formatHotelResults, resolveCityCode } from "./hotels.js";
+export type { RestaurantSearchParams, RestaurantResult, RestaurantDetail } from "./restaurants.js";
+export { getRestaurantDetails, formatRestaurantResults, formatRestaurantDetail, getReservationLink } from "./restaurants.js";
+export type { EventSearchParams, EventResult } from "./events.js";
+export { getEventDetails, formatEventResults } from "./events.js";
 export type { TransportRequestParams } from "./transport.js";
 export type { DeliverySearchParams } from "./delivery.js";
+export type { MeliSearchParams, MeliProduct } from "./mercadolibre.js";
+export { searchMeliProducts, getMeliProduct, formatMeliResults } from "./mercadolibre.js";
+export type { EbaySearchParams, EbayProduct } from "./ebay.js";
+export { searchEbayProducts, getEbayProduct, formatEbayResults } from "./ebay.js";
+export type { PlacesSearchParams, PlaceResult } from "./google-places.js";
+export { searchPlaces, getPlaceDetails, formatPlacesResults } from "./google-places.js";

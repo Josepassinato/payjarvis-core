@@ -1,7 +1,7 @@
 /**
  * Onboarding Bot Service — Conversational onboarding via Telegram/WhatsApp
  *
- * Flow (100% in chat, English by default):
+ * Flow (100% in chat, multilingual: EN/PT/ES):
  * name → bot_nickname → email_password → email_confirm → beta_choice → limits → stores → shipping_address → payment → complete
  */
 
@@ -17,6 +17,269 @@ export interface BotResponse {
   message: string;
   step: string;
   complete: boolean;
+}
+
+// ─── Language Detection ──────────────────────────────────
+
+type Lang = "en" | "pt" | "es";
+
+const PT_WORDS = ["oi", "olá", "ola", "tudo bem", "bom dia", "boa tarde", "boa noite", "obrigado", "obrigada", "por favor", "como vai", "e aí", "eai", "fala", "salve"];
+const ES_WORDS = ["hola", "buenos días", "buenos dias", "buenas tardes", "buenas noches", "cómo estás", "como estas", "gracias", "por favor", "qué tal", "que tal"];
+const PT_PHONE_PREFIXES = ["+55"];
+const ES_PHONE_PREFIXES = ["+34", "+52", "+54", "+56", "+57"];
+
+function detectLanguage(phone: string | null, firstMessage: string): Lang {
+  // 1. Phone prefix detection
+  if (phone) {
+    const cleaned = phone.replace("whatsapp:", "");
+    if (PT_PHONE_PREFIXES.some((p) => cleaned.startsWith(p))) return "pt";
+    if (ES_PHONE_PREFIXES.some((p) => cleaned.startsWith(p))) return "es";
+  }
+
+  // 2. Message content detection
+  const lower = firstMessage.trim().toLowerCase();
+  if (PT_WORDS.some((w) => lower.includes(w))) return "pt";
+  if (ES_WORDS.some((w) => lower.includes(w))) return "es";
+
+  // 3. Default
+  return "en";
+}
+
+// ─── i18n Messages ───────────────────────────────────────
+
+const MSG = {
+  greeting: {
+    en: (referral: string) =>
+      `${referral}Hi! 👋 I'm PayJarvis, your personal shopping and research assistant.\n\n🔒 Your data is protected with Zero-Knowledge encryption. Not even we can see your sensitive information.\n\nI can help you with:\n🛒 Shop online for you\n🔍 Search and compare products\n💰 Control your spending automatically\n📋 Organize your personal tasks\n\nWhat's your name?`,
+    pt: (referral: string) =>
+      `${referral}Olá! 👋 Eu sou o PayJarvis, seu assistente pessoal de compras e pesquisa.\n\n🔒 Seus dados são protegidos com criptografia Zero-Knowledge. Nem nós conseguimos ver suas informações sensíveis.\n\nEu posso te ajudar com:\n🛒 Comprar online por você\n🔍 Pesquisar e comparar produtos\n💰 Controlar seus gastos automaticamente\n📋 Organizar suas tarefas pessoais\n\nQual é o seu nome?`,
+    es: (referral: string) =>
+      `${referral}¡Hola! 👋 Soy PayJarvis, tu asistente personal de compras e investigación.\n\n🔒 Tus datos están protegidos con cifrado Zero-Knowledge. Ni nosotros podemos ver tu información sensible.\n\nPuedo ayudarte con:\n🛒 Comprar online por ti\n🔍 Buscar y comparar productos\n💰 Controlar tus gastos automáticamente\n📋 Organizar tus tareas personales\n\n¿Cuál es tu nombre?`,
+  },
+  referralIntro: {
+    en: (name: string) => `Your friend ${name} invited you to try PayJarvis!\n\n`,
+    pt: (name: string) => `Seu amigo ${name} te convidou para experimentar o PayJarvis!\n\n`,
+    es: (name: string) => `¡Tu amigo ${name} te invitó a probar PayJarvis!\n\n`,
+  },
+  nameTooShort: {
+    en: "Name too short. What's your name?",
+    pt: "Nome muito curto. Qual é o seu nome?",
+    es: "Nombre muy corto. ¿Cuál es tu nombre?",
+  },
+  nameTooLong: {
+    en: "Name too long. What's your name?",
+    pt: "Nome muito longo. Qual é o seu nome?",
+    es: "Nombre muy largo. ¿Cuál es tu nombre?",
+  },
+  niceToMeet: {
+    en: (name: string) => `Nice to meet you, ${name}! 😊\n\nWould you like to give me a special name or keep calling me Jarvis?`,
+    pt: (name: string) => `Prazer em te conhecer, ${name}! 😊\n\nVocê quer me dar um nome especial ou pode me chamar de Jarvis?`,
+    es: (name: string) => `¡Mucho gusto, ${name}! 😊\n\n¿Quieres darme un nombre especial o prefieres llamarme Jarvis?`,
+  },
+  keepJarvis: {
+    en: "Alright, just call me Jarvis! 😄",
+    pt: "Beleza, pode me chamar de Jarvis! 😄",
+    es: "¡Perfecto, llámame Jarvis! 😄",
+  },
+  loveNickname: {
+    en: (name: string) => `Love it! From now on, call me ${name}! 🎉`,
+    pt: (name: string) => `Adorei! De agora em diante, me chama de ${name}! 🎉`,
+    es: (name: string) => `¡Me encanta! De ahora en adelante, llámame ${name}! 🎉`,
+  },
+  invalidNickname: {
+    en: "Just type a short name like Luna, Max, or say 'Jarvis is fine' 😊",
+    pt: "Digita um nome curto como Luna, Max, ou diz 'Jarvis tá bom' 😊",
+    es: "Escribe un nombre corto como Luna, Max, o di 'Jarvis está bien' 😊",
+  },
+  emailPasswordPrompt: {
+    en: (prefix: string) =>
+      `${prefix}\n\nNow let's create your PayJarvis account! 🔐\n\nI need two things:\n📧 Your email (to log into PayJarvis)\n🔑 Create a NEW password (this is NOT your email password — it's a new one just for PayJarvis)\n\nSend both together, like this:\nmyemail@gmail.com MyNewPassword123\n\n⚠️ Important: Do NOT send your email password. Create a new, unique password for your PayJarvis account.`,
+    pt: (prefix: string) =>
+      `${prefix}\n\nAgora vamos criar sua conta no PayJarvis! 🔐\n\nPreciso de duas coisas:\n📧 Seu email (para entrar no PayJarvis)\n🔑 Crie uma senha NOVA (NÃO é a senha do seu email — é uma senha nova só para o PayJarvis)\n\nManda os dois juntos, assim:\nmeuemail@gmail.com MinhaSenha123\n\n⚠️ Importante: NÃO envie a senha do seu email. Crie uma senha nova e única para sua conta PayJarvis.`,
+    es: (prefix: string) =>
+      `${prefix}\n\n¡Ahora vamos a crear tu cuenta en PayJarvis! 🔐\n\nNecesito dos cosas:\n📧 Tu email (para entrar en PayJarvis)\n🔑 Crea una contraseña NUEVA (NO es la contraseña de tu email — es una nueva solo para PayJarvis)\n\nEnvía ambos juntos, así:\nmiemail@gmail.com MiContraseña123\n\n⚠️ Importante: NO envíes la contraseña de tu email. Crea una contraseña nueva y única para tu cuenta PayJarvis.`,
+  },
+  emailPasswordRetryNoAt: {
+    en: "No worries! When you're ready, send your email and create a NEW password for PayJarvis.\n\n⚠️ Don't use your email password — create a new one just for PayJarvis.\n\nExample: john@gmail.com MyNewPassword123",
+    pt: "Sem problema! Quando estiver pronto, manda seu email e cria uma senha NOVA para o PayJarvis.\n\n⚠️ Não use a senha do seu email — crie uma nova só para o PayJarvis.\n\nExemplo: joao@gmail.com MinhaSenha123",
+    es: "¡No te preocupes! Cuando estés listo, envía tu email y crea una contraseña NUEVA para PayJarvis.\n\n⚠️ No uses la contraseña de tu email — crea una nueva solo para PayJarvis.\n\nEjemplo: juan@gmail.com MiContraseña123",
+  },
+  emailInvalid: {
+    en: "Hmm, that doesn't look like a valid email. Send your email and a NEW password for PayJarvis together:\n\n⚠️ Don't use your email password — create a new one.\n\nExample: john@gmail.com MyNewPassword123",
+    pt: "Hmm, isso não parece um email válido. Manda seu email e uma senha NOVA para o PayJarvis juntos:\n\n⚠️ Não use a senha do seu email — crie uma nova.\n\nExemplo: joao@gmail.com MinhaSenha123",
+    es: "Hmm, eso no parece un email válido. Envía tu email y una contraseña NUEVA para PayJarvis juntos:\n\n⚠️ No uses la contraseña de tu email — crea una nueva.\n\nEjemplo: juan@gmail.com MiContraseña123",
+  },
+  passwordMissing: {
+    en: "I also need a NEW password for PayJarvis (minimum 6 characters).\n\n⚠️ Don't use your email password — create a new one just for PayJarvis.\n\nExample: john@gmail.com MyNewPassword123",
+    pt: "Também preciso de uma senha NOVA para o PayJarvis (mínimo 6 caracteres).\n\n⚠️ Não use a senha do seu email — crie uma nova só para o PayJarvis.\n\nExemplo: joao@gmail.com MinhaSenha123",
+    es: "También necesito una contraseña NUEVA para PayJarvis (mínimo 6 caracteres).\n\n⚠️ No uses la contraseña de tu email — crea una nueva solo para PayJarvis.\n\nEjemplo: juan@gmail.com MiContraseña123",
+  },
+  passwordTooShort: {
+    en: "Password must be at least 6 characters. Try again with a NEW password for PayJarvis:\n\n⚠️ Remember: this is NOT your email password.\n\nExample: john@gmail.com MyNewPassword123",
+    pt: "A senha precisa ter pelo menos 6 caracteres. Tenta de novo com uma senha NOVA para o PayJarvis:\n\n⚠️ Lembre: NÃO é a senha do seu email.\n\nExemplo: joao@gmail.com MinhaSenha123",
+    es: "La contraseña debe tener al menos 6 caracteres. Intenta de nuevo con una contraseña NUEVA para PayJarvis:\n\n⚠️ Recuerda: NO es la contraseña de tu email.\n\nEjemplo: juan@gmail.com MiContraseña123",
+  },
+  emailCodeSent: {
+    en: "I sent a 6-digit code to your email. What is it?\n\n💡 If you can't find it in your inbox, check your Spam folder!",
+    pt: "Enviei um código de 6 dígitos pro seu email. Qual é o código?\n\n💡 Se não encontrar na caixa de entrada, olha na pasta de Spam!",
+    es: "Envié un código de 6 dígitos a tu email. ¿Cuál es el código?\n\n💡 Si no lo encuentras en tu bandeja, ¡revisa la carpeta de Spam!",
+  },
+  emailCodeWrong: {
+    en: (remaining: number) => `Incorrect code. ${remaining} attempt${remaining === 1 ? "" : "s"} remaining.\n\nEnter the 6-digit code:`,
+    pt: (remaining: number) => `Código incorreto. ${remaining} tentativa${remaining === 1 ? "" : "s"} restante${remaining === 1 ? "" : "s"}.\n\nDigite o código de 6 dígitos:`,
+    es: (remaining: number) => `Código incorrecto. ${remaining} intento${remaining === 1 ? "" : "s"} restante${remaining === 1 ? "" : "s"}.\n\nIngresa el código de 6 dígitos:`,
+  },
+  emailCodeTooMany: {
+    en: "Too many incorrect attempts. I sent a new code to your email.\n\nEnter the new 6-digit code:",
+    pt: "Muitas tentativas incorretas. Enviei um novo código pro seu email.\n\nDigite o novo código de 6 dígitos:",
+    es: "Demasiados intentos incorrectos. Envié un nuevo código a tu email.\n\nIngresa el nuevo código de 6 dígitos:",
+  },
+  accountCreated: {
+    en: "Account created! 🎉\n\nYou arrived at the right time! We're in Beta and access is completely free. Try me out with no commitment!\n\nWant to set up your shopping system now or explore first?\n\n1️⃣ Set up now\n2️⃣ Explore first — I'll set up later",
+    pt: "Conta criada! 🎉\n\nVocê chegou na hora certa! Estamos em Beta e o acesso é totalmente gratuito. Me experimenta sem compromisso!\n\nQuer configurar o sistema de compras agora ou explorar primeiro?\n\n1️⃣ Configurar agora\n2️⃣ Explorar primeiro — configuro depois",
+    es: "¡Cuenta creada! 🎉\n\n¡Llegaste en el momento justo! Estamos en Beta y el acceso es completamente gratis. ¡Pruébame sin compromiso!\n\n¿Quieres configurar tu sistema de compras ahora o explorar primero?\n\n1️⃣ Configurar ahora\n2️⃣ Explorar primero — configuro después",
+  },
+  limitsPrompt: {
+    en: "What spending limit per purchase would you like? (e.g.: $50, $100, $200)",
+    pt: "Qual limite de gasto por compra você quer? (ex.: $50, $100, $200)",
+    es: "¿Qué límite de gasto por compra te gustaría? (ej.: $50, $100, $200)",
+  },
+  limitsInvalid: {
+    en: "Invalid amount. Choose a number between 1 and 10,000:\n\nExample: $50, $100, $200",
+    pt: "Valor inválido. Escolha um número entre 1 e 10.000:\n\nExemplo: $50, $100, $200",
+    es: "Monto inválido. Elige un número entre 1 y 10.000:\n\nEjemplo: $50, $100, $200",
+  },
+  limitsSet: {
+    en: (val: string) => `Great! $${val} per purchase limit set.\n\nRight now I can shop on Amazon for you! More stores coming soon.\n\nWant to connect your Amazon account now?\n\n1️⃣ Yes — let's set it up\n2️⃣ Later — I'll explore first`,
+    pt: (val: string) => `Ótimo! Limite de $${val} por compra definido.\n\nAgora eu consigo comprar na Amazon por você! Mais lojas em breve.\n\nQuer conectar sua conta da Amazon agora?\n\n1️⃣ Sim — vamos configurar\n2️⃣ Depois — vou explorar primeiro`,
+    es: (val: string) => `¡Genial! Límite de $${val} por compra establecido.\n\nAhora puedo comprar en Amazon por ti. ¡Más tiendas pronto!\n\n¿Quieres conectar tu cuenta de Amazon ahora?\n\n1️⃣ Sí — vamos a configurar\n2️⃣ Después — voy a explorar primero`,
+  },
+  storesSkip: {
+    en: "No problem! You can connect Amazon anytime from Settings.\n\n",
+    pt: "Sem problema! Você pode conectar a Amazon a qualquer momento nas Configurações.\n\n",
+    es: "¡No hay problema! Puedes conectar Amazon en cualquier momento desde Configuración.\n\n",
+  },
+  storesConnected: {
+    en: "Amazon connected! ✅ I can now shop for you anytime.\n\n",
+    pt: "Amazon conectada! ✅ Agora posso comprar pra você a qualquer momento.\n\n",
+    es: "¡Amazon conectada! ✅ Ahora puedo comprar por ti en cualquier momento.\n\n",
+  },
+  storesComingSoon: {
+    en: "That store is coming soon! Right now I can shop on Amazon.\n\nWant to connect Amazon?\n\n1️⃣ Yes\n2️⃣ Later",
+    pt: "Essa loja está chegando em breve! Agora eu consigo comprar na Amazon.\n\nQuer conectar a Amazon?\n\n1️⃣ Sim\n2️⃣ Depois",
+    es: "¡Esa tienda llegará pronto! Ahora puedo comprar en Amazon.\n\n¿Quieres conectar Amazon?\n\n1️⃣ Sí\n2️⃣ Después",
+  },
+  storesDefault: {
+    en: "Right now I can shop on Amazon. Want to connect it?\n\n1️⃣ Yes — let's set it up\n2️⃣ Later — I'll explore first",
+    pt: "Agora eu consigo comprar na Amazon. Quer conectar?\n\n1️⃣ Sim — vamos configurar\n2️⃣ Depois — vou explorar primeiro",
+    es: "Ahora puedo comprar en Amazon. ¿Quieres conectarla?\n\n1️⃣ Sí — vamos a configurar\n2️⃣ Después — voy a explorar primero",
+  },
+  shippingPrompt: {
+    en: (prefix: string) => `${prefix}Where should I deliver your purchases? Send me your shipping address:\n\n📍 Street, City, State, ZIP code\n\n(Example: 1234 Main St, Miami, FL 33101)\n\nOr type "skip" to add later.`,
+    pt: (prefix: string) => `${prefix}Onde devo entregar suas compras? Me manda seu endereço de entrega:\n\n📍 Rua, Cidade, Estado, CEP\n\n(Exemplo: Rua das Flores 123, São Paulo, SP 01000-000)\n\nOu digite "pular" para adicionar depois.`,
+    es: (prefix: string) => `${prefix}¿Dónde debo entregar tus compras? Envíame tu dirección de envío:\n\n📍 Calle, Ciudad, Estado, Código Postal\n\n(Ejemplo: Calle Principal 123, Ciudad de México, CDMX 06000)\n\nO escribe "saltar" para agregar después.`,
+  },
+  shippingTooShort: {
+    en: "That seems too short for an address. Please include street, city, state and ZIP code.\n\n(Example: 1234 Main St, Miami, FL 33101)\n\nOr type \"skip\" to add later.",
+    pt: "Parece muito curto para um endereço. Inclua rua, cidade, estado e CEP.\n\n(Exemplo: Rua das Flores 123, São Paulo, SP 01000-000)\n\nOu digite \"pular\" para adicionar depois.",
+    es: "Eso parece muy corto para una dirección. Incluye calle, ciudad, estado y código postal.\n\n(Ejemplo: Calle Principal 123, Ciudad de México, CDMX 06000)\n\nO escribe \"saltar\" para agregar después.",
+  },
+  shippingConfirm: {
+    en: (addr: string) => `Got it! All purchases will be delivered to:\n📍 ${addr}\n\nYou can change this anytime by saying "update my address".\n\n`,
+    pt: (addr: string) => `Entendido! Todas as compras serão entregues em:\n📍 ${addr}\n\nVocê pode mudar a qualquer momento dizendo "atualiza meu endereço".\n\n`,
+    es: (addr: string) => `¡Entendido! Todas las compras se entregarán en:\n📍 ${addr}\n\nPuedes cambiar en cualquier momento diciendo "actualiza mi dirección".\n\n`,
+  },
+  paymentPrompt: {
+    en: (link: string) => `Last step — add your card so I can shop for you.\n\nClick here to register securely (powered by Stripe): ${link}\n\nOr type "skip" to add later.`,
+    pt: (link: string) => `Último passo — adicione seu cartão para que eu possa comprar por você.\n\nClique aqui para cadastrar com segurança (powered by Stripe): ${link}\n\nOu digite "pular" para adicionar depois.`,
+    es: (link: string) => `Último paso — agrega tu tarjeta para que pueda comprar por ti.\n\nHaz clic aquí para registrar de forma segura (powered by Stripe): ${link}\n\nO escribe "saltar" para agregar después.`,
+  },
+  paymentFallback: {
+    en: "Last step — add a payment method.\n\nYou can set this up later in the dashboard.\n\nType \"skip\" to finish.",
+    pt: "Último passo — adicione um método de pagamento.\n\nVocê pode configurar isso depois no painel.\n\nDigite \"pular\" para finalizar.",
+    es: "Último paso — agrega un método de pago.\n\nPuedes configurar esto después en el panel.\n\nEscribe \"saltar\" para terminar.",
+  },
+  paymentNotDetected: {
+    en: "I haven't detected the payment yet. Try clicking the link above to add your card.\n\nOr type \"skip\" to set up later.",
+    pt: "Ainda não detectei o pagamento. Tenta clicar no link acima para adicionar seu cartão.\n\nOu digite \"pular\" para configurar depois.",
+    es: "Aún no detecté el pago. Intenta hacer clic en el enlace de arriba para agregar tu tarjeta.\n\nO escribe \"saltar\" para configurar después.",
+  },
+  paymentClickLink: {
+    en: "Click the link above to add your card.\n\nType \"done\" when finished or \"skip\" to do it later.",
+    pt: "Clique no link acima para adicionar seu cartão.\n\nDigite \"pronto\" quando terminar ou \"pular\" para fazer depois.",
+    es: "Haz clic en el enlace de arriba para agregar tu tarjeta.\n\nEscribe \"listo\" cuando termines o \"saltar\" para hacerlo después.",
+  },
+  complete: {
+    en: (nickname: string) => `${nickname} is ready to help! 🚀\n\nYou arrived at the right time! We're in Beta — completely free, no commitment!\n\nWould you like to set up shopping so I can buy things for you? 🛒\nClick here: https://www.payjarvis.com/dashboard/setup-shopping\nIt takes 2 minutes and your card info is protected by Stripe 🔒\n\nAsk me anything — I'm here 24/7 for you!`,
+    pt: (nickname: string) => `${nickname} está pronto pra te ajudar! 🚀\n\nVocê chegou na hora certa! Estamos em Beta — totalmente gratuito, sem compromisso!\n\nQuer configurar as compras pra eu poder comprar pra você? 🛒\nClique aqui: https://www.payjarvis.com/dashboard/setup-shopping\nLeva 2 minutos e seus dados do cartão são protegidos pelo Stripe 🔒\n\nMe pergunta qualquer coisa — estou aqui 24/7 pra você!`,
+    es: (nickname: string) => `¡${nickname} está listo para ayudarte! 🚀\n\n¡Llegaste en el momento justo! Estamos en Beta — completamente gratis, sin compromiso.\n\n¿Quieres configurar las compras para que pueda comprar por ti? 🛒\nHaz clic aquí: https://www.payjarvis.com/dashboard/setup-shopping\nToma 2 minutos y tus datos están protegidos por Stripe 🔒\n\n¡Pregúntame lo que sea — estoy aquí 24/7 para ti!`,
+  },
+  noSession: {
+    en: "No active onboarding session.",
+    pt: "Nenhuma sessão de onboarding ativa.",
+    es: "No hay sesión de onboarding activa.",
+  },
+  sessionExpired: {
+    en: "Session expired. Start again with /start.",
+    pt: "Sessão expirada. Comece novamente com /start.",
+    es: "Sesión expirada. Empieza de nuevo con /start.",
+  },
+  // Resume messages
+  resumeName: {
+    en: "Looks like you already started! What's your name?",
+    pt: "Parece que você já começou! Qual é o seu nome?",
+    es: "¡Parece que ya empezaste! ¿Cuál es tu nombre?",
+  },
+  resumeNickname: {
+    en: (name: string) => `${name}! Would you like to give me a special name or keep calling me Jarvis?`,
+    pt: (name: string) => `${name}! Quer me dar um nome especial ou pode me chamar de Jarvis?`,
+    es: (name: string) => `¡${name}! ¿Quieres darme un nombre especial o prefieres llamarme Jarvis?`,
+  },
+  resumeEmailPassword: {
+    en: "Let's create your PayJarvis account! 🔐\n\nSend your email and a NEW password (not your email password — a new one just for PayJarvis):\n\nExample: myemail@gmail.com MyNewPassword123",
+    pt: "Vamos criar sua conta no PayJarvis! 🔐\n\nManda seu email e uma senha NOVA (não é a senha do seu email — é uma nova só para o PayJarvis):\n\nExemplo: meuemail@gmail.com MinhaSenha123",
+    es: "¡Vamos a crear tu cuenta en PayJarvis! 🔐\n\nEnvía tu email y una contraseña NUEVA (no es la contraseña de tu email — es una nueva solo para PayJarvis):\n\nEjemplo: miemail@gmail.com MiContraseña123",
+  },
+  resumeEmailConfirm: {
+    en: (email: string) => `I already sent the code to ${email}. Enter the 6-digit code:`,
+    pt: (email: string) => `Já enviei o código para ${email}. Digite o código de 6 dígitos:`,
+    es: (email: string) => `Ya envié el código a ${email}. Ingresa el código de 6 dígitos:`,
+  },
+  resumeBetaChoice: {
+    en: "Want to set up your shopping system now or explore first?\n\n1️⃣ Set up now\n2️⃣ Explore first",
+    pt: "Quer configurar o sistema de compras agora ou explorar primeiro?\n\n1️⃣ Configurar agora\n2️⃣ Explorar primeiro",
+    es: "¿Quieres configurar tu sistema de compras ahora o explorar primero?\n\n1️⃣ Configurar ahora\n2️⃣ Explorar primero",
+  },
+  resumeLimits: {
+    en: "What spending limit per purchase would you like? (e.g.: $50, $100, $200)",
+    pt: "Qual limite de gasto por compra você quer? (ex.: $50, $100, $200)",
+    es: "¿Qué límite de gasto por compra te gustaría? (ej.: $50, $100, $200)",
+  },
+  resumeStores: {
+    en: "Which stores can I shop for you?\n\n🟢 Amazon\n🔜 eBay, Walmart, Target, Best Buy — coming soon\n\nOr type a store website. Type \"done\" to continue.",
+    pt: "Em quais lojas posso comprar pra você?\n\n🟢 Amazon\n🔜 eBay, Walmart, Target, Best Buy — em breve\n\nOu digita o site de uma loja. Digite \"pronto\" para continuar.",
+    es: "¿En qué tiendas puedo comprar por ti?\n\n🟢 Amazon\n🔜 eBay, Walmart, Target, Best Buy — próximamente\n\nO escribe el sitio de una tienda. Escribe \"listo\" para continuar.",
+  },
+  resumeShipping: {
+    en: "Where should I deliver your purchases? Send your address (Street, City, State, ZIP).\n\nOr type \"skip\" to add later.",
+    pt: "Onde devo entregar suas compras? Mande seu endereço (Rua, Cidade, Estado, CEP).\n\nOu digite \"pular\" para adicionar depois.",
+    es: "¿Dónde debo entregar tus compras? Envía tu dirección (Calle, Ciudad, Estado, CP).\n\nO escribe \"saltar\" para agregar después.",
+  },
+  resumePayment: {
+    en: "Just need to add your card. Click the link I sent or type \"skip\" to do it later.",
+    pt: "Só falta adicionar seu cartão. Clique no link que enviei ou digite \"pular\" para fazer depois.",
+    es: "Solo falta agregar tu tarjeta. Haz clic en el enlace que envié o escribe \"saltar\" para hacerlo después.",
+  },
+  resumeDefault: {
+    en: "What's your name so we can get started?",
+    pt: "Qual é o seu nome para começarmos?",
+    es: "¿Cuál es tu nombre para empezar?",
+  },
+} as const;
+
+function t(key: keyof typeof MSG, lang: Lang): any {
+  const entry = MSG[key] as Record<string, unknown>;
+  return entry[lang] ?? entry["en"];
 }
 
 // ─── Helpers ─────────────────────────────────────────────
@@ -58,25 +321,36 @@ async function withRetry<T>(
   throw new Error("unreachable");
 }
 
+async function getSessionLang(sessionId: string): Promise<Lang> {
+  const s = await prisma.onboardingSession.findUnique({ where: { id: sessionId }, select: { language: true } });
+  return (s?.language as Lang) ?? "en";
+}
+
 // ─── Start ───────────────────────────────────────────────
 
 export async function startOnboarding(
   chatId: string,
   platform: "telegram" | "whatsapp",
-  shareCode?: string
+  shareCode?: string,
+  firstMessage?: string,
 ): Promise<{ sessionId: string; message: string }> {
   const existing = platform === "telegram"
     ? await prisma.onboardingSession.findUnique({ where: { telegramChatId: chatId } })
     : await prisma.onboardingSession.findUnique({ where: { whatsappPhone: chatId } });
 
   if (existing && existing.step !== "complete" && existing.expiresAt > new Date()) {
-    const response = await getStepMessage(existing.step, existing);
+    const lang = (existing.language as Lang) ?? "en";
+    const response = await getStepMessage(existing.step, existing, lang);
     return { sessionId: existing.id, message: response };
   }
 
   if (existing) {
     await prisma.onboardingSession.delete({ where: { id: existing.id } });
   }
+
+  // Detect language from phone number and first message
+  const phone = platform === "whatsapp" ? chatId : null;
+  const lang = detectLanguage(phone, firstMessage ?? "");
 
   let sharedByName: string | null = null;
   if (shareCode) {
@@ -88,16 +362,17 @@ export async function startOnboarding(
       telegramChatId: platform === "telegram" ? chatId : null,
       whatsappPhone: platform === "whatsapp" ? chatId : null,
       shareCode: shareCode ?? null,
+      language: lang,
       step: "name",
       expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000), // 72h
     },
   });
 
   const referralIntro = sharedByName
-    ? `Your friend ${sharedByName} invited you to try PayJarvis!\n\n`
+    ? (t("referralIntro", lang) as (name: string) => string)(sharedByName)
     : "";
 
-  const greeting = `${referralIntro}Hi! 👋 I'm PayJarvis, your personal shopping and research assistant.\n\nI can help you with:\n🛒 Shop online for you\n🔍 Search and compare products\n💰 Control your spending automatically\n📋 Organize your personal tasks\n\nWhat's your name?`;
+  const greeting = (t("greeting", lang) as (referral: string) => string)(referralIntro);
 
   return { sessionId: session.id, message: greeting };
 }
@@ -114,33 +389,35 @@ export async function processStep(
     : await prisma.onboardingSession.findUnique({ where: { whatsappPhone: chatId } });
 
   if (!session || session.step === "complete") {
-    return { message: "No active onboarding session.", step: "none", complete: false };
+    return { message: MSG.noSession.en, step: "none", complete: false };
   }
+
+  const lang = (session.language as Lang) ?? "en";
 
   if (session.expiresAt < new Date()) {
     await prisma.onboardingSession.delete({ where: { id: session.id } });
-    return { message: "Session expired. Start again with /start.", step: "expired", complete: false };
+    return { message: t("sessionExpired", lang) as string, step: "expired", complete: false };
   }
 
   switch (session.step) {
     case "name":
-      return handleNameStep(session.id, userInput);
+      return handleNameStep(session.id, userInput, lang);
     case "bot_nickname":
-      return handleBotNicknameStep(session.id, userInput);
+      return handleBotNicknameStep(session.id, userInput, lang);
     case "email_password":
-      return handleEmailPasswordStep(session.id, userInput);
+      return handleEmailPasswordStep(session.id, userInput, lang);
     case "email_confirm":
-      return handleEmailConfirmStep(session.id, userInput);
+      return handleEmailConfirmStep(session.id, userInput, lang);
     case "beta_choice":
-      return handleBetaChoiceStep(session.id, userInput);
+      return handleBetaChoiceStep(session.id, userInput, lang);
     case "limits":
-      return handleLimitsStep(session.id, userInput);
+      return handleLimitsStep(session.id, userInput, lang);
     case "stores":
-      return handleStoresStep(session.id, userInput);
+      return handleStoresStep(session.id, userInput, lang);
     case "shipping_address":
-      return handleShippingAddressStep(session.id, userInput);
+      return handleShippingAddressStep(session.id, userInput, lang);
     case "payment":
-      return handlePaymentStep(session.id, userInput);
+      return handlePaymentStep(session.id, userInput, lang);
     default:
       return { message: "Unexpected state. Try /start again.", step: session.step, complete: false };
   }
@@ -148,14 +425,25 @@ export async function processStep(
 
 // ─── Step: name ──────────────────────────────────────────
 
-async function handleNameStep(sessionId: string, input: string): Promise<BotResponse> {
+async function handleNameStep(sessionId: string, input: string, lang: Lang): Promise<BotResponse> {
   const name = input.trim();
 
   if (name.length < 2) {
-    return { message: "Name too short. What's your name?", step: "name", complete: false };
+    return { message: t("nameTooShort", lang) as string, step: "name", complete: false };
   }
   if (name.length > 100) {
-    return { message: "Name too long. What's your name?", step: "name", complete: false };
+    return { message: t("nameTooLong", lang) as string, step: "name", complete: false };
+  }
+
+  // Re-detect language from first real message if it looks like PT/ES
+  const detected = detectLanguage(null, input);
+  if (detected !== "en") {
+    await prisma.onboardingSession.update({
+      where: { id: sessionId },
+      data: { fullName: name, step: "bot_nickname", language: detected },
+    });
+    const msg = (t("niceToMeet", detected) as (n: string) => string)(name);
+    return { message: msg, step: "bot_nickname", complete: false };
   }
 
   await prisma.onboardingSession.update({
@@ -163,36 +451,32 @@ async function handleNameStep(sessionId: string, input: string): Promise<BotResp
     data: { fullName: name, step: "bot_nickname" },
   });
 
-  return {
-    message: `Nice to meet you, ${name}! 😊\n\nWould you like to give me a special name or keep calling me Jarvis?`,
-    step: "bot_nickname",
-    complete: false,
-  };
+  const msg = (t("niceToMeet", lang) as (n: string) => string)(name);
+  return { message: msg, step: "bot_nickname", complete: false };
 }
 
 // ─── Step: bot_nickname ──────────────────────────────────
 
-async function handleBotNicknameStep(sessionId: string, input: string): Promise<BotResponse> {
+async function handleBotNicknameStep(sessionId: string, input: string, lang: Lang): Promise<BotResponse> {
   const lower = input.trim().toLowerCase();
-  const keepDefault = ["no", "nah", "jarvis", "keep", "that's fine", "fine", "n", "não", "nao", "pode ser"];
-  const notAName = ["falar", "português", "portugues", "english", "spanish", "please", "can you", "speak", "language", "idioma", "sim", "yes", "como", "what", "help", "ajuda", "quero", "want", "could", "would"];
+  const keepDefault = ["no", "nah", "jarvis", "keep", "that's fine", "fine", "n", "não", "nao", "pode ser", "no", "está bien", "esta bien"];
+  const notAName = ["falar", "português", "portugues", "english", "spanish", "please", "can you", "speak", "language", "idioma", "sim", "yes", "como", "what", "help", "ajuda", "quero", "want", "could", "would", "hablar", "español"];
 
   let nickname: string;
   let response: string;
 
   if (keepDefault.some((k) => lower === k || lower.startsWith(k))) {
     nickname = "Jarvis";
-    response = "Alright, just call me Jarvis! 😄";
+    response = t("keepJarvis", lang) as string;
   } else if (input.trim().length > 20 || notAName.some((w) => lower.includes(w))) {
-    // Not a valid bot name — likely a sentence or language request
     return {
-      message: "Just type a short name like Luna, Max, or say 'Jarvis is fine' 😊",
+      message: t("invalidNickname", lang) as string,
       step: "bot_nickname",
       complete: false,
     };
   } else {
-    nickname = input.trim().slice(0, 50);
-    response = `Love it! From now on, call me ${nickname}! 🎉`;
+    nickname = input.trim().slice(0, 20);
+    response = (t("loveNickname", lang) as (n: string) => string)(nickname);
   }
 
   await prisma.onboardingSession.update({
@@ -201,7 +485,7 @@ async function handleBotNicknameStep(sessionId: string, input: string): Promise<
   });
 
   return {
-    message: `${response}\n\nNow I need to register you. Send me your email and create a password:\n\n📧 Email:\n🔒 Password:\n\n(You can send both in one message, e.g.: myemail@gmail.com MyPassword123)`,
+    message: (t("emailPasswordPrompt", lang) as (prefix: string) => string)(response),
     step: "email_password",
     complete: false,
   };
@@ -209,13 +493,13 @@ async function handleBotNicknameStep(sessionId: string, input: string): Promise<
 
 // ─── Step: email_password ────────────────────────────────
 
-async function handleEmailPasswordStep(sessionId: string, input: string): Promise<BotResponse> {
+async function handleEmailPasswordStep(sessionId: string, input: string, lang: Lang): Promise<BotResponse> {
   const trimmed = input.trim();
 
   // Detect if user sent a question/sentence instead of email+password
   if (!trimmed.includes("@")) {
     return {
-      message: "No worries! When you're ready, send your email and a password together.\n\nExample: john@gmail.com MyPassword123",
+      message: t("emailPasswordRetryNoAt", lang) as string,
       step: "email_password",
       complete: false,
     };
@@ -236,7 +520,7 @@ async function handleEmailPasswordStep(sessionId: string, input: string): Promis
 
   if (!email) {
     return {
-      message: "Hmm, that doesn't look like a valid email. Send your email and password together:\n\nExample: john@gmail.com MyPassword123",
+      message: t("emailInvalid", lang) as string,
       step: "email_password",
       complete: false,
     };
@@ -244,7 +528,7 @@ async function handleEmailPasswordStep(sessionId: string, input: string): Promis
 
   if (!password) {
     return {
-      message: "I also need a password (minimum 6 characters). Send email and password:\n\nExample: john@gmail.com MyPassword123",
+      message: t("passwordMissing", lang) as string,
       step: "email_password",
       complete: false,
     };
@@ -252,7 +536,7 @@ async function handleEmailPasswordStep(sessionId: string, input: string): Promis
 
   if (password.length < 6) {
     return {
-      message: "Password must be at least 6 characters. Try again:\n\nExample: john@gmail.com MyPassword123",
+      message: t("passwordTooShort", lang) as string,
       step: "email_password",
       complete: false,
     };
@@ -270,7 +554,7 @@ async function handleEmailPasswordStep(sessionId: string, input: string): Promis
   });
 
   return {
-    message: `I sent a 6-digit code to your email. What is it?\n\n💡 If you can't find it in your inbox, check your Spam folder!`,
+    message: t("emailCodeSent", lang) as string,
     step: "email_confirm",
     complete: false,
   };
@@ -278,7 +562,7 @@ async function handleEmailPasswordStep(sessionId: string, input: string): Promis
 
 // ─── Step: email_confirm ─────────────────────────────────
 
-async function handleEmailConfirmStep(sessionId: string, input: string): Promise<BotResponse> {
+async function handleEmailConfirmStep(sessionId: string, input: string, lang: Lang): Promise<BotResponse> {
   const code = input.trim();
   const session = await prisma.onboardingSession.findUnique({ where: { id: sessionId } });
   if (!session) return { message: "Session not found.", step: "error", complete: false };
@@ -301,7 +585,7 @@ async function handleEmailConfirmStep(sessionId: string, input: string): Promise
       }
 
       return {
-        message: "Too many incorrect attempts. I sent a new code to your email.\n\nEnter the new 6-digit code:",
+        message: t("emailCodeTooMany", lang) as string,
         step: "email_confirm",
         complete: false,
       };
@@ -314,7 +598,7 @@ async function handleEmailConfirmStep(sessionId: string, input: string): Promise
 
     const remaining = MAX_ATTEMPTS - attempts;
     return {
-      message: `Incorrect code. ${remaining} attempt${remaining === 1 ? "" : "s"} remaining.\n\nEnter the 6-digit code:`,
+      message: (t("emailCodeWrong", lang) as (n: number) => string)(remaining),
       step: "email_confirm",
       complete: false,
     };
@@ -329,7 +613,7 @@ async function handleEmailConfirmStep(sessionId: string, input: string): Promise
   });
 
   return {
-    message: `Account created! 🎉\n\nYou arrived at the right time! We're in Beta and access is completely free. Try me out with no commitment!\n\nWant to set up your shopping system now or explore first?\n\n1️⃣ Set up now\n2️⃣ Explore first — I'll set up later`,
+    message: t("accountCreated", lang) as string,
     step: "beta_choice",
     complete: false,
   };
@@ -337,11 +621,11 @@ async function handleEmailConfirmStep(sessionId: string, input: string): Promise
 
 // ─── Step: beta_choice ───────────────────────────────────
 
-async function handleBetaChoiceStep(sessionId: string, input: string): Promise<BotResponse> {
+async function handleBetaChoiceStep(sessionId: string, input: string, lang: Lang): Promise<BotResponse> {
   const lower = input.trim().toLowerCase();
 
-  if (lower === "2" || lower.includes("later") || lower.includes("explore") || lower.includes("depois")) {
-    return completeOnboarding(sessionId);
+  if (lower === "2" || lower.includes("later") || lower.includes("explore") || lower.includes("depois") || lower.includes("después")) {
+    return completeOnboarding(sessionId, lang);
   }
 
   await prisma.onboardingSession.update({
@@ -350,7 +634,7 @@ async function handleBetaChoiceStep(sessionId: string, input: string): Promise<B
   });
 
   return {
-    message: "What spending limit per purchase would you like? (e.g.: $50, $100, $200)",
+    message: t("limitsPrompt", lang) as string,
     step: "limits",
     complete: false,
   };
@@ -358,13 +642,13 @@ async function handleBetaChoiceStep(sessionId: string, input: string): Promise<B
 
 // ─── Step: limits ────────────────────────────────────────
 
-async function handleLimitsStep(sessionId: string, input: string): Promise<BotResponse> {
+async function handleLimitsStep(sessionId: string, input: string, lang: Lang): Promise<BotResponse> {
   const cleaned = input.replace(/[^0-9.]/g, "");
   const value = parseFloat(cleaned);
 
   if (isNaN(value) || value <= 0 || value > 10000) {
     return {
-      message: "Invalid amount. Choose a number between 1 and 10,000:\n\nExample: $50, $100, $200",
+      message: t("limitsInvalid", lang) as string,
       step: "limits",
       complete: false,
     };
@@ -388,7 +672,7 @@ async function handleLimitsStep(sessionId: string, input: string): Promise<BotRe
   });
 
   return {
-    message: `Great! $${value.toFixed(0)} per purchase limit set.\n\nRight now I can shop on Amazon for you! More stores coming soon.\n\nWant to connect your Amazon account now?\n\n1️⃣ Yes — let's set it up\n2️⃣ Later — I'll explore first`,
+    message: (t("limitsSet", lang) as (val: string) => string)(value.toFixed(0)),
     step: "stores",
     complete: false,
   };
@@ -396,18 +680,18 @@ async function handleLimitsStep(sessionId: string, input: string): Promise<BotRe
 
 // ─── Step: stores ────────────────────────────────────────
 
-async function handleStoresStep(sessionId: string, input: string): Promise<BotResponse> {
+async function handleStoresStep(sessionId: string, input: string, lang: Lang): Promise<BotResponse> {
   const lower = input.trim().toLowerCase();
   const session = await prisma.onboardingSession.findUnique({ where: { id: sessionId } });
   if (!session?.userId) return { message: "Internal error.", step: "error", complete: false };
 
   // "Later" / Skip / 2
-  if (lower === "2" || lower === "later" || lower === "skip" || lower === "done" || lower === "pular" || lower === "pronto" || lower === "depois") {
-    return moveToShippingStep(sessionId, "No problem! You can connect Amazon anytime from Settings.\n\n");
+  if (lower === "2" || lower === "later" || lower === "skip" || lower === "done" || lower === "pular" || lower === "pronto" || lower === "depois" || lower === "saltar" || lower === "después") {
+    return moveToShippingStep(sessionId, t("storesSkip", lang) as string, lang);
   }
 
   // "Yes" / 1 / Amazon
-  if (lower === "1" || lower === "yes" || lower === "sim" || lower === "amazon" || lower.includes("yes") || lower.includes("amazon") || lower.includes("set")) {
+  if (lower === "1" || lower === "yes" || lower === "sim" || lower === "sí" || lower === "si" || lower === "amazon" || lower.includes("yes") || lower.includes("amazon") || lower.includes("set")) {
     await connectStore(session.userId, "amazon", "https://www.amazon.com", "Amazon", true);
 
     await prisma.onboardingSession.update({
@@ -415,21 +699,21 @@ async function handleStoresStep(sessionId: string, input: string): Promise<BotRe
       data: { storesConfigured: true },
     });
 
-    return moveToShippingStep(sessionId, "Amazon connected! ✅ I can now shop for you anytime.\n\n");
+    return moveToShippingStep(sessionId, t("storesConnected", lang) as string, lang);
   }
 
   // Coming soon stores
   const comingSoon = ["ebay", "walmart", "target", "best buy", "bestbuy", "nike", "zara"];
   if (comingSoon.some((s) => lower.includes(s))) {
     return {
-      message: "That store is coming soon! Right now I can shop on Amazon.\n\nWant to connect Amazon?\n\n1️⃣ Yes\n2️⃣ Later",
+      message: t("storesComingSoon", lang) as string,
       step: "stores",
       complete: false,
     };
   }
 
   return {
-    message: "Right now I can shop on Amazon. Want to connect it?\n\n1️⃣ Yes — let's set it up\n2️⃣ Later — I'll explore first",
+    message: t("storesDefault", lang) as string,
     step: "stores",
     complete: false,
   };
@@ -524,15 +808,18 @@ async function connectStore(
 
 async function moveToShippingStep(
   sessionId: string,
-  prefix = ""
+  prefix: string,
+  lang?: Lang,
 ): Promise<BotResponse> {
+  const effectiveLang = lang ?? await getSessionLang(sessionId);
+
   await prisma.onboardingSession.update({
     where: { id: sessionId },
     data: { step: "shipping_address" },
   });
 
   return {
-    message: `${prefix}Where should I deliver your purchases? Send me your shipping address:\n\n📍 Street, City, State, ZIP code\n\n(Example: 1234 Main St, Miami, FL 33101)\n\nOr type "skip" to add later.`,
+    message: (t("shippingPrompt", effectiveLang) as (p: string) => string)(prefix),
     step: "shipping_address",
     complete: false,
   };
@@ -540,19 +827,19 @@ async function moveToShippingStep(
 
 // ─── Step: shipping_address ─────────────────────────────
 
-async function handleShippingAddressStep(sessionId: string, input: string): Promise<BotResponse> {
+async function handleShippingAddressStep(sessionId: string, input: string, lang: Lang): Promise<BotResponse> {
   const lower = input.trim().toLowerCase();
   const session = await prisma.onboardingSession.findUnique({ where: { id: sessionId } });
   if (!session?.userId) return { message: "Internal error.", step: "error", complete: false };
 
-  if (lower === "skip" || lower === "pular") {
-    return moveToPaymentStep(sessionId, session.userId);
+  if (lower === "skip" || lower === "pular" || lower === "saltar") {
+    return moveToPaymentStep(sessionId, session.userId, lang);
   }
 
   const address = input.trim();
   if (address.length < 10) {
     return {
-      message: "That seems too short for an address. Please include street, city, state and ZIP code.\n\n(Example: 1234 Main St, Miami, FL 33101)\n\nOr type \"skip\" to add later.",
+      message: t("shippingTooShort", lang) as string,
       step: "shipping_address",
       complete: false,
     };
@@ -563,20 +850,22 @@ async function handleShippingAddressStep(sessionId: string, input: string): Prom
     data: { shippingAddress: address },
   });
 
-  return moveToPaymentStep(sessionId, session.userId, `Got it! All purchases will be delivered to:\n📍 ${address}\n\nYou can change this anytime by saying "update my address".\n\n`);
+  const prefix = (t("shippingConfirm", lang) as (addr: string) => string)(address);
+  return moveToPaymentStep(sessionId, session.userId, lang, prefix);
 }
 
 async function moveToPaymentStep(
   sessionId: string,
   userId: string,
+  lang: Lang,
   prefix = ""
 ): Promise<BotResponse> {
   let paymentMessage = "";
   try {
     const link = await generateStripeSetupLink(userId, sessionId);
-    paymentMessage = `Last step — add your card so I can shop for you.\n\nClick here to register securely (powered by Stripe): ${link}\n\nOr type "skip" to add later.`;
+    paymentMessage = (t("paymentPrompt", lang) as (l: string) => string)(link);
   } catch {
-    paymentMessage = "Last step — add a payment method.\n\nYou can set this up later in the dashboard.\n\nType \"skip\" to finish.";
+    paymentMessage = t("paymentFallback", lang) as string;
   }
 
   await prisma.onboardingSession.update({
@@ -593,21 +882,21 @@ async function moveToPaymentStep(
 
 // ─── Step: payment ───────────────────────────────────────
 
-async function handlePaymentStep(sessionId: string, input: string): Promise<BotResponse> {
+async function handlePaymentStep(sessionId: string, input: string, lang: Lang): Promise<BotResponse> {
   const lower = input.trim().toLowerCase();
 
-  if (lower === "skip" || lower === "pular") {
-    return completeOnboarding(sessionId);
+  if (lower === "skip" || lower === "pular" || lower === "saltar") {
+    return completeOnboarding(sessionId, lang);
   }
 
   const session = await prisma.onboardingSession.findUnique({ where: { id: sessionId } });
   if (!session) return { message: "Session not found.", step: "error", complete: false };
 
   if (session.paymentSetup) {
-    return completeOnboarding(sessionId);
+    return completeOnboarding(sessionId, lang);
   }
 
-  if (lower === "done" || lower === "pronto" || lower === "ok" || lower === "✅") {
+  if (lower === "done" || lower === "pronto" || lower === "listo" || lower === "ok" || lower === "✅") {
     if (session.stripeSetupIntent) {
       try {
         const provider = getPaymentProvider("stripe") as StripeProvider;
@@ -617,7 +906,7 @@ async function handlePaymentStep(sessionId: string, input: string): Promise<BotR
             where: { id: sessionId },
             data: { paymentSetup: true },
           });
-          return completeOnboarding(sessionId);
+          return completeOnboarding(sessionId, lang);
         }
       } catch {
         // Setup intent not completed yet
@@ -625,14 +914,14 @@ async function handlePaymentStep(sessionId: string, input: string): Promise<BotR
     }
 
     return {
-      message: "I haven't detected the payment yet. Try clicking the link above to add your card.\n\nOr type \"skip\" to set up later.",
+      message: t("paymentNotDetected", lang) as string,
       step: "payment",
       complete: false,
     };
   }
 
   return {
-    message: "Click the link above to add your card.\n\nType \"done\" when finished or \"skip\" to do it later.",
+    message: t("paymentClickLink", lang) as string,
     step: "payment",
     complete: false,
   };
@@ -640,10 +929,11 @@ async function handlePaymentStep(sessionId: string, input: string): Promise<BotR
 
 // ─── Complete ────────────────────────────────────────────
 
-export async function completeOnboarding(sessionId: string): Promise<BotResponse> {
+export async function completeOnboarding(sessionId: string, lang?: Lang): Promise<BotResponse> {
   const session = await prisma.onboardingSession.findUnique({ where: { id: sessionId } });
   if (!session) return { message: "Session not found.", step: "error", complete: false };
 
+  const effectiveLang = lang ?? (session.language as Lang) ?? "en";
   const nickname = session.botNickname || "Jarvis";
 
   if (session.userId) {
@@ -674,9 +964,17 @@ export async function completeOnboarding(sessionId: string): Promise<BotResponse
       }
     });
 
-    // Sequence init with retry
+    // Seed user facts so AI remembers onboarding data
     const platform = session.telegramChatId ? "telegram" : "whatsapp";
     const chatId = session.telegramChatId ?? session.whatsappPhone ?? "";
+
+    if (chatId) {
+      seedUserFacts(chatId, session, effectiveLang).catch((err) => {
+        console.error(`[Onboarding] seedUserFacts error for ${chatId}:`, (err as Error).message);
+      });
+    }
+
+    // Sequence init with retry
     const referrerName = session.shareCode ? await getSharedByName(session.shareCode) : null;
 
     if (chatId) {
@@ -700,7 +998,7 @@ export async function completeOnboarding(sessionId: string): Promise<BotResponse
   }
 
   return {
-    message: `${nickname} is ready to help! 🚀\n\nYou arrived at the right time! We're in Beta — completely free, no commitment!\n\nAsk me anything — I'm here 24/7 for you!`,
+    message: (t("complete", effectiveLang) as (n: string) => string)(nickname),
     step: "complete",
     complete: true,
   };
@@ -747,6 +1045,41 @@ export async function generateStripeSetupLink(userId: string, sessionId: string)
   });
 
   return link;
+}
+
+// ─── Seed user facts from onboarding data ────────────────
+
+async function seedUserFacts(
+  chatId: string,
+  session: { fullName?: string | null; botNickname?: string | null; email?: string | null },
+  lang: Lang,
+) {
+  const langCode = lang === "pt" ? "pt-BR" : lang === "es" ? "es-ES" : "en-US";
+  const facts: [string, string, string][] = [];
+
+  if (session.fullName) {
+    facts.push(["user_name", session.fullName, "identity"]);
+    const firstName = session.fullName.split(" ")[0];
+    if (firstName) facts.push(["first_name", firstName, "identity"]);
+  }
+  if (session.botNickname) {
+    facts.push(["bot_nickname", session.botNickname, "identity"]);
+  }
+  if (session.email) {
+    facts.push(["email", session.email, "identity"]);
+  }
+  facts.push(["language", langCode, "preferences"]);
+
+  for (const [key, value, category] of facts) {
+    await prisma.$executeRaw`
+      INSERT INTO openclaw_user_facts (user_id, fact_key, fact_value, category, source, updated_at)
+      VALUES (${chatId}, ${key}, ${value}, ${category}, ${"onboarding"}, now())
+      ON CONFLICT (user_id, fact_key) DO UPDATE SET
+        fact_value = ${value}, category = ${category}, source = ${"onboarding"}, updated_at = now()
+    `;
+  }
+
+  console.log(`[Onboarding] Seeded ${facts.length} user facts for ${chatId} (lang: ${langCode})`);
 }
 
 // ─── Session check ───────────────────────────────────────
@@ -904,28 +1237,28 @@ async function createDefaultBot(userId: string, botName = "Jarvis"): Promise<str
 
 // ─── Step message (resume) ───────────────────────────────
 
-async function getStepMessage(step: string, session: { email?: string | null; fullName?: string | null }): Promise<string> {
+async function getStepMessage(step: string, session: { email?: string | null; fullName?: string | null }, lang: Lang): Promise<string> {
   switch (step) {
     case "name":
-      return "Looks like you already started! What's your name?";
+      return t("resumeName", lang) as string;
     case "bot_nickname":
-      return `${session.fullName ?? "Hey"}! Would you like to give me a special name or keep calling me Jarvis?`;
+      return (t("resumeNickname", lang) as (n: string) => string)(session.fullName ?? "Hey");
     case "email_password":
-      return "Send me your email and create a password:\n\n(e.g.: myemail@gmail.com MyPassword123)";
+      return t("resumeEmailPassword", lang) as string;
     case "email_confirm":
-      return `I already sent the code to ${session.email ?? "your email"}. Enter the 6-digit code:`;
+      return (t("resumeEmailConfirm", lang) as (e: string) => string)(session.email ?? "your email");
     case "beta_choice":
-      return "Want to set up your shopping system now or explore first?\n\n1️⃣ Set up now\n2️⃣ Explore first";
+      return t("resumeBetaChoice", lang) as string;
     case "limits":
-      return "What spending limit per purchase would you like? (e.g.: $50, $100, $200)";
+      return t("resumeLimits", lang) as string;
     case "stores":
-      return "Which stores can I shop for you?\n\n🟢 Amazon\n🔜 eBay, Walmart, Target, Best Buy — coming soon\n\nOr type a store website. Type \"done\" to continue.";
+      return t("resumeStores", lang) as string;
     case "shipping_address":
-      return "Where should I deliver your purchases? Send your address (Street, City, State, ZIP).\n\nOr type \"skip\" to add later.";
+      return t("resumeShipping", lang) as string;
     case "payment":
-      return "Just need to add your card. Click the link I sent or type \"skip\" to do it later.";
+      return t("resumePayment", lang) as string;
     default:
-      return "What's your name so we can get started?";
+      return t("resumeDefault", lang) as string;
   }
 }
 
@@ -940,13 +1273,15 @@ async function notifyReferrer(shareCode: string, newUserName: string): Promise<v
 
   const referrer = await prisma.user.findUnique({
     where: { id: link.createdByUserId },
-    select: { telegramChatId: true, notificationChannel: true },
+    select: { telegramChatId: true, phone: true, notificationChannel: true },
   });
 
-  if (referrer?.telegramChatId && referrer.notificationChannel === "telegram") {
+  const text = `🎉 ${newUserName} activated the bot you shared!`;
+
+  // Notify via Telegram
+  if (referrer?.telegramChatId) {
     const botToken = process.env.TELEGRAM_BOT_TOKEN;
     if (botToken) {
-      const text = `🎉 ${newUserName} activated the bot you shared!`;
       try {
         await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
           method: "POST",
@@ -954,8 +1289,30 @@ async function notifyReferrer(shareCode: string, newUserName: string): Promise<v
           body: JSON.stringify({ chat_id: referrer.telegramChatId, text }),
         });
       } catch (err) {
-        console.error("[Onboarding] Failed to notify referrer:", err);
+        console.error("[Onboarding] Failed to notify referrer via Telegram:", err);
       }
+    }
+  }
+
+  // Notify via WhatsApp
+  if (referrer?.phone && referrer.notificationChannel === "whatsapp") {
+    try {
+      const twilioSid = process.env.TWILIO_ACCOUNT_SID;
+      const twilioToken = process.env.TWILIO_AUTH_TOKEN;
+      const fromNumber = process.env.TWILIO_WHATSAPP_NUMBER;
+      if (twilioSid && twilioToken && fromNumber) {
+        const toNumber = `whatsapp:${referrer.phone.startsWith("+") ? referrer.phone : "+" + referrer.phone}`;
+        await fetch(`https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            Authorization: `Basic ${Buffer.from(`${twilioSid}:${twilioToken}`).toString("base64")}`,
+          },
+          body: new URLSearchParams({ From: fromNumber, To: toNumber, Body: text }).toString(),
+        });
+      }
+    } catch (err) {
+      console.error("[Onboarding] Failed to notify referrer via WhatsApp:", err);
     }
   }
 }

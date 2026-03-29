@@ -141,21 +141,22 @@ export class PayPalProvider extends BasePaymentProvider {
   }): Promise<PaymentIntent> {
     const token = await this.getAccessToken();
 
+    const isEmail = params.merchantAccountId.includes("@");
+    const purchaseUnit: Record<string, unknown> = {
+      amount: {
+        currency_code: params.currency.toUpperCase(),
+        value: params.amount.toFixed(2),
+      },
+      custom_id: params.metadata?.transactionId ?? undefined,
+      description: params.metadata?.description ?? "PayJarvis transaction",
+    };
+    if (isEmail) {
+      purchaseUnit.payee = { email_address: params.merchantAccountId };
+    }
+
     const orderPayload = {
       intent: "CAPTURE",
-      purchase_units: [
-        {
-          amount: {
-            currency_code: params.currency.toUpperCase(),
-            value: params.amount.toFixed(2),
-          },
-          custom_id: params.metadata?.transactionId ?? undefined,
-          description: params.metadata?.description ?? "PayJarvis transaction",
-          payee: {
-            email_address: params.merchantAccountId,
-          },
-        },
-      ],
+      purchase_units: [purchaseUnit],
       application_context: {
         brand_name: "PayJarvis",
         shipping_preference: "NO_SHIPPING",

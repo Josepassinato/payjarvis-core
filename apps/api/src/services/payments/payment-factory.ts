@@ -1,14 +1,14 @@
 import type { BasePaymentProvider } from "./base.provider.js";
 import { StripeProvider } from "./providers/stripe.provider.js";
 import { PayPalProvider } from "./providers/paypal.provider.js";
-import { ApplePayProvider } from "./providers/apple-pay.provider.js";
-import { GooglePayProvider } from "./providers/google-pay.provider.js";
+import { SkyfirePaymentProvider } from "./providers/skyfire.provider.js";
+import { MercadoPagoProvider } from "./providers/mercadopago.provider.js";
 
 const providers: Record<string, BasePaymentProvider> = {
   stripe: new StripeProvider(),
   paypal: new PayPalProvider(),
-  apple_pay: new ApplePayProvider(),
-  google_pay: new GooglePayProvider(),
+  skyfire: new SkyfirePaymentProvider(),
+  mercadopago: new MercadoPagoProvider(),
 };
 
 export function getPaymentProvider(name: string): BasePaymentProvider {

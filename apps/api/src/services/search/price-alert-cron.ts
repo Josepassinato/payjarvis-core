@@ -1,0 +1,137 @@
+/**
+ * Price Alert Cron — Checks price alerts every 6 hours.
+ * When price drops below target, sends notification via WhatsApp/Telegram.
+ */
+
+import { prisma } from "@payjarvis/database";
+import { unifiedProductSearch } from "./unified-search.service.js";
+
+const CHECK_INTERVAL = 6 * 60 * 60 * 1000; // 6 hours
+const BATCH_SIZE = 10;
+const BATCH_DELAY = 2000; // 2s between batches
+const PAYJARVIS_URL = process.env.PAYJARVIS_URL || "http://localhost:3001";
+
+export function startPriceAlertCron() {
+  console.log("[PRICE-ALERTS] Cron registered — checks every 6 hours");
+
+  // First check after 2 minutes (let server warm up)
+  setTimeout(() => {
+    checkPriceAlerts().catch(err => console.error("[PRICE-ALERTS] Error:", err.message));
+  }, 120_000);
+
+  // Then every 6 hours
+  setInterval(() => {
+    checkPriceAlerts().catch(err => console.error("[PRICE-ALERTS] Error:", err.message));
+  }, CHECK_INTERVAL);
+}
+
+export async function checkPriceAlerts() {
+  const sixHoursAgo = new Date(Date.now() - CHECK_INTERVAL);
+
+  const alerts = await prisma.priceAlert.findMany({
+    where: {
+      active: true,
+      OR: [
+        { lastChecked: null },
+        { lastChecked: { lt: sixHoursAgo } },
+      ],
+    },
+    orderBy: { lastChecked: "asc" },
+    take: 50, // max 50 alerts per cycle
+  });
+
+  if (alerts.length === 0) return;
+  console.log(`[PRICE-ALERTS] Checking ${alerts.length} active alerts`);
+
+  // Process in batches
+  for (let i = 0; i < alerts.length; i += BATCH_SIZE) {
+    const batch = alerts.slice(i, i + BATCH_SIZE);
+
+    await Promise.allSettled(batch.map(async (alert) => {
+      try {
+        const result = await unifiedProductSearch({
+          query: alert.query,
+          store: alert.store || undefined,
+          country: alert.country,
+          maxResults: 1,
+        });
+
+        const bestProduct = result.products[0];
+        const currentPrice = bestProduct?.price || null;
+
+        // Update current price and lastChecked
+        await prisma.priceAlert.update({
+          where: { id: alert.id },
+          data: { currentPrice, lastChecked: new Date() },
+        });
+
+        // Check if price dropped below target
+        if (currentPrice !== null && currentPrice <= alert.targetPrice && !alert.notifiedAt) {
+          console.log(`[PRICE-ALERTS] TRIGGERED: "${alert.query}" at $${currentPrice} (target: $${alert.targetPrice}) for ${alert.userId}`);
+
+          await prisma.priceAlert.update({
+            where: { id: alert.id },
+            data: { notifiedAt: new Date() },
+          });
+
+          // Send notification
+          await sendPriceAlertNotification(alert.userId, {
+            query: alert.query,
+            store: bestProduct?.store || alert.store || "Online",
+            targetPrice: alert.targetPrice,
+            currentPrice,
+            currency: alert.currency,
+            url: bestProduct?.url || "",
+          });
+        }
+      } catch (err) {
+        console.error(`[PRICE-ALERTS] Error checking "${alert.query}":`, (err as Error).message);
+        // Still update lastChecked to avoid retry storm
+        await prisma.priceAlert.update({
+          where: { id: alert.id },
+          data: { lastChecked: new Date() },
+        }).catch(() => {});
+      }
+    }));
+
+    // Delay between batches
+    if (i + BATCH_SIZE < alerts.length) {
+      await new Promise(r => setTimeout(r, BATCH_DELAY));
+    }
+  }
+
+  console.log(`[PRICE-ALERTS] Done checking ${alerts.length} alerts`);
+}
+
+async function sendPriceAlertNotification(
+  userId: string,
+  data: { query: string; store: string; targetPrice: number; currentPrice: number; currency: string; url: string }
+) {
+  const isWhatsApp = userId.startsWith("whatsapp:");
+  const curr = data.currency === "BRL" ? "R$" : "$";
+
+  const message = isWhatsApp
+    ? `Alerta de preco! ${data.query}\n${curr}${data.currentPrice.toFixed(2)} na ${data.store} (meta: ${curr}${data.targetPrice.toFixed(2)})\n${data.url}`
+    : `Price alert! ${data.query}\n${curr}${data.currentPrice.toFixed(2)} at ${data.store} (target: ${curr}${data.targetPrice.toFixed(2)})\n${data.url}`;
+
+  if (isWhatsApp) {
+    try {
+      const { sendWhatsAppMessage } = await import("../twilio-whatsapp.service.js");
+      await sendWhatsAppMessage(userId, message);
+    } catch (err) {
+      console.error(`[PRICE-ALERTS] WhatsApp notification failed for ${userId}:`, (err as Error).message);
+    }
+  } else {
+    // Telegram — send via internal API
+    try {
+      await fetch(`${PAYJARVIS_URL}/api/notifications/telegram`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-internal-secret": process.env.INTERNAL_SECRET || "" },
+        body: JSON.stringify({ chatId: userId, text: message }),
+        signal: AbortSignal.timeout(10000),
+      });
+    } catch (err) {
+      console.error(`[PRICE-ALERTS] Telegram notification failed for ${userId}:`, (err as Error).message);
+    }
+  }
+}

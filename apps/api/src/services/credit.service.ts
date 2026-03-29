@@ -1,9 +1,9 @@
 /**
  * Credit Service — LLM message credits, billing, alerts.
  *
- * Every user gets 5,000 free messages. Referred users get 60-day free trial.
+ * Every user gets 5,000 free messages. Beta users get unlimited access.
  * After credits run out, user must purchase a pack or subscribe.
- * Alerts at 75%, 90%, 100% usage. Trial alerts at day 55, 58, 60.
+ * Alerts at 75%, 90%, 100% usage. Legacy trial alerts kept for existing users.
  */
 
 import { prisma } from "@payjarvis/database";
@@ -11,9 +11,9 @@ import { prisma } from "@payjarvis/database";
 // ─── Pricing ─────────────────────────────────────────────
 
 const COST_PER_MSG_REAL = 0.0001;
-const COST_PER_MSG_CHARGED = 0.001;
+const COST_PER_MSG_CHARGED = 0.0012; // 12x markup (was 10x/15x)
 const FREE_MESSAGES = 5000;
-const FREE_TRIAL_DAYS = 60;
+const FREE_TRIAL_DAYS = 60; // legacy — kept for existing trial users
 
 export const CREDIT_PACKAGES = [
   { id: "pack_15k", messages: 15000, priceUsd: 10.0, label: "15,000 messages — $10" },
@@ -50,7 +50,7 @@ export interface PurchaseResult {
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID || "";
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN || "";
-const TWILIO_WHATSAPP_NUMBER = process.env.TWILIO_WHATSAPP_NUMBER || "whatsapp:+14155238886";
+const TWILIO_WHATSAPP_NUMBER = process.env.TWILIO_WHATSAPP_NUMBER || "whatsapp:+17547145921";
 
 function detectLang(chatId: string): "en" | "pt" {
   return chatId.includes("+55") ? "pt" : "en";
@@ -112,7 +112,7 @@ export async function initCredits(userId: string, referredBy?: string): Promise<
     },
   });
 
-  console.log(`[Credit] Initialized for ${userId}${hasReferral ? " (60-day trial)" : ""}`);
+  console.log(`[Credit] Initialized for ${userId}${hasReferral ? " (beta referral)" : ""}`);
 }
 
 export async function consumeMessage(
@@ -272,7 +272,7 @@ export async function consumeMessage(
       const lang = detectLang(info.chatId);
       const remaining = updated.messagesRemaining;
       const msg = lang === "pt"
-        ? `Você usou 75% das suas mensagens.\n\n${remaining} restantes.\n\nAdicione mais para manter o Jarvis:\n\n1. 15.000 msgs — $10\n2. 50.000 msgs — $25`
+        ? `You've used 75% of your messages.\n\n${remaining} remaining.\n\nAdd more to keep Jarvis:\n\n1. 15,000 msgs — $10\n2. 50,000 msgs — $25`
         : `You've used 75% of your messages.\n\n${remaining} remaining.\n\nAdd more to keep Jarvis running:\n\n1. 15,000 msgs — $10\n2. 50,000 msgs — $25`;
       sendAlert(info.platform, info.chatId, msg).catch(() => {});
     }
@@ -421,8 +421,8 @@ export async function processTrialAlerts(): Promise<void> {
     if (info) {
       const lang = detectLang(info.chatId);
       const msg = lang === "pt"
-        ? "Faltam 5 dias do seu período gratuito.\n\nManter seu assistente por $20/mês?\n\n1. Sim, manter o Jarvis\n2. Agora não"
-        : "5 days left of your free period.\n\nKeep your executive assistant for $20/month?\n\n1. Yes, keep Jarvis\n2. Not now";
+        ? "The Beta period is ending soon.\n\nKeep your assistant for $20/month?\n\n1. Yes, keep Jarvis\n2. Not now"
+        : "The Beta period is ending soon.\n\nKeep your executive assistant for $20/month?\n\n1. Yes, keep Jarvis\n2. Not now";
       await sendAlert(info.platform, info.chatId, msg);
     }
     await prisma.llmCredit.update({ where: { id: credit.id }, data: { alertDay55Sent: true } });
@@ -446,8 +446,8 @@ export async function processTrialAlerts(): Promise<void> {
     if (info) {
       const lang = detectLang(info.chatId);
       const msg = lang === "pt"
-        ? "Faltam 2 dias do seu período gratuito.\n\n1. Manter o Jarvis — $20/mês\n2. Agora não"
-        : "2 days remaining of your free trial.\n\n1. Keep Jarvis — $20/month\n2. Not now";
+        ? "2 days left in Beta.\n\n1. Keep Jarvis — $20/month\n2. Not now"
+        : "2 days remaining of Beta access.\n\n1. Keep Jarvis — $20/month\n2. Not now";
       await sendAlert(info.platform, info.chatId, msg);
     }
     await prisma.llmCredit.update({ where: { id: credit.id }, data: { alertDay58Sent: true } });
@@ -470,8 +470,8 @@ export async function processTrialAlerts(): Promise<void> {
     if (info) {
       const lang = detectLang(info.chatId);
       const msg = lang === "pt"
-        ? `Seu período gratuito de 60 dias termina hoje.\n\nVocê enviou ${credit.messagesUsed} mensagens com o Jarvis.\n\nContinuar por $20/mês?\n\n1. Sim — manter meu assistente\n2. Agora não — talvez depois`
-        : `Your 60-day free period ends today.\n\nYou've sent ${credit.messagesUsed} messages with Jarvis.\n\nContinue for $20/month?\n\n1. Yes — keep my assistant\n2. Not now — maybe later`;
+        ? `The Beta period ends today.\n\nYou sent ${credit.messagesUsed} messages with Jarvis.\n\nContinue for $20/month?\n\n1. Yes — keep my assistant\n2. Not now — maybe later`
+        : `Your Beta access ends today.\n\nYou've sent ${credit.messagesUsed} messages with Jarvis.\n\nContinue for $20/month?\n\n1. Yes — keep my assistant\n2. Not now — maybe later`;
       await sendAlert(info.platform, info.chatId, msg);
     }
     // Deactivate trial

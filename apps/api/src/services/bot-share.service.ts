@@ -146,7 +146,7 @@ export async function cloneBot(
       systemPrompt: (config.systemPrompt as string) ?? null,
       botDisplayName: (config.botDisplayName as string) ?? null,
       capabilities: (config.capabilities as string[]) ?? [],
-      language: (config.language as string) ?? "pt-BR",
+      language: (config.language as string) ?? "en-US",
     },
   });
 

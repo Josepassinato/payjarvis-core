@@ -1,5 +1,8 @@
 /**
  * Commerce Service: Hotels (Amadeus API)
+ *
+ * Flow: Hotel List → Hotel Offers → Offer Details → (future) Booking
+ * Auth: OAuth2 client_credentials with token caching and 401 retry
  */
 
 const BASE = process.env.AMADEUS_ENV === "production"
@@ -9,12 +12,75 @@ const BASE = process.env.AMADEUS_ENV === "production"
 let token: string | null = null;
 let tokenExpiry = 0;
 
-function isConfigured(): boolean {
-  return !!(process.env.AMADEUS_CLIENT_ID && process.env.AMADEUS_CLIENT_SECRET);
+// ─── City Code Map ──────────────────────────────────
+
+const CITY_CODES: Record<string, string> = {
+  // US
+  'miami': 'MIA', 'new york': 'NYC', 'los angeles': 'LAX',
+  'chicago': 'CHI', 'san francisco': 'SFO', 'orlando': 'ORL',
+  'las vegas': 'LAS', 'boston': 'BOS', 'washington': 'WAS',
+  'houston': 'HOU', 'dallas': 'DFW', 'atlanta': 'ATL',
+  'seattle': 'SEA', 'denver': 'DEN', 'philadelphia': 'PHL',
+  // Brazil
+  'são paulo': 'SAO', 'sao paulo': 'SAO', 'rio de janeiro': 'RIO',
+  'brasília': 'BSB', 'brasilia': 'BSB', 'belo horizonte': 'BHZ',
+  'salvador': 'SSA', 'recife': 'REC', 'fortaleza': 'FOR',
+  'curitiba': 'CWB', 'porto alegre': 'POA', 'manaus': 'MAO',
+  // Europe
+  'lisboa': 'LIS', 'lisbon': 'LIS', 'porto': 'OPO',
+  'paris': 'PAR', 'london': 'LON', 'madrid': 'MAD',
+  'barcelona': 'BCN', 'rome': 'ROM', 'roma': 'ROM',
+  'berlin': 'BER', 'amsterdam': 'AMS', 'dublin': 'DUB',
+  'zürich': 'ZRH', 'zurich': 'ZRH', 'vienna': 'VIE',
+  // Other
+  'tokyo': 'TYO', 'cancun': 'CUN', 'dubai': 'DXB',
+  'bangkok': 'BKK', 'singapore': 'SIN', 'buenos aires': 'BUE',
+  'bogota': 'BOG', 'lima': 'LIM', 'santiago': 'SCL',
+  'mexico city': 'MEX', 'toronto': 'YTO', 'sydney': 'SYD',
+};
+
+/**
+ * Resolve city name to IATA code.
+ * If input is already 3 uppercase letters, returns as-is.
+ * Falls back to Amadeus City Search API.
+ */
+export async function resolveCityCode(input: string): Promise<string> {
+  const trimmed = input.trim();
+
+  // Already an IATA code
+  if (/^[A-Z]{3}$/.test(trimmed)) return trimmed;
+
+  // Lookup in map (case-insensitive)
+  const lower = trimmed.toLowerCase();
+  if (CITY_CODES[lower]) return CITY_CODES[lower];
+
+  // Fallback: Amadeus City Search API
+  if (isConfigured()) {
+    try {
+      const data = await amadeusGet("/v1/reference-data/locations", {
+        keyword: trimmed,
+        subType: "CITY",
+      });
+      const city = data.data?.[0];
+      if (city?.iataCode) return city.iataCode;
+    } catch {
+      // Ignore — return uppercase input as last resort
+    }
+  }
+
+  return trimmed.toUpperCase().substring(0, 3);
 }
 
-async function getToken(): Promise<string> {
-  if (token && Date.now() < tokenExpiry) return token;
+// ─── Auth ────────────────────────────────────────────
+
+function isConfigured(): boolean {
+  return !!(process.env.AMADEUS_CLIENT_ID && process.env.AMADEUS_CLIENT_SECRET
+    && process.env.AMADEUS_CLIENT_ID !== "CHANGE_ME");
+}
+
+async function getToken(forceRefresh = false): Promise<string> {
+  if (!forceRefresh && token && Date.now() < tokenExpiry) return token;
+
   const res = await fetch(`${BASE}/v1/security/oauth2/token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -27,35 +93,65 @@ async function getToken(): Promise<string> {
   return token!;
 }
 
-async function amadeusGet(path: string, params: Record<string, string> = {}): Promise<any> {
+async function amadeusGet(path: string, params: Record<string, string> = {}, retry = true): Promise<any> {
   const t = await getToken();
   const qs = new URLSearchParams(params).toString();
-  const res = await fetch(`${BASE}${path}${qs ? "?" + qs : ""}`, {
+  const url = `${BASE}${path}${qs ? "?" + qs : ""}`;
+
+  console.log(`[AMADEUS] GET ${path} params=${JSON.stringify(params)}`);
+
+  const res = await fetch(url, {
     headers: { Authorization: `Bearer ${t}` },
   });
+
+  // 401 → token expired, refresh and retry once
+  if (res.status === 401 && retry) {
+    console.log("[AMADEUS] 401 — refreshing token and retrying");
+    token = null;
+    tokenExpiry = 0;
+    return amadeusGet(path, params, false);
+  }
+
   const data = await res.json() as any;
-  if (!res.ok) throw new Error(data.detail || JSON.stringify(data.errors?.[0]) || "Amadeus API error");
+  if (!res.ok) {
+    const errMsg = data.detail || data.errors?.[0]?.detail || JSON.stringify(data.errors?.[0]) || "Amadeus API error";
+    throw new Error(errMsg);
+  }
   return data;
 }
 
+// ─── Interfaces ──────────────────────────────────────
+
 export interface HotelSearchParams {
-  city: string;       // IATA city code (e.g., "MIA", "GRU")
-  checkIn: string;
-  checkOut: string;
+  city?: string;      // City name or IATA code
+  checkIn: string;    // YYYY-MM-DD
+  checkOut: string;   // YYYY-MM-DD
   adults?: number;
-  maxPrice?: number;
+  maxPrice?: number;  // Max price per night
+  currency?: string;
+  ratings?: string[]; // e.g. ["4", "5"]
+  radius?: number;    // km from center
+  latitude?: number;  // GPS latitude for nearby search
+  longitude?: number; // GPS longitude for nearby search
 }
 
 export interface HotelResult {
   name: string;
+  hotelId: string;
   stars: string;
   price: string;
   pricePerNight: string;
   priceNumeric: number;
+  totalPrice: number;
+  currency: string;
   rating: string;
   roomType: string;
-  amenities: string;
+  cancellation: string;
+  offerId: string;
+  nights: number;
 }
+
+// ─── Search ──────────────────────────────────────────
 
 function daysBetween(d1: string, d2: string): number {
   return Math.max(1, Math.ceil((new Date(d2).getTime() - new Date(d1).getTime()) / 86400000));
@@ -67,54 +163,91 @@ export async function searchHotels(params: HotelSearchParams): Promise<{
   results: HotelResult[];
   error?: string;
 }> {
+  // Resolve city or use geocode
+  const useGeocode = params.latitude && params.longitude && !params.city;
+  const cityCode = useGeocode ? "" : await resolveCityCode(params.city || "");
+  console.log(`[HOTELS] Searching ${useGeocode ? `geo(${params.latitude},${params.longitude})` : `${params.city} → ${cityCode}`}, ${params.checkIn} to ${params.checkOut}`);
+
   if (!isConfigured()) {
     return { source: "amadeus", mock: true, results: mockHotels(params) };
   }
 
   try {
-    // Step 1: Find hotels in city
-    const listData = await amadeusGet("/v1/reference-data/locations/hotels/by-city", {
-      cityCode: params.city,
-      radius: "20",
-      radiusUnit: "KM",
-    });
-
-    const hotelIds = (listData.data || []).slice(0, 20).map((h: any) => h.hotelId);
+    // Step 1: Hotel List — find hotels by city or geocode
+    let listData: any;
+    if (useGeocode) {
+      const listParams: Record<string, string> = {
+        latitude: String(params.latitude),
+        longitude: String(params.longitude),
+        radius: String(params.radius ?? 20),
+        radiusUnit: "KM",
+        hotelSource: "ALL",
+      };
+      if (params.ratings?.length) listParams.ratings = params.ratings.join(",");
+      listData = await amadeusGet("/v1/reference-data/locations/hotels/by-geocode", listParams);
+    } else {
+      const listParams: Record<string, string> = {
+        cityCode,
+        radius: String(params.radius ?? 20),
+        radiusUnit: "KM",
+        hotelSource: "ALL",
+      };
+      if (params.ratings?.length) listParams.ratings = params.ratings.join(",");
+      listData = await amadeusGet("/v1/reference-data/locations/hotels/by-city", listParams);
+    }
+    const hotelIds = (listData.data || []).slice(0, 30).map((h: any) => h.hotelId);
     if (hotelIds.length === 0) return { source: "amadeus", mock: false, results: [] };
 
-    // Step 2: Get offers
+    // Step 2: Hotel Offers — get prices (max 50 hotelIds per request)
+    const currency = params.currency || "USD";
     const offersData = await amadeusGet("/v3/shopping/hotel-offers", {
       hotelIds: hotelIds.join(","),
       checkInDate: params.checkIn,
       checkOutDate: params.checkOut,
       adults: String(params.adults ?? 1),
-      currency: "USD",
+      currency,
     });
 
     const nights = daysBetween(params.checkIn, params.checkOut);
 
-    const results: HotelResult[] = (offersData.data || []).slice(0, 8).map((hotel: any) => {
+    const results: HotelResult[] = (offersData.data || []).slice(0, 10).map((hotel: any) => {
       const offer = hotel.offers?.[0];
       const total = offer ? parseFloat(offer.price.total) : 0;
+      const perNight = total / nights;
+      const cur = offer?.price?.currency || currency;
+      const cancelPolicy = offer?.policies?.cancellations?.[0];
+      const cancelText = cancelPolicy?.type === "FULL_REFUNDABLE"
+        ? `Cancelamento gratuito até ${cancelPolicy.deadline?.substring(0, 10) || "check policy"}`
+        : cancelPolicy?.description?.text || "Consulte política";
+
       return {
         name: hotel.hotel?.name || "Unknown",
+        hotelId: hotel.hotel?.hotelId || "",
         stars: hotel.hotel?.rating || "N/A",
-        price: offer ? `${offer.price.currency} ${offer.price.total}` : "N/A",
-        pricePerNight: offer ? `${offer.price.currency} ${(total / nights).toFixed(2)}` : "N/A",
-        priceNumeric: total,
+        price: `${cur} ${total.toFixed(2)}`,
+        pricePerNight: `${cur} ${perNight.toFixed(2)}`,
+        priceNumeric: perNight,
+        totalPrice: total,
+        currency: cur,
         rating: hotel.hotel?.rating || "N/A",
-        roomType: offer?.room?.typeEstimated?.category || "Standard",
-        amenities: offer?.policies?.cancellations?.[0]?.description?.text || "Check policy",
+        roomType: offer?.room?.typeEstimated?.category || offer?.room?.description?.text || "Standard",
+        cancellation: cancelText,
+        offerId: offer?.id || "",
+        nights,
       };
     });
 
-    // Filter by maxPrice if specified
+    // Filter by maxPrice per night if specified
     const filtered = params.maxPrice
       ? results.filter((r) => r.priceNumeric <= params.maxPrice!)
       : results;
 
-    return { source: "amadeus", mock: false, results: filtered };
+    // Sort by price per night
+    filtered.sort((a, b) => a.priceNumeric - b.priceNumeric);
+
+    return { source: "amadeus", mock: false, results: filtered.slice(0, 5) };
   } catch (err) {
+    console.error("[HOTELS] Search error:", err instanceof Error ? err.message : err);
     return {
       source: "amadeus",
       mock: false,
@@ -124,10 +257,85 @@ export async function searchHotels(params: HotelSearchParams): Promise<{
   }
 }
 
+// ─── Offer Details (Step 3) ──────────────────────────
+
+export async function getHotelOffer(offerId: string): Promise<{
+  source: string;
+  offer: any | null;
+  error?: string;
+}> {
+  if (!isConfigured()) {
+    return { source: "amadeus", offer: null, error: "Amadeus API not configured — fill AMADEUS_CLIENT_ID and AMADEUS_CLIENT_SECRET" };
+  }
+
+  try {
+    const data = await amadeusGet(`/v3/shopping/hotel-offers/${offerId}`);
+    return { source: "amadeus", offer: data.data || null };
+  } catch (err) {
+    return {
+      source: "amadeus",
+      offer: null,
+      error: err instanceof Error ? err.message : "Failed to get offer details",
+    };
+  }
+}
+
+// ─── Format for Telegram ─────────────────────────────
+
+export function formatHotelResults(results: HotelResult[], city: string): string {
+  if (results.length === 0) {
+    return `Não encontrei hotéis disponíveis em ${city} para essas datas. Tente outras datas ou uma cidade próxima.`;
+  }
+
+  const starsEmoji = (s: string) => {
+    const n = parseInt(s);
+    if (isNaN(n)) return "";
+    return "⭐".repeat(Math.min(n, 5));
+  };
+
+  const nights = results[0]?.nights || 1;
+  const header = `🏨 Hotéis em ${city} (${nights} noite${nights > 1 ? "s" : ""})\n`;
+
+  const items = results.map((h, i) => {
+    return [
+      `${i + 1}. ${h.name} ${starsEmoji(h.stars)}`,
+      `   💰 $${h.priceNumeric.toFixed(0)}/noite (total: $${h.totalPrice.toFixed(0)})`,
+      `   📋 ${h.roomType}`,
+      `   🔄 ${h.cancellation}`,
+    ].join("\n");
+  });
+
+  return header + "\n" + items.join("\n\n") + "\n\nQuer que eu reserve algum desses? Me diga o número.";
+}
+
+// ─── Mock Data ───────────────────────────────────────
+
 function mockHotels(p: HotelSearchParams): HotelResult[] {
+  const nights = daysBetween(p.checkIn, p.checkOut);
   return [
-    { name: "Downtown Comfort Inn", stars: "4", price: "USD 480.00", pricePerNight: "USD 160.00", priceNumeric: 480, rating: "4.2", roomType: "Standard King", amenities: "WiFi, Pool, Gym" },
-    { name: "City Center Hilton", stars: "5", price: "USD 750.00", pricePerNight: "USD 250.00", priceNumeric: 750, rating: "4.7", roomType: "Deluxe Double", amenities: "WiFi, Pool, Spa, Restaurant" },
-    { name: "Budget Express Hotel", stars: "3", price: "USD 270.00", pricePerNight: "USD 90.00", priceNumeric: 270, rating: "3.8", roomType: "Standard Double", amenities: "WiFi, Parking" },
+    {
+      name: "Downtown Comfort Inn", hotelId: "MOCK001", stars: "4",
+      price: `USD ${(160 * nights).toFixed(2)}`, pricePerNight: "USD 160.00",
+      priceNumeric: 160, totalPrice: 160 * nights, currency: "USD",
+      rating: "4.2", roomType: "Standard King",
+      cancellation: "Cancelamento gratuito até 3 dias antes",
+      offerId: "mock-offer-001", nights,
+    },
+    {
+      name: "City Center Hilton", hotelId: "MOCK002", stars: "5",
+      price: `USD ${(250 * nights).toFixed(2)}`, pricePerNight: "USD 250.00",
+      priceNumeric: 250, totalPrice: 250 * nights, currency: "USD",
+      rating: "4.7", roomType: "Deluxe Double",
+      cancellation: "Cancelamento gratuito até 7 dias antes",
+      offerId: "mock-offer-002", nights,
+    },
+    {
+      name: "Budget Express Hotel", hotelId: "MOCK003", stars: "3",
+      price: `USD ${(90 * nights).toFixed(2)}`, pricePerNight: "USD 90.00",
+      priceNumeric: 90, totalPrice: 90 * nights, currency: "USD",
+      rating: "3.8", roomType: "Standard Double",
+      cancellation: "Não reembolsável",
+      offerId: "mock-offer-003", nights,
+    },
   ];
 }

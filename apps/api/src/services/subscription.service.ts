@@ -13,7 +13,7 @@ const STRIPE_PORTAL_CONFIG_ID = process.env.STRIPE_PORTAL_CONFIG_ID || "";
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID || "";
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN || "";
-const TWILIO_WHATSAPP_NUMBER = process.env.TWILIO_WHATSAPP_NUMBER || "whatsapp:+14155238886";
+const TWILIO_WHATSAPP_NUMBER = process.env.TWILIO_WHATSAPP_NUMBER || "whatsapp:+17547145921";
 
 function getStripe(): Stripe {
   const key = process.env.STRIPE_SECRET_KEY;
@@ -159,7 +159,7 @@ export async function cancelSubscription(
 
     const lang = user.phone?.startsWith("+55") ? "pt" : "en";
     const msg = lang === "pt"
-      ? `Sua assinatura será cancelada em ${endsAt.toLocaleDateString("pt-BR")}. Você continua com acesso ilimitado até lá.`
+      ? `Your subscription will be cancelled on ${endsAt.toLocaleDateString("en-US")}. You still have unlimited access until then.`
       : `Your subscription will end on ${endsAt.toLocaleDateString("en-US")}. You keep unlimited access until then.`;
     notifyUser(userId, msg).catch(() => {});
 
@@ -260,7 +260,7 @@ export async function handleInvoicePaymentFailed(invoice: Stripe.Invoice): Promi
 
   const lang = user.phone?.startsWith("+55") ? "pt" : "en";
   const msg = lang === "pt"
-    ? "Pagamento da assinatura falhou.\n\nAtualize seu cartão para continuar:\npayjarvis.com/billing"
+    ? "Subscription payment failed.\n\nUpdate your card to continue:\npayjarvis.com/billing"
     : "Payment failed for your Jarvis subscription.\n\nUpdate your card to continue:\npayjarvis.com/billing";
   notifyUser(user.id, msg).catch(() => {});
   console.log(`[Subscription] invoice.payment_failed for ${user.id}`);
@@ -287,7 +287,7 @@ export async function handleSubscriptionDeleted(subscription: Stripe.Subscriptio
 
   const lang = user.phone?.startsWith("+55") ? "pt" : "en";
   const msg = lang === "pt"
-    ? `Sua assinatura Premium foi cancelada.\n\nVocê ainda tem ${remaining} mensagens disponíveis.\n\nReative quando quiser: payjarvis.com/upgrade`
+    ? `Your Premium subscription has been cancelled.\n\nYou still have ${remaining} messages available.\n\nReactivate anytime: payjarvis.com/upgrade`
     : `Your Jarvis Premium subscription has been canceled.\n\nYou still have ${remaining} messages available.\n\nReactivate anytime: payjarvis.com/upgrade`;
   notifyUser(user.id, msg).catch(() => {});
   console.log(`[Subscription] deleted for ${user.id}`);

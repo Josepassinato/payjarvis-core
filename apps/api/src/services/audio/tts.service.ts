@@ -1,8 +1,9 @@
 /**
- * TTS Service — Text-to-Speech via edge-tts (+ ElevenLabs optional)
+ * TTS Service — Gemini TTS → ElevenLabs → edge-tts fallback chain
  *
  * Converts text to OGG Opus audio files.
- * Primary: ElevenLabs (if API key configured)
+ * Primary: Gemini 2.5 Flash TTS (REST API, included in Gemini billing)
+ * Secondary: ElevenLabs (if API key configured)
  * Fallback: edge-tts (free, always available)
  *
  * Used by WhatsApp and Telegram voice reply handlers.
@@ -13,11 +14,29 @@ import { writeFileSync, unlinkSync, readFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
+// ─── Config ─────────────────────────────────────────
+
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
+const GEMINI_TTS_MODEL = "gemini-2.5-flash-preview-tts";
+const GEMINI_TTS_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_TTS_MODEL}:generateContent`;
+
+const GEMINI_VOICES: Record<string, string> = {
+  pt: "Orus",
+  en: "Orus",
+  es: "Kore",
+  fr: "Orus",
+  de: "Orus",
+  it: "Orus",
+  ja: "Orus",
+  ko: "Orus",
+  zh: "Orus",
+  ru: "Orus",
+  ar: "Orus",
+};
+
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY || "";
 const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || "21m00Tcm4TlvDq8ikWAM";
 const ELEVENLABS_MODEL = "eleven_multilingual_v2";
-const MAX_TEXT_LENGTH = 4000;
-const TIMEOUT_MS = 30000;
 
 const EDGE_TTS_VOICES: Record<string, string> = {
   pt: "pt-BR-FranciscaNeural",
@@ -32,6 +51,11 @@ const EDGE_TTS_VOICES: Record<string, string> = {
   ru: "ru-RU-SvetlanaNeural",
   ar: "ar-SA-ZariyahNeural",
 };
+
+const MAX_TEXT_LENGTH = 4000;
+const TIMEOUT_MS = 30000;
+
+// ─── Helpers ────────────────────────────────────────
 
 function tmpFile(ext: string): string {
   return join(tmpdir(), `tts_${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`);
@@ -62,7 +86,94 @@ function convertToOgg(inputPath: string): Promise<string> {
   });
 }
 
-/** ElevenLabs TTS */
+/** Convert raw PCM (s16le, 24kHz, mono) to OGG Opus via ffmpeg */
+function convertPcmToOgg(pcmPath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const outputPath = tmpFile("ogg");
+    execFile("ffmpeg", [
+      "-f", "s16le",
+      "-ar", "24000",
+      "-ac", "1",
+      "-i", pcmPath,
+      "-c:a", "libopus",
+      "-b:a", "48k",
+      "-ar", "24000",
+      "-ac", "1",
+      "-y",
+      outputPath,
+    ], { timeout: 15000 }, (err) => {
+      if (err) return reject(new Error(`ffmpeg pcm→ogg failed: ${err.message}`));
+      resolve(outputPath);
+    });
+  });
+}
+
+// ─── Gemini TTS Provider (Primary) ──────────────────
+
+async function geminiTTS(text: string, lang: string): Promise<string> {
+  if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY not configured");
+
+  const voice = GEMINI_VOICES[lang] || GEMINI_VOICES.en;
+  const url = `${GEMINI_TTS_URL}?key=${GEMINI_API_KEY}`;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text }] }],
+        generationConfig: {
+          response_modalities: ["AUDIO"],
+          speech_config: {
+            voice_config: {
+              prebuilt_voice_config: { voice_name: voice },
+            },
+          },
+        },
+      }),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeout);
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`Gemini TTS API ${res.status}: ${body.slice(0, 200)}`);
+    }
+
+    const data = await res.json() as {
+      candidates?: Array<{
+        content: { parts: Array<{ inlineData?: { data: string; mimeType: string } }> };
+      }>;
+    };
+
+    const parts = data?.candidates?.[0]?.content?.parts;
+    if (!parts) throw new Error("Gemini TTS: no parts in response");
+
+    const audioPart = parts.find(p => p.inlineData);
+    if (!audioPart?.inlineData) throw new Error("Gemini TTS: no audio data in response");
+
+    // Decode base64 PCM and save
+    const pcmBuffer = Buffer.from(audioPart.inlineData.data, "base64");
+    const pcmPath = tmpFile("pcm");
+    writeFileSync(pcmPath, pcmBuffer);
+
+    // Convert PCM (s16le, 24kHz, mono) → OGG Opus
+    const oggPath = await convertPcmToOgg(pcmPath);
+    cleanupFiles(pcmPath);
+
+    return oggPath;
+  } catch (err) {
+    clearTimeout(timeout);
+    throw err;
+  }
+}
+
+// ─── ElevenLabs Provider (Secondary) ────────────────
+
 async function elevenLabsTTS(text: string, lang: string): Promise<string> {
   if (!ELEVENLABS_API_KEY) throw new Error("ELEVENLABS_API_KEY not configured");
 
@@ -106,7 +217,8 @@ async function elevenLabsTTS(text: string, lang: string): Promise<string> {
   }
 }
 
-/** edge-tts TTS (free fallback) */
+// ─── edge-tts Fallback (Last Resort) ────────────────
+
 function edgeTTS(text: string, lang: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const mp3Path = tmpFile("mp3");
@@ -130,7 +242,8 @@ function edgeTTS(text: string, lang: string): Promise<string> {
   });
 }
 
-/** Strip markdown formatting for cleaner speech */
+// ─── Strip Markdown ─────────────────────────────────
+
 function stripMarkdown(text: string): string {
   return text
     .replace(/\*\*(.*?)\*\*/g, "$1")
@@ -143,10 +256,12 @@ function stripMarkdown(text: string): string {
     .trim();
 }
 
+// ─── Public API ─────────────────────────────────────
+
 /**
  * Convert text to OGG Opus voice note.
  * Returns path to temporary .ogg file (caller must delete after use).
- * Tries ElevenLabs first, falls back to edge-tts.
+ * Chain: Gemini TTS → ElevenLabs → edge-tts
  *
  * @param text - Text to convert
  * @param lang - Language code (pt, en, es, fr, etc.)
@@ -160,24 +275,35 @@ export async function textToSpeech(text: string, lang = "pt"): Promise<string | 
   const clean = stripMarkdown(truncated);
   if (!clean) return null;
 
-  // Try ElevenLabs
+  // 1. Try Gemini TTS (primary — best quality, included in Gemini billing)
+  if (GEMINI_API_KEY) {
+    try {
+      const oggPath = await geminiTTS(clean, lang);
+      console.log("[TTS] Gemini OK, lang:", lang);
+      return oggPath;
+    } catch (err) {
+      console.error("[TTS] Gemini failed:", (err as Error).message);
+    }
+  }
+
+  // 2. Try ElevenLabs (secondary)
   if (ELEVENLABS_API_KEY) {
     try {
       const oggPath = await elevenLabsTTS(clean, lang);
       console.log("[TTS] ElevenLabs OK, lang:", lang);
       return oggPath;
     } catch (err) {
-      console.error("[TTS] ElevenLabs failed, trying edge-tts:", (err as Error).message);
+      console.error("[TTS] ElevenLabs failed:", (err as Error).message);
     }
   }
 
-  // Fallback: edge-tts
+  // 3. Fallback: edge-tts (free, always available)
   try {
     const oggPath = await edgeTTS(clean, lang);
     console.log("[TTS] edge-tts OK, lang:", lang);
     return oggPath;
   } catch (err) {
-    console.error("[TTS] edge-tts also failed:", (err as Error).message);
+    console.error("[TTS] All TTS providers failed. edge-tts error:", (err as Error).message);
     return null;
   }
 }

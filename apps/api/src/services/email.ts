@@ -1,35 +1,55 @@
 /**
- * Email Service — Resend API
+ * Email Service — Zoho SMTP via Nodemailer
  *
- * Sends transactional emails from jarvis@payjarvis.com via Resend.
- * Fallback: logs warning if RESEND_API_KEY not configured.
+ * Sends transactional emails from admin@payjarvis.com via Zoho Mail SMTP.
+ * Retry with 3 attempts on transient failures.
  */
 
-import { Resend } from "resend";
+import nodemailer from "nodemailer";
+import type { Transporter } from "nodemailer";
 
-// ─── Singleton Client ─────────────────────────────────
+// ─── Config ─────────────────────────────────────────
 
-let _resend: Resend | null = null;
+const SMTP_HOST = process.env.SMTP_HOST || "smtp.zoho.com";
+const SMTP_PORT = Number(process.env.SMTP_PORT) || 465;
+const SMTP_SECURE = process.env.SMTP_SECURE !== "false"; // default true for port 465
+const SMTP_USER = process.env.SMTP_USER || "";
+const SMTP_PASSWORD = process.env.SMTP_PASSWORD || "";
+const EMAIL_FROM = process.env.SMTP_FROM || process.env.EMAIL_FROM || "PayJarvis <admin@payjarvis.com>";
 
-function getResend(): Resend {
-  if (!_resend) {
-    const apiKey = process.env.RESEND_API_KEY;
-    if (!apiKey) throw new Error("RESEND_API_KEY not configured");
-    _resend = new Resend(apiKey);
+// ─── Singleton Transporter ──────────────────────────
+
+let _transporter: Transporter | null = null;
+
+function getTransporter(): Transporter {
+  if (!_transporter) {
+    if (!SMTP_USER || !SMTP_PASSWORD) {
+      throw new Error("SMTP_USER and SMTP_PASSWORD are required");
+    }
+    _transporter = nodemailer.createTransport({
+      host: SMTP_HOST,
+      port: SMTP_PORT,
+      secure: SMTP_SECURE,
+      auth: {
+        user: SMTP_USER,
+        pass: SMTP_PASSWORD,
+      },
+      tls: {
+        rejectUnauthorized: true,
+      },
+    });
   }
-  return _resend;
+  return _transporter;
 }
-
-const EMAIL_FROM = process.env.EMAIL_FROM || "PayJarvis <jarvis@payjarvis.com>";
 
 /**
  * Check if email service is configured.
  */
 export function isEmailConfigured(): boolean {
-  return !!process.env.RESEND_API_KEY;
+  return !!(SMTP_USER && SMTP_PASSWORD);
 }
 
-// ─── Send Email ──────────────────────────────────────
+// ─── Send Email (with retry) ────────────────────────
 
 export interface SendEmailOptions {
   to: string;
@@ -41,34 +61,45 @@ export interface SendEmailOptions {
 
 export async function sendEmail(options: SendEmailOptions): Promise<{ success: boolean; messageId?: string; error?: string }> {
   if (!isEmailConfigured()) {
-    console.warn("[Email] RESEND_API_KEY not configured — skipping send");
+    console.warn("[Email] SMTP not configured — skipping send");
     return { success: false, error: "Email not configured" };
   }
 
-  try {
-    const resend = getResend();
+  const MAX_RETRIES = 3;
+  let lastError = "";
 
-    const { data, error } = await resend.emails.send({
-      from: EMAIL_FROM,
-      to: options.to,
-      subject: options.subject,
-      html: options.html,
-      text: options.text,
-      replyTo: options.replyTo,
-    });
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const transporter = getTransporter();
 
-    if (error) {
-      console.error(`[Email] Resend error to ${options.to}:`, error.message);
-      return { success: false, error: error.message };
+      const info = await transporter.sendMail({
+        from: EMAIL_FROM,
+        to: options.to,
+        subject: options.subject,
+        html: options.html,
+        text: options.text,
+        replyTo: options.replyTo,
+      });
+
+      console.log(`[Email] Sent to ${options.to}: ${info.messageId}`);
+      return { success: true, messageId: info.messageId };
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : "Unknown email error";
+      console.error(`[Email] Attempt ${attempt}/${MAX_RETRIES} failed:`, lastError);
+
+      // Reset transporter on auth errors
+      if (lastError.includes("auth") || lastError.includes("535") || lastError.includes("534")) {
+        _transporter = null;
+      }
+
+      if (attempt < MAX_RETRIES) {
+        await new Promise(r => setTimeout(r, 1000 * attempt)); // 1s, 2s backoff
+      }
     }
-
-    console.log(`[Email] Sent to ${options.to}: ${data?.id}`);
-    return { success: true, messageId: data?.id };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "Unknown email error";
-    console.error("[Email] Send failed:", msg);
-    return { success: false, error: msg };
   }
+
+  console.error(`[Email] All ${MAX_RETRIES} attempts failed for ${options.to}`);
+  return { success: false, error: lastError };
 }
 
 // ─── Email Templates ─────────────────────────────────
@@ -308,20 +339,20 @@ export function templateHandoffRequest(data: {
 export function templateOnboardingConfirm(data: {
   code: string;
 }): { subject: string; html: string; text: string } {
-  const subject = `Seu código de confirmação PayJarvis: ${data.code}`;
+  const subject = `Your PayJarvis confirmation code: ${data.code}`;
 
-  const html = wrap("Confirme seu email", `
-    <p style="color:#374151;font-size:15px;">Seu código de confirmação:</p>
+  const html = wrap("Confirm your email", `
+    <p style="color:#374151;font-size:15px;">Your confirmation code:</p>
     <div style="text-align:center;margin:24px 0;">
       <span style="display:inline-block;background:#f3f4f6;border:2px solid ${BRAND_COLOR};border-radius:12px;padding:16px 32px;font-size:32px;font-weight:700;letter-spacing:8px;color:#111827;">${data.code}</span>
     </div>
     <p style="color:#6b7280;font-size:14px;text-align:center;">
-      Volta ao Telegram e digita este código para continuar.<br/>
-      O código expira em 10 minutos.
+      Go back to Telegram and enter this code to continue.<br/>
+      The code expires in 10 minutes.
     </p>
   `);
 
-  const text = `PayJarvis — Código de Confirmação\n\nSeu código: ${data.code}\n\nVolte ao Telegram e digite este código.\nExpira em 10 minutos.`;
+  const text = `PayJarvis — Confirmation Code\n\nYour code: ${data.code}\n\nGo back to Telegram and enter this code.\nExpires in 10 minutes.`;
 
   return { subject, html, text };
 }

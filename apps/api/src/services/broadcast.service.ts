@@ -156,7 +156,7 @@ async function sendWhatsAppMessage(phone: string, text: string) {
 
   const body = new URLSearchParams({
     To: `whatsapp:${phone}`,
-    From: `whatsapp:${TWILIO_WHATSAPP_NUMBER}`,
+    From: TWILIO_WHATSAPP_NUMBER,
     Body: text,
   });
 
