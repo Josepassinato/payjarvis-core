@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Connect Amazon - PayJarvis</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:-apple-system,BlinkMacSystemFont,sans-serif; background:#fff; display:flex; justify-content:center; align-items:center; min-height:100vh; padding:20px; }
+.card { max-width:400px; width:100%; }
+.icon { width:48px; height:48px; background:#fff7ed; border-radius:16px; display:flex; align-items:center; justify-content:center; margin:0 auto 16px; font-size:24px; }
+h1 { text-align:center; font-size:20px; color:#111; margin-bottom:4px; }
+.sub { text-align:center; font-size:14px; color:#666; margin-bottom:24px; }
+.field { margin-bottom:16px; }
+label { display:block; font-size:14px; font-weight:500; color:#333; margin-bottom:6px; }
+input { width:100%; padding:12px 16px; border:1px solid #ddd; border-radius:12px; font-size:14px; outline:none; }
+input:focus { border-color:#f97316; box-shadow:0 0 0 2px rgba(249,115,22,0.2); }
+.btn { width:100%; padding:12px; background:#f97316; color:#fff; border:none; border-radius:12px; font-size:14px; font-weight:600; cursor:pointer; }
+.btn:hover { background:#ea580c; }
+.btn:disabled { opacity:0.5; cursor:not-allowed; }
+.status { text-align:center; padding:16px; margin-top:16px; border-radius:12px; font-size:14px; }
+.status.loading { background:#fff7ed; color:#c2410c; }
+.status.success { background:#f0fdf4; color:#166534; }
+.status.error { background:#fef2f2; color:#991b1b; }
+.status.human { background:#fffbeb; color:#92400e; }
+.code-input { text-align:center; font-size:20px; letter-spacing:8px; }
+.info { background:#f9fafb; border:1px solid #e5e7eb; border-radius:12px; padding:12px 16px; margin-bottom:20px; font-size:12px; color:#666; }
+.hidden { display:none; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="icon">🔒</div>
+  <h1>Connect Amazon</h1>
+  <p class="sub">PayJarvis will use your account for purchases</p>
+  
+  <div class="info">Your credentials go directly to Amazon. Never stored.</div>
+
+  <div id="form-section">
+    <form id="login-form">
+      <div class="field">
+        <label>Amazon Email</label>
+        <input type="email" id="email" placeholder="your@email.com" required autocomplete="email">
+      </div>
+      <div class="field">
+        <label>Amazon Password</label>
+        <input type="password" id="password" placeholder="Your password" required autocomplete="current-password">
+      </div>
+      <button type="submit" class="btn" id="submit-btn">Connect Account</button>
+    </form>
+  </div>
+
+  <div id="code-section" class="hidden">
+    <form id="code-form">
+      <div class="field">
+        <label id="code-label">Enter verification code</label>
+        <input type="text" id="code" class="code-input" placeholder="123456" autocomplete="one-time-code">
+      </div>
+      <button type="submit" class="btn" id="code-btn">Submit Code</button>
+    </form>
+  </div>
+
+  <div id="status-box" class="hidden status"></div>
+</div>
+
+<script>
+const API = '/api';
+const USER_ID = 'cmmpq6uht0000120n8efqe9yq';
+let sessionId = null;
+let pollInterval = null;
+
+const $ = id => document.getElementById(id);
+const show = (id, cls, msg) => { const el = $(id); el.className = 'status ' + cls; el.textContent = msg; el.classList.remove('hidden'); };
+
+$('login-form').onsubmit = async (e) => {
+  e.preventDefault();
+  const email = $('email').value, password = $('password').value;
+  $('submit-btn').disabled = true;
+  $('submit-btn').textContent = 'Connecting...';
+  show('status-box', 'loading', 'Logging into Amazon... (up to 30s)');
+
+  try {
+    const res = await fetch(API + '/vault/amazon/login', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ userId: USER_ID, email, password }),
+      signal: AbortSignal.timeout(120000)
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      show('status-box', 'success', '✅ Amazon Connected! You can close this page.');
+      $('form-section').classList.add('hidden');
+      return;
+    }
+
+    if (data.status === 'NEEDS_HUMAN' && data.sessionId) {
+      sessionId = data.sessionId;
+      $('form-section').classList.add('hidden');
+      $('code-section').classList.remove('hidden');
+      $('code-label').textContent = data.message || 'Enter verification code';
+      show('status-box', 'human', 'Amazon needs verification. Check your email/phone.');
+      startPolling();
+      return;
+    }
+
+    show('status-box', 'error', data.error || 'Login failed. Try again.');
+    $('submit-btn').disabled = false;
+    $('submit-btn').textContent = 'Connect Account';
+  } catch (err) {
+    show('status-box', 'error', 'Connection timeout. Try again.');
+    $('submit-btn').disabled = false;
+    $('submit-btn').textContent = 'Connect Account';
+  }
+};
+
+$('code-form').onsubmit = async (e) => {
+  e.preventDefault();
+  if (!sessionId || !$('code').value) return;
+  $('code-btn').disabled = true;
+  $('code-btn').textContent = 'Submitting...';
+  
+  try {
+    await fetch(API + '/vault/amazon/login-input/' + sessionId, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ text: $('code').value, submit: true })
+    });
+    $('code').value = '';
+    show('status-box', 'loading', 'Code submitted. Checking...');
+  } catch {}
+  $('code-btn').disabled = false;
+  $('code-btn').textContent = 'Submit Code';
+};
+
+function startPolling() {
+  pollInterval = setInterval(async () => {
+    try {
+      const res = await fetch(API + '/vault/amazon/login-status/' + sessionId + '?userId=' + USER_ID);
+      const data = await res.json();
+      if (data.success && data.status === 'completed') {
+        clearInterval(pollInterval);
+        show('status-box', 'success', '✅ Amazon Connected! You can close this page.');
+        $('code-section').classList.add('hidden');
+      } else if (data.status === 'expired' || data.status === 'failed') {
+        clearInterval(pollInterval);
+        show('status-box', 'error', 'Session expired. Refresh and try again.');
+      }
+    } catch {}
+  }, 3000);
+}
+</script>
+</body>
+</html>

@@ -17,7 +17,9 @@
     "connections": "Connections",
     "assistants": "Assistants",
     "stores": "Stores",
-    "billing": "Billing"
+    "billing": "Billing",
+    "wallet": "Wallet",
+    "setupShopping": "Setup Shopping"
   },
   "common": {
     "save": "Save",

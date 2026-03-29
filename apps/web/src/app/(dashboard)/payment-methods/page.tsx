@@ -7,6 +7,9 @@ import { loadStripe } from "@stripe/stripe-js";
 import { Elements, CardElement, useStripe, useElements } from "@stripe/react-stripe-js";
 import { useApi } from "@/lib/use-api";
 import { LoadingSpinner, ErrorBox } from "@/components/loading";
+import dynamic from "next/dynamic";
+
+const VisaClickToPay = dynamic(() => import("@/components/visa-click-to-pay"), { ssr: false });
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 const STRIPE_PK = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? "";
@@ -157,6 +160,8 @@ export default function PaymentMethodsPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showCardForm, setShowCardForm] = useState(false);
 
+  const [showVisaCheckout, setShowVisaCheckout] = useState(false);
+
   const PROVIDER_CARDS = [
     {
       id: "stripe",
@@ -164,6 +169,14 @@ export default function PaymentMethodsPage() {
       description: t("paymentMethods.stripeDesc"),
       icon: "M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z",
       comingSoon: false,
+    },
+    {
+      id: "visa-click-to-pay",
+      name: "Visa Click to Pay",
+      description: "One-click checkout with Visa Secure Remote Commerce",
+      icon: "M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z",
+      comingSoon: false,
+      isVisa: true,
     },
     {
       id: "paypal",
@@ -332,7 +345,34 @@ export default function PaymentMethodsPage() {
               </div>
 
               <div className="mt-3">
-                {card.comingSoon ? (
+                {(card as any).isVisa ? (
+                  showVisaCheckout ? (
+                    <div className="space-y-2">
+                      <VisaClickToPay
+                        onSuccess={(data) => {
+                          setShowVisaCheckout(false);
+                          setSuccessMessage("Visa Click to Pay linked successfully");
+                          setTimeout(() => setSuccessMessage(null), 3000);
+                          refetch();
+                        }}
+                        onError={(msg) => setErrorMessage(msg)}
+                      />
+                      <button
+                        onClick={() => setShowVisaCheckout(false)}
+                        className="w-full px-4 py-2 text-sm rounded-lg bg-gray-100 text-gray-400 hover:text-gray-900 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => { setShowVisaCheckout(true); setErrorMessage(null); }}
+                      className="w-full px-4 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-500 transition-colors"
+                    >
+                      Set up Click to Pay
+                    </button>
+                  )
+                ) : card.comingSoon ? (
                   <button
                     disabled
                     className="w-full px-4 py-2 text-sm rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed"

@@ -375,9 +375,108 @@ export default function Home() {
       {/* ─── TRUST BADGES ─── */}
       <TrustBadges />
 
+      {/* ─── SECURITY HIGHLIGHT ─── */}
+      <section className="relative border-t border-gray-200/40 bg-gradient-to-b from-white/50 to-gray-50">
+        <div className="mx-auto max-w-6xl px-6 py-24 sm:py-32">
+          <div className="text-center">
+            <div className="mx-auto mb-6 inline-flex items-center gap-2 rounded-full border border-emerald-500/20 bg-emerald-500/5 px-5 py-2.5">
+              <svg className="h-5 w-5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z" />
+              </svg>
+              <span className="text-sm font-semibold text-emerald-700">{t("landing.securityBadge")}</span>
+            </div>
+            <h2 className="mb-4 font-display text-3xl font-bold sm:text-4xl lg:text-5xl text-gray-900">
+              {t("landing.securityTitle")}
+            </h2>
+            <p className="mx-auto mb-12 max-w-2xl text-lg text-gray-500">
+              {t("landing.securityDesc")}
+            </p>
+          </div>
+
+          <div className="grid gap-6 sm:grid-cols-3">
+            {[
+              {
+                icon: (
+                  <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z" />
+                  </svg>
+                ),
+                color: "text-emerald-600",
+                bg: "bg-emerald-50 border-emerald-100",
+                titleKey: "landing.sec1Title",
+                descKey: "landing.sec1Desc",
+              },
+              {
+                icon: (
+                  <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25a3 3 0 0 1 3 3m3 0a6 6 0 0 1-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1 1 21.75 8.25Z" />
+                  </svg>
+                ),
+                color: "text-emerald-600",
+                bg: "bg-emerald-50 border-emerald-100",
+                titleKey: "landing.sec2Title",
+                descKey: "landing.sec2Desc",
+              },
+              {
+                icon: (
+                  <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 0 0 1.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.451 10.451 0 0 1 12 4.5c4.756 0 8.773 3.162 10.065 7.498a10.522 10.522 0 0 1-4.293 5.774M6.228 6.228 3 3m3.228 3.228 3.65 3.65m7.894 7.894L21 21m-3.228-3.228-3.65-3.65m0 0a3 3 0 1 0-4.243-4.243m4.242 4.242L9.88 9.88" />
+                  </svg>
+                ),
+                color: "text-emerald-600",
+                bg: "bg-emerald-50 border-emerald-100",
+                titleKey: "landing.sec3Title",
+                descKey: "landing.sec3Desc",
+              },
+            ].map((card) => (
+              <div
+                key={card.titleKey}
+                className={`rounded-2xl border ${card.bg} p-8 text-center transition-all duration-300 hover:translate-y-[-2px] hover:shadow-lg`}
+              >
+                <div className={`mx-auto mb-4 inline-flex h-14 w-14 items-center justify-center rounded-xl bg-white shadow-sm ${card.color}`}>
+                  {card.icon}
+                </div>
+                <h3 className="mb-2 font-display text-lg font-bold text-gray-900">{t(card.titleKey)}</h3>
+                <p className="text-sm leading-relaxed text-gray-500">{t(card.descKey)}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-10 text-center">
+            <a
+              href="/security"
+              className="inline-flex items-center gap-2 text-sm font-semibold text-emerald-600 transition-colors hover:text-emerald-500"
+            >
+              {t("landing.securityCta")}
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+              </svg>
+            </a>
+          </div>
+        </div>
+      </section>
+
       {/* ─── FOOTER ─── */}
-      <footer className="border-t border-gray-200/50 py-8 text-center text-sm text-gray-500">
-        {t("landing.footer")}
+      <footer className="border-t border-gray-200/50 py-12 bg-gray-50">
+        <div className="mx-auto max-w-6xl px-6">
+          <div className="flex flex-col items-center gap-6 sm:flex-row sm:justify-between">
+            <span className="text-sm text-gray-500">{t("landing.footer")}</span>
+            <div className="flex flex-wrap items-center justify-center gap-6">
+              <a href="/security" className="inline-flex items-center gap-1.5 text-sm text-gray-500 transition-colors hover:text-gray-900">
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z" />
+                </svg>
+                Security
+              </a>
+              <a href="/privacy" className="text-sm text-gray-500 transition-colors hover:text-gray-900">
+                Privacy Policy
+              </a>
+              <a href="/terms" className="text-sm text-gray-500 transition-colors hover:text-gray-900">
+                Terms of Service
+              </a>
+            </div>
+          </div>
+        </div>
       </footer>
     </main>
   );

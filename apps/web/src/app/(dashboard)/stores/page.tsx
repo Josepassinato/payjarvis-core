@@ -10,6 +10,7 @@ interface StoreInfo {
   label: string;
   url: string;
   icon: string;
+  active: boolean; // true = can connect, false = coming soon
 }
 
 interface ConnectedStore {
@@ -32,14 +33,11 @@ interface ConnectedStore {
 }
 
 const AVAILABLE_STORES: StoreInfo[] = [
-  { store: "amazon", label: "Amazon", url: "https://www.amazon.com", icon: "M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z" },
-  { store: "walmart", label: "Walmart", url: "https://www.walmart.com", icon: "M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" },
-  { store: "target", label: "Target", url: "https://www.target.com", icon: "M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" },
-  { store: "bestbuy", label: "Best Buy", url: "https://www.bestbuy.com", icon: "M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" },
-  { store: "ebay", label: "eBay", url: "https://www.ebay.com", icon: "M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" },
-  { store: "costco", label: "Costco", url: "https://www.costco.com", icon: "M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" },
-  { store: "homedepot", label: "Home Depot", url: "https://www.homedepot.com", icon: "M11.42 15.17l-5.658-3.26-.013-.008a6.714 6.714 0 01-2.75-5.36c0-3.72 3.015-6.735 6.735-6.735 1.955 0 3.716.835 4.95 2.164A6.698 6.698 0 0119.635.207c3.72 0 6.735 3.016 6.735 6.736 0 2.064-.88 3.924-2.282 5.22l-.013.011-5.656 3.26" },
-  { store: "instacart", label: "Instacart", url: "https://www.instacart.com", icon: "M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" },
+  { store: "amazon", label: "Amazon", url: "https://www.amazon.com", icon: "M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z", active: true },
+  { store: "ebay", label: "eBay", url: "https://www.ebay.com", icon: "M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z", active: false },
+  { store: "walmart", label: "Walmart", url: "https://www.walmart.com", icon: "M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4", active: false },
+  { store: "target", label: "Target", url: "https://www.target.com", icon: "M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z", active: false },
+  { store: "bestbuy", label: "Best Buy", url: "https://www.bestbuy.com", icon: "M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z", active: false },
 ];
 
 function StatusBadge({ status }: { status: string }) {
@@ -69,6 +67,14 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
+function ComingSoonBadge() {
+  return (
+    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500 border border-gray-200">
+      Coming Soon
+    </span>
+  );
+}
+
 export default function StoresPage() {
   const { getToken } = useAuth();
   const [connected, setConnected] = useState<ConnectedStore[]>([]);
@@ -76,6 +82,8 @@ export default function StoresPage() {
   const [error, setError] = useState<string | null>(null);
   const [connecting, setConnecting] = useState<string | null>(null);
   const [justConnected, setJustConnected] = useState<string | null>(null);
+  const [customUrl, setCustomUrl] = useState("");
+  const [showCustomInput, setShowCustomInput] = useState(false);
 
   const loadStores = useCallback(async () => {
     try {
@@ -113,6 +121,7 @@ export default function StoresPage() {
   }, [loadStores]);
 
   const handleConnect = async (store: StoreInfo) => {
+    if (!store.active) return;
     setConnecting(store.store);
     setError(null);
     try {
@@ -138,6 +147,50 @@ export default function StoresPage() {
       }
 
       setJustConnected(store.store);
+      await loadStores();
+      setTimeout(() => setJustConnected(null), 8000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Connection failed");
+    } finally {
+      setConnecting(null);
+    }
+  };
+
+  const handleAddCustomStore = async () => {
+    const url = customUrl.trim();
+    if (!url) return;
+
+    const normalized = url.includes("://") ? url : `https://${url}`;
+    const hostname = normalized.replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0];
+    const storeName = hostname.split(".")[0];
+    const storeLabel = storeName.charAt(0).toUpperCase() + storeName.slice(1);
+
+    setConnecting(storeName);
+    setError(null);
+    try {
+      const token = await getToken();
+      const res = await fetch(`${API_URL}/stores/connect`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          store: storeName,
+          storeUrl: normalized,
+          storeLabel,
+        }),
+      });
+      const json = await res.json();
+
+      if (!json.success) {
+        setError(json.error);
+        return;
+      }
+
+      setCustomUrl("");
+      setShowCustomInput(false);
+      setJustConnected(storeName);
       await loadStores();
       setTimeout(() => setJustConnected(null), 8000);
     } catch (err) {
@@ -195,7 +248,7 @@ export default function StoresPage() {
             </svg>
             <div>
               <p className="text-sm font-semibold text-green-800">
-                {AVAILABLE_STORES.find(s => s.store === justConnected)?.label} configured!
+                Store configured!
               </p>
               <p className="text-sm text-green-700 mt-1">
                 When your bot finds a product, it will send a direct link on Telegram
@@ -222,7 +275,7 @@ export default function StoresPage() {
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-lg bg-brand-50 flex items-center justify-center">
                         <svg className="w-5 h-5 text-brand-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d={info?.icon ?? ""} />
+                          <path strokeLinecap="round" strokeLinejoin="round" d={info?.icon ?? "M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z"} />
                         </svg>
                       </div>
                       <div>
@@ -262,45 +315,105 @@ export default function StoresPage() {
 
       {/* Available Stores */}
       {available.length > 0 && (
-        <div>
+        <div className="mb-10">
           <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4">Available Stores</h2>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {available.map((store) => (
               <div
                 key={store.store}
-                className="bg-white border border-gray-200 rounded-xl p-5 hover:shadow-sm transition-shadow"
+                className={`bg-white border rounded-xl p-5 transition-shadow ${
+                  store.active
+                    ? "border-gray-200 hover:shadow-sm"
+                    : "border-gray-100 opacity-70"
+                }`}
               >
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-10 h-10 rounded-lg bg-gray-50 flex items-center justify-center">
-                    <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d={store.icon} />
-                    </svg>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                      store.active ? "bg-brand-50" : "bg-gray-50"
+                    }`}>
+                      <svg className={`w-5 h-5 ${store.active ? "text-brand-500" : "text-gray-300"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d={store.icon} />
+                      </svg>
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-900">{store.label}</h3>
+                      <p className="text-xs text-gray-400">{store.url}</p>
+                    </div>
                   </div>
-                  <div>
-                    <h3 className="text-sm font-semibold text-gray-900">{store.label}</h3>
-                    <p className="text-xs text-gray-400">{store.url}</p>
-                  </div>
+                  {!store.active && <ComingSoonBadge />}
                 </div>
 
-                <button
-                  onClick={() => handleConnect(store)}
-                  disabled={connecting === store.store}
-                  className="w-full py-2 px-4 bg-brand-500 text-white text-sm font-medium rounded-lg hover:bg-brand-600 disabled:opacity-50 transition-colors"
-                >
-                  {connecting === store.store ? (
-                    <span className="flex items-center justify-center gap-2">
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
-                      Connecting...
-                    </span>
-                  ) : (
-                    "Connect"
-                  )}
-                </button>
+                {store.active ? (
+                  <button
+                    onClick={() => handleConnect(store)}
+                    disabled={connecting === store.store}
+                    className="w-full py-2 px-4 bg-brand-500 text-white text-sm font-medium rounded-lg hover:bg-brand-600 disabled:opacity-50 transition-colors"
+                  >
+                    {connecting === store.store ? (
+                      <span className="flex items-center justify-center gap-2">
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+                        Connecting...
+                      </span>
+                    ) : (
+                      "Connect"
+                    )}
+                  </button>
+                ) : (
+                  <button
+                    disabled
+                    className="w-full py-2 px-4 bg-gray-100 text-gray-400 text-sm font-medium rounded-lg cursor-not-allowed"
+                  >
+                    Coming Soon
+                  </button>
+                )}
               </div>
             ))}
           </div>
         </div>
       )}
+
+      {/* Add Custom Store */}
+      <div>
+        <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4">Custom Store</h2>
+        {showCustomInput ? (
+          <div className="bg-white border border-gray-200 rounded-xl p-5">
+            <p className="text-sm text-gray-600 mb-3">
+              Enter the website URL of the store you want to add:
+            </p>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={customUrl}
+                onChange={(e) => setCustomUrl(e.target.value)}
+                placeholder="e.g. nike.com, zara.com"
+                className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+                onKeyDown={(e) => e.key === "Enter" && handleAddCustomStore()}
+              />
+              <button
+                onClick={handleAddCustomStore}
+                disabled={!customUrl.trim() || !!connecting}
+                className="px-4 py-2 bg-brand-500 text-white text-sm font-medium rounded-lg hover:bg-brand-600 disabled:opacity-50 transition-colors"
+              >
+                Add
+              </button>
+              <button
+                onClick={() => { setShowCustomInput(false); setCustomUrl(""); }}
+                className="px-4 py-2 text-gray-500 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            onClick={() => setShowCustomInput(true)}
+            className="w-full py-3 px-4 border-2 border-dashed border-gray-200 rounded-xl text-sm text-gray-500 font-medium hover:border-brand-300 hover:text-brand-500 transition-colors"
+          >
+            + Add Custom Store
+          </button>
+        )}
+      </div>
     </div>
   );
 }

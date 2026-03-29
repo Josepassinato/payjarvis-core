@@ -17,7 +17,9 @@
     "connections": "Conexiones",
     "assistants": "Asistentes",
     "stores": "Tiendas",
-    "billing": "Suscripcion"
+    "billing": "Suscripcion",
+    "wallet": "Billetera",
+    "setupShopping": "Configurar Compras"
   },
   "common": {
     "save": "Guardar",

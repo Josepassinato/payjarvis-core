@@ -43,6 +43,7 @@ function ConnectAmazonContent() {
   const [error, setError] = useState<string | null>(null);
   const [liveUrl, setLiveUrl] = useState<string | null>(null);
   const [bbContextId, setBbContextId] = useState<string | null>(null);
+  const [bbSessionId, setBbSessionId] = useState<string | null>(null);
   const [iframeLoaded, setIframeLoaded] = useState(false);
   const [iframeFailed, setIframeFailed] = useState(false);
   const [accountName, setAccountName] = useState<string | null>(null);
@@ -147,18 +148,23 @@ function ConnectAmazonContent() {
       console.log(`[CONNECT-AMAZON] Live session ready: liveUrl=${data.data.liveUrl?.slice(0, 80)}`);
       setLiveUrl(data.data.liveUrl);
       setBbContextId(data.data.bbContextId);
+      setBbSessionId(data.data.bbSessionId ?? null);
       setStatus("live_login");
 
-      // Start polling for login completion
-      startLoginPolling(data.data.bbContextId);
+      // Start polling for login completion (pass bbSessionId for reconnection)
+      startLoginPolling(data.data.bbContextId, data.data.bbSessionId);
 
-      // Set iframe load timeout — if iframe doesn't load in 10s, offer fallback
+      // Set iframe load timeout — if iframe doesn't load in 5s, switch to form
       iframeTimerRef.current = setTimeout(() => {
         if (!iframeLoaded) {
-          console.log("[CONNECT-AMAZON] iFrame load timeout — showing fallback option");
+          console.log("[CONNECT-AMAZON] iFrame load timeout — switching to fallback form");
           setIframeFailed(true);
+          // Auto-switch to form after 8s total
+          setTimeout(() => {
+            if (!iframeLoaded) setStatus("fallback_form");
+          }, 3_000);
         }
-      }, 10_000);
+      }, 5_000);
     } catch (err) {
       console.error("[CONNECT-AMAZON] Live login error:", err);
       setStatus("fallback_form");
@@ -166,14 +172,16 @@ function ConnectAmazonContent() {
   }
 
   // 3. Poll for login completion every 8s
-  const startLoginPolling = useCallback((contextId: string) => {
+  const startLoginPolling = useCallback((contextId: string, sessionId?: string) => {
     if (pollRef.current) clearInterval(pollRef.current);
     // Wait 15s before first check (give user time to type credentials)
     const timeout = setTimeout(() => {
       pollRef.current = setInterval(async () => {
         try {
           console.log("[CONNECT-AMAZON] Checking if login completed...");
-          const res = await fetch(`${API}/vault/amazon/check-live-login/${contextId}?userId=${userId}`);
+          const params = new URLSearchParams({ userId: userId! });
+          if (sessionId) params.set("bbSessionId", sessionId);
+          const res = await fetch(`${API}/vault/amazon/check-live-login/${contextId}?${params}`);
           const data = await res.json();
           if (data.success && data.data?.loggedIn) {
             console.log(`[CONNECT-AMAZON] Login verified! accountName=${data.data.userName}`);

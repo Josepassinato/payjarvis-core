@@ -1,11 +1,30 @@
 import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
 import { I18nProvider } from "@/components/i18n-provider";
+import { ServiceWorkerRegister } from "@/components/sw-register";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "PayJarvis — Bot Payment Identity",
-  description: "Trust and identity layer for payment bots",
+  title: "PayJarvis — AI Shopping Assistant",
+  description: "Your AI-powered personal shopping assistant. Compare prices, voice conversations, travel planning, and more.",
+  icons: {
+    icon: "/favicon.ico",
+    apple: "/apple-touch-icon.png",
+  },
+  openGraph: {
+    title: "PayJarvis — AI Shopping Assistant",
+    description: "Your AI-powered personal shopping assistant. Compare prices, voice conversations, travel planning, and more.",
+    images: ["/og-image.png"],
+    siteName: "PayJarvis",
+  },
+  other: {
+    "theme-color": "#00BFFF",
+    "apple-mobile-web-app-capable": "yes",
+    "apple-mobile-web-app-status-bar-style": "black-translucent",
+    "application-name": "Jarvis",
+    "apple-mobile-web-app-title": "Jarvis",
+  },
+  manifest: "/manifest.json",
 };
 
 export default function RootLayout({
@@ -16,10 +35,21 @@ export default function RootLayout({
   return (
     <ClerkProvider>
       <html lang="en" className="dark">
+        <head>
+          <link rel="icon" href="/favicon.ico" sizes="32x32" />
+          <link rel="icon" type="image/png" href="/icon-192.png" sizes="192x192" />
+          <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+          <meta name="theme-color" content="#00BFFF" />
+          <meta name="apple-mobile-web-app-capable" content="yes" />
+          <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+          <meta name="apple-mobile-web-app-title" content="Jarvis" />
+          <meta name="application-name" content="Jarvis" />
+        </head>
         <body className="bg-surface text-gray-100 antialiased font-body">
           <I18nProvider>
             {children}
           </I18nProvider>
+          <ServiceWorkerRegister />
         </body>
       </html>
     </ClerkProvider>

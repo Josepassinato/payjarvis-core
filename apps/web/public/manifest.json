@@ -1,0 +1,29 @@
+{
+  "name": "PayJarvis — Your AI Assistant",
+  "short_name": "Jarvis",
+  "description": "Personal AI assistant for shopping, travel, restaurants and more",
+  "start_url": "/chat",
+  "display": "standalone",
+  "background_color": "#0f0f19",
+  "theme_color": "#00BFFF",
+  "orientation": "portrait",
+  "categories": ["productivity", "shopping", "lifestyle"],
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

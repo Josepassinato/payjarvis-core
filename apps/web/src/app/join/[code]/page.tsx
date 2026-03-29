@@ -231,7 +231,7 @@ export default function JoinPage() {
                 href={`/sign-up?ref=${code}&redirect_url=/join/${code}`}
                 className="block w-full py-4 bg-gradient-to-r from-indigo-500 to-purple-600 text-white font-semibold rounded-xl hover:from-indigo-400 hover:to-purple-500 transition-all text-center shadow-lg shadow-indigo-500/25 text-base"
               >
-                Ativar meu Bot Grátis
+                Ativar meu Bot — Beta Gratuito
               </a>
               <p className="text-center text-sm text-white/40">
                 Já tem conta?{" "}
