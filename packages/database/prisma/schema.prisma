@@ -101,6 +101,7 @@ enum PaymentProvider {
   AMAZON
   PIX
   CREDIT_CARD
+  MERCADOPAGO
 }
 
 enum PaymentMethodStatus {
