@@ -11,12 +11,14 @@
   },
   "dependencies": {
     "@browserbasehq/sdk": "^2.8.0",
+    "@browserbasehq/stagehand": "^3.1.0",
     "@fastify/cors": "^10.0.0",
     "@payjarvis/bdit": "*",
     "@payjarvis/types": "*",
     "fastify": "^5.0.0",
     "playwright-core": "^1.58.2",
-    "ws": "^8.0.0"
+    "ws": "^8.0.0",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/ws": "^8.0.0",

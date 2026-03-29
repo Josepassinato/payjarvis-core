@@ -30,6 +30,7 @@ module.exports = {
       name: "payjarvis-api",
       script: path.resolve(__dirname, "apps/api/dist/server.js"),
       cwd: path.resolve(__dirname),
+      node_args: "--max-old-space-size=384",
       env: {
         ...prodEnv,
         NODE_ENV: "production",

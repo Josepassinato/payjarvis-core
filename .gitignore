@@ -60,3 +60,6 @@ sandbox/
 
 # System
 dump.rdb
+HISTORICO.md
+Payjarvis/
+.env.production.bak*
