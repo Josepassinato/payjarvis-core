@@ -1314,6 +1314,70 @@ model PriceAlert {
   @@map("price_alerts")
 }
 
+// ─── Coupon Cache ───
+
+model CouponCache {
+  id            String    @id @default(cuid())
+  store         String    @db.VarChar(100)
+  code          String    @db.VarChar(50)
+  description   String
+  discountType  String    @db.VarChar(20) // percentage, fixed, free_shipping
+  discountValue Float?
+  minPurchase   Float?
+  verified      Boolean   @default(false)
+  expiresAt     DateTime?
+  source        String    @db.VarChar(50)
+  createdAt     DateTime  @default(now())
+
+  @@index([store, createdAt])
+  @@map("coupon_cache")
+}
+
+// ─── Price History ───
+
+model PriceHistory {
+  id                 String   @id @default(cuid())
+  productIdentifier  String   @db.VarChar(200) // ASIN, ML ID, normalized name
+  store              String   @db.VarChar(100)
+  price              Float
+  currency           String   @default("USD") @db.VarChar(3)
+  recordedAt         DateTime @default(now())
+
+  @@index([productIdentifier, recordedAt])
+  @@index([productIdentifier])
+  @@map("price_history")
+}
+
+// ─── User Subscriptions (Recurring Payment Tracking) ───
+
+model UserSubscription {
+  id                     String    @id @default(cuid())
+  userId                 String
+  serviceName            String    @db.VarChar(200)
+  serviceDomain          String?   @db.VarChar(200)
+  planName               String?   @db.VarChar(100)
+  amount                 Float
+  currency               String    @default("USD") @db.VarChar(3)
+  billingCycle           String    @default("monthly") @db.VarChar(20) // monthly, yearly, weekly
+  nextBillingDate        DateTime?
+  lastBilledDate         DateTime?
+  status                 String    @default("active") @db.VarChar(20) // active, cancelled, paused, trial
+  paymentMethod          String    @db.VarChar(50) // paypal, mercadopago, credit_card, gmail_detected
+  externalSubscriptionId String?   @db.VarChar(200) // ID in PayPal/MP
+  canCancelViaApi        Boolean   @default(false)
+  cancelUrl              String?
+  cancellationProofUrl   String?
+  monthlyEquivalent      Float?    // annual/12 conversion
+  discoveredVia          String    @db.VarChar(50) // paypal_api, mp_api, gmail_scan, manual
+  metadata               Json?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  @@unique([userId, serviceName, paymentMethod])
+  @@index([userId, status])
+  @@map("user_subscriptions")
+}
+
 // ─── Butler Protocol 🎩 ───
 
 model ButlerProfile {
@@ -1508,4 +1572,29 @@ model SpendingLimit {
   updatedAt      DateTime @updatedAt
 
   @@map("spending_limits")
+}
+
+// ─── Shopping Lists (Planner de Compras Inteligente) ───
+
+model ShoppingList {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId         String    @map("user_id")
+  title          String    @default("Shopping List") @db.VarChar(200)
+  theme          String?   @db.VarChar(100)
+  location       String?   @db.VarChar(200)
+  items          Json      @default("[]")
+  totalEstimated Decimal?  @map("total_estimated") @db.Decimal(10, 2)
+  currency       String    @default("USD") @db.VarChar(3)
+  status         String    @default("draft") @db.VarChar(20)
+  sharedWith     Json?     @default("[]") @map("shared_with")
+  approvedAt     DateTime? @map("approved_at")
+  approvedItems  Json?     @map("approved_items")
+  rejectedItems  Json?     @map("rejected_items")
+  purchaseResult Json?     @map("purchase_result")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @default(now()) @map("updated_at")
+
+  @@index([userId])
+  @@index([userId, status])
+  @@map("shopping_lists")
 }
