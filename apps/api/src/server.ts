@@ -75,6 +75,7 @@ import { adminInnerCircleRoutes } from "./routes/admin/admin-inner-circle.js";
 import { mastercardRoutes } from "./routes/mastercard.routes.js";
 import { visaRoutes } from "./routes/visa.routes.js";
 import { shoppingConfigRoutes } from "./routes/shopping-config.js";
+import { shoppingPlannerRoutes } from "./routes/shopping-planner.routes.js";
 import { webChatRoutes } from "./routes/web-chat.js";
 import { voiceRoutes } from "./routes/voice.js";
 import { recordingRoutes } from "./routes/recordings.js";
@@ -93,10 +94,58 @@ import "./jobs/scheduled-tasks-cron.js";
 import { startPriceAlertCron } from "./services/search/price-alert-cron.js";
 startPriceAlertCron();
 
+const REDACTED_FIELDS = ["password", "encryptedPassword", "ssn", "creditCard", "pin", "secret", "token", "cookiesEnc"];
+
+function redactSensitiveFields(obj: any): any {
+  if (!obj || typeof obj !== "object") return obj;
+  if (Array.isArray(obj)) return obj.map(redactSensitiveFields);
+  const redacted: Record<string, any> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (REDACTED_FIELDS.some(f => key.toLowerCase().includes(f.toLowerCase()))) {
+      redacted[key] = "[REDACTED]";
+    } else if (typeof value === "object" && value !== null) {
+      redacted[key] = redactSensitiveFields(value);
+    } else {
+      redacted[key] = value;
+    }
+  }
+  return redacted;
+}
+
 const app = Fastify({
   logger: process.env.NODE_ENV === "production"
-    ? { level: "warn" }
-    : true,
+    ? {
+        level: "warn",
+        serializers: {
+          req(request: any) {
+            return {
+              method: request.method,
+              url: request.url,
+              hostname: request.hostname,
+              remoteAddress: request.ip,
+            };
+          },
+          res(reply: any) {
+            return { statusCode: reply.statusCode };
+          },
+        },
+      }
+    : {
+        serializers: {
+          req(request: any) {
+            return {
+              method: request.method,
+              url: request.url,
+              hostname: request.hostname,
+              remoteAddress: request.ip,
+              body: request.body ? redactSensitiveFields(request.body) : undefined,
+            };
+          },
+          res(reply: any) {
+            return { statusCode: reply.statusCode };
+          },
+        },
+      },
 });
 
 const allowedOrigins = [
@@ -230,6 +279,9 @@ await app.register(visaRoutes);
 
 // Shopping Config — setup-shopping wizard (limits, categories, card)
 await app.register(shoppingConfigRoutes);
+
+// Shopping Planner — intelligent shopping plan generation
+await app.register(shoppingPlannerRoutes);
 
 // Web Chat — PWA chat interface (same Jarvis pipeline as WhatsApp/Telegram)
 await app.register(webChatRoutes);

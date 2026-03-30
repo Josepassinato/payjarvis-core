@@ -32,6 +32,226 @@ const BROWSER_AGENT_URL = process.env.BROWSER_AGENT_URL || "http://localhost:300
 const BOT_API_KEY = process.env.BOT_API_KEY || process.env.PAYJARVIS_API_KEY || "";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 
+// ─── Grok (xAI) Config ────────────────────────────────
+const XAI_API_KEY = process.env.XAI_API_KEY || "";
+const XAI_BASE_URL = "https://api.x.ai/v1";
+const GROK_MODEL = "grok-3-mini";
+
+// ─── LLM Router: Grok for conversation, Gemini for tools ───
+
+const TOOL_PATTERNS = [
+  /\b(buy|compra[r]?|purchase|order|checkout|carrinho|add\s+to\s+cart)\b/i,
+  /\b(search|busca[r]?|find|procura[r]?|look\s+for|recomend[ae]\w*|suggest|achei?|achar)\b/i,
+  /\b(track|rastre\w*|tracking|onde\s+tá|where\s+is\s+my)\b/i,
+  /\b(compare|compara[r]?|comparação|mais\s+barato|cheaper|best\s+deal)\b/i,
+  /\b(price|preço|preco|quanto\s+custa|how\s+much|custo|cost)\b/i,
+  /\b(amazon|walmart|target|macys|publix|ebay|mercado\s*livre|best\s*buy|google\s*shopping)\b/i,
+  /\b(product|produto|item|coupon|cupom|deal|oferta|desconto|discount|promoção|promo)\b/i,
+  /\b(price\s*alert|alerta\s*de\s*preço|monitor\w*\s*preço|avisa\w*\s*quando)\b/i,
+  /\b(flight|voo|hotel|hostel|airbnb|restaurant|restaurante|evento|event|show|concert)\b/i,
+  /\b(book|reserva[r]?|reserve|agendar|schedule|appointment|consulta)\b/i,
+  /\b(trem|train|ônibus|onibus|bus|passagem|ticket|amtrak|greyhound|flixbus)\b/i,
+  /\b(rental\s+car|alugar\s+carro|uber|lyft|99|táxi|taxi)\b/i,
+  /\b(direction|direção|rota|route|how\s+(do\s+i\s+)?get\s+to|como\s+chego|maps|mapa)\b/i,
+  /\b(pay|pagar|pagamento|payment|cobrar|charge|stripe|paypal)\b/i,
+  /\b(subscribe|assinatura|credits|créditos|saldo|balance|fatura|invoice)\b/i,
+  /\b(transaction|transação|extrato|statement|spending|gasto)\b/i,
+  /\b(call|lig[aeo]\w*|telefonar|phone|me\s+liga)\b/i,
+  /\b(mechanic|mecânico|mecanico|plumber|encanador|electrician|eletricista|pintor|painter)\b/i,
+  /\b(home\s+service|serviço|reformar|reforma|conserto|repair)\b/i,
+  /\b(document|documento|export|exportar|pdf|contract|contrato|letter|carta|report|relatório)\b/i,
+  /\b(vault|cofre|credential|credencial|login|senha|password|butler)\b/i,
+  /\b(package|encomenda|remédio|remedio|prescription|farmácia|pharmacy|cvs|walgreens)\b/i,
+  /\b(remind|lembr[aei]\w*|lembrete|reminder|alarm[ei]?)\b/i,
+  /\b(tarefa\w*|task\w*|agendad\w*|agendamento)\b/i,
+  /\b(conclu[ií]\w*|complet\w*|done|finish\w*|feito|terminei|marquei|marcar)\b/i,
+  /\b(já\s+fiz|already\s+did|mark\s+as)\b/i,
+  /\b(todo\s+dia|toda\s+(segunda|terça|terca|quarta|quinta|sexta|semana)|every\s+(day|week|monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b/i,
+  /\b(a\s+cada\s+\d+\s*(hora|minute|min|h)\w*|every\s+\d+\s*(hour|minute|min|hr)s?)\b/i,
+  /\b(share|compartilh\w*|invite|convid\w*|referral|indica\w*|qr\s*code)\b/i,
+  /\b(web\s*search|browse|navegar|pesquis[ae]\w*|notícia\w*|news)\b/i,
+  /\b(image|imagem|foto|photo|picture|screenshot|analys[ei]\w*|identif\w*)\b/i,
+  /\b(perto\s+de\s+mim|near\s*(by|me)|aqui\s+perto|nearby|stores?\s+near)\b/i,
+  /\b(zip\s*code|cep|endereço|address|geocod\w*)\b/i,
+];
+
+// Short confirmations that should route to Gemini when in a tool context
+const CONFIRMATION_PATTERNS = [
+  /^(sim|s|yes|y|yeah|yep|ok|okay|pode|quero|manda|fecha|bora|vamos|claro|com certeza|confirmo|confirma|vai|go|do it|let'?s go|sure|please|por favor|esse|este|essa|esta|aquele|aquela|1|2|3|primeiro|segundo|terceiro)\.?!?$/i,
+];
+
+// Patterns in recent bot messages that indicate a tool-dependent context (purchase, booking, etc.)
+const TOOL_CONTEXT_PATTERNS = [
+  /\$\d+|\bR\$\s*\d+|\b\d+[.,]\d{2}\b/i,                  // prices: $99, R$ 50, 29.99
+  /\b(comprar?|buy|purchase|checkout|pagamento|payment)\b/i, // purchase keywords
+  /\b(carrinho|cart|order|pedido)\b/i,                       // cart/order
+  /\b(confirmar?|confirm)\b/i,                               // confirmation prompts
+  /\b(quer\s+(esse|este|essa|esta)|want\s+this|pick|choose|escolh[aei])\b/i, // selection prompts
+  /[1-3]️⃣/,                                                 // numbered options emoji
+  /\b(frete|shipping|entrega|delivery)\b/i,                  // shipping context
+  /\b(resultado|result|found|encontr[aeio])/i,               // search results
+];
+
+function shouldUseGrok(userMessage: string, history?: { role: string; parts: { text: string }[] }[]): boolean {
+  // If the message itself matches a tool pattern, always use Gemini
+  for (const pattern of TOOL_PATTERNS) {
+    if (pattern.test(userMessage)) return false;
+  }
+
+  // For short confirmations, check if recent history has a tool context
+  if (history && history.length > 0) {
+    const isConfirmation = CONFIRMATION_PATTERNS.some((p) => p.test(userMessage.trim()));
+    if (isConfirmation) {
+      // Check last 3 model messages for tool-context keywords
+      const recentModelMessages = history
+        .filter((h) => h.role === "model")
+        .slice(-3)
+        .map((h) => h.parts[0].text)
+        .join(" ");
+      const hasToolContext = TOOL_CONTEXT_PATTERNS.some((p) => p.test(recentModelMessages));
+      if (hasToolContext) {
+        console.log(`[WA LLM] Short confirmation "${userMessage}" in tool context → using Gemini`);
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
+function buildGrokSystemPrompt(
+  userFacts: { fact_key: string; fact_value: string }[]
+): string {
+  const nameFact = userFacts.find(
+    (f) => f.fact_key === "name" || f.fact_key === "first_name" || f.fact_key === "user_name"
+  );
+  const userName = nameFact ? nameFact.fact_value : "user";
+
+  const langFact = userFacts.find((f) => f.fact_key === "language");
+  const langInstruction =
+    langFact && langFact.fact_value !== "en-US"
+      ? `ALWAYS respond in ${langFact.fact_value}.`
+      : "Auto-detect the user language. ALWAYS respond in the same language as the received message.";
+
+  const profileFacts = userFacts
+    .filter((f) => !f.fact_key.startsWith("conversation_summary_"))
+    .map((f) => `${f.fact_key}: ${f.fact_value}`)
+    .join(", ");
+  const userProfile = profileFacts ? `\nUSER PROFILE: ${profileFacts}` : "";
+
+  const summaryFacts = userFacts.filter((f) =>
+    f.fact_key.startsWith("conversation_summary_")
+  );
+  const longTermMemory =
+    summaryFacts.length > 0
+      ? `\nLONG-TERM MEMORY:\n${summaryFacts.map((f) => f.fact_value).join("\n")}`
+      : "";
+
+  const today = new Date().toISOString().split("T")[0];
+  const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const dayOfWeek = dayNames[new Date().getDay()];
+
+  return `You are Jarvis, the smartest shopping agent in the world. You work for ${userName}. Today: ${today} (${dayOfWeek}).
+
+IDENTITY
+You are a SHOPPING AGENT — not a generic assistant. You find the best deals, compare prices, monitor products, and save ${userName} money.
+
+PERSONALITY — VOICE CONSISTENCY (CRITICAL)
+You MUST maintain the EXACT same voice across every message. Never change tone, style, or personality mid-conversation.
+Your voice is: Direct, confident, opinionated about deals. You LOVE saving money.
+Signature: 🦀. Catchphrases: "Achei! 🦀", "Deal found! 🦀", "Economia de $X! 🦀"
+Celebrates savings, honest about bad prices, remembers preferences.
+NEVER be generic, robotic, overly formal, or switch between different speaking styles.
+Example of GOOD voice: "Nike Air Max por $89 na Amazon 🟢 Bom preço! Manda ver? 🦀"
+Example of BAD voice: "Olá! Eu encontrei algumas opções interessantes para você. Gostaria que eu apresentasse as alternativas disponíveis?"
+You are the SAME Jarvis in every message — warm, direct, deal-obsessed, concise.
+
+${langInstruction}
+Portuguese BR, English, or Spanish — never mix languages.
+
+FORMAT: Maximum 3 lines per message. Be concise. WhatsApp truncates long messages.
+Use numbers for options, never bullets. Never explain what you're going to do — just do it.
+
+CHANNEL: You are talking on WhatsApp.
+
+YOUR ROLE IN THE SYSTEM
+You handle CONVERSATION — shopping advice, deal opinions, product recommendations, emotional support.
+You have a partner system (Gemini) that handles ACTIONS — searches, payments, tracking, 47+ tools.
+
+CRITICAL RULE — NEVER FABRICATE ACTIONS
+You CANNOT execute tools or searches yourself.
+When user asks for a product, deal, or action:
+→ Say "Buscando! 🦀" or "On it! 🦀" and the system routes to the action engine.
+→ NEVER pretend you searched or found results.
+
+WHAT YOU CAN DO:
+- Shopping advice, deal opinions, product recommendations
+- Budget tips, spending analysis
+- Conversation, humor, celebrating savings
+
+WHAT THE SYSTEM CAN DO (offer when relevant):
+🔍 Search 100+ stores, 📊 Price history, 🎟️ Coupons, 📦 Track packages, 💰 Manage subscriptions, 📸 Photo → price search
+
+PROACTIVE: When conversation leads to a purchase opportunity, suggest searching.
+
+RESPONSE FORMAT RULE (TEXT vs AUDIO)
+When the message starts with [voice], you MUST add a format tag at the VERY START of your response:
+[FORMAT:TEXT] — for responses with prices, links, lists, comparisons, reports, step-by-step instructions, data tables, or anything the user needs to consult later.
+[FORMAT:AUDIO] — ONLY for casual chat ("oi", "tudo bem?", "obrigado"), short confirmations ("Pronto!", "Feito!", "Anotado!"), or when the response is 1-2 short sentences.
+If in doubt, use [FORMAT:TEXT]. Text is always safer — the user can read it again. Audio disappears.
+For non-voice messages (no [voice] prefix), do NOT add format tags.
+${userProfile}
+${longTermMemory}
+
+RAY-BAN META GLASSES
+${userFacts.some((f) => f.fact_key === "has_meta_glasses" && f.fact_value === "true") ? `The user has Ray-Ban Meta smart glasses. Shopping responses MUST be ULTRA-SHORT (max 2 lines) so the glasses can read them aloud. Send details and links in a SEPARATE follow-up message.` : ""}
+
+Remember: you're Jarvis — the shopping agent that saves money. Not a generic chatbot. 🦀`;
+}
+
+async function chatWithGrokApi(
+  history: { role: string; parts: { text: string }[] }[],
+  userMessage: string,
+  userFacts: { fact_key: string; fact_value: string }[]
+): Promise<string> {
+  const systemPrompt = buildGrokSystemPrompt(userFacts);
+
+  const messages: { role: "system" | "assistant" | "user"; content: string }[] = [
+    { role: "system", content: systemPrompt },
+    ...(history || [])
+      .filter((msg) => msg.parts?.[0]?.text)
+      .map((msg) => ({
+        role: (msg.role === "model" ? "assistant" : "user") as "assistant" | "user",
+        content: msg.parts[0].text,
+      })),
+    { role: "user", content: userMessage },
+  ];
+
+  const response = await fetch(`${XAI_BASE_URL}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${XAI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: GROK_MODEL,
+      messages,
+      temperature: 0.7,
+      max_tokens: 2048,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => "unknown");
+    throw new Error(`Grok API error ${response.status}: ${errorText}`);
+  }
+
+  const data = (await response.json()) as {
+    choices?: { message?: { content?: string } }[];
+  };
+  return data.choices?.[0]?.message?.content || "";
+}
+
 // ─── Memory: conversation history ──────────────────────
 
 export async function getHistory(userId: string, limit = 50) {
@@ -115,78 +335,62 @@ function buildSystemPrompt(userFacts: { fact_key: string; fact_value: string }[]
   const dayOfWeek = dayNames[today.getDay()];
   const tomorrowStr = new Date(today.getTime() + 86400000).toISOString().split("T")[0];
 
-  return `You are Jarvis, personal executive assistant of ${userName}.
+  return `You are Jarvis, the smartest shopping agent in the world. You work for ${userName}.
+
+IDENTITY
+You are a SHOPPING AGENT. Your mission: help ${userName} never overpay for anything.
+You search 100+ stores, compare prices, find coupons, monitor deals, and buy.
 
 CORE RULE — SELF-AWARENESS
-Before responding to ANY request, mentally check your available tools. NEVER say "I can't", "I don't know", or "I don't have that information" when you have a tool that can help.
+Before responding, check your available tools. NEVER say "I can't" when you have a tool that helps.
 
-YOUR CAPABILITIES:
-- VISION: You can analyze images — identify products, brands, text, labels, food, places, documents. If user sends a photo, ALWAYS analyze it. NEVER ask "what is this?" — look at it yourself.
-- VOICE: Audio messages are transcribed for you. Respond naturally.
-- SEARCH: search_restaurants, search_hotels, search_flights, search_events, search_products (searches Amazon, Best Buy, Walmart, Target, Google Shopping with automatic fallback — specify store="bestbuy" if user mentions a specific store), find_stores, find_home_service, find_mechanic, compare_prices, web_search, browse (visit websites — NEVER for product search)
-- NAVIGATION: get_directions (routes+ETA+Google Maps link), geocode_address (validate addresses). ALWAYS include Google Maps links.
-- DOCUMENTS: generate_document (PDF: contracts, letters, reports, invoices), fill_form (website forms), export_transactions (spending reports)
-- COMMERCE: request_payment, track_package (USPS+Correios), amazon_search, get_transactions, get_payment_methods
-- PURCHASES: skyfire_setup_wallet (setup payment wallet), skyfire_checkout (buy products — ALWAYS confirm first), skyfire_my_purchases (order history), skyfire_spending (spending summary + limits), skyfire_set_limits (change limits). User's card data is processed with bank-grade encryption — PayJarvis NEVER sees card numbers. For purchases: search product → show details → ask confirmation → checkout. Double confirm for >$100, triple for >$500.
-- PRICE ALERTS: set_price_alert (monitor prices, checks every 6h, notifies when price drops), get_price_alerts (list active alerts)
-- VAULT: setup_vault, save_card, list_vault_items, delete_vault_item — Zero-Knowledge encrypted storage
-- MEMORY: save_user_fact (save ANY user data immediately), set_reminder, get_reminders, complete_reminder
-- SCHEDULED TASKS: manage_scheduled_task — Create recurring tasks that run automatically. User says "every day at 8am send me news" → creates a scheduled task. Supports: create, list, edit, delete, pause, resume. Natural language schedules: "every day", "every Monday", "every 6 hours", "first of month", "weekdays at 7am".
-- SOCIAL: share_jarvis (invite friends), request_handoff (escalate to human)
-- PHONE CALLS: make_phone_call — Call restaurants, hotels, doctors, stores, airlines on behalf of the user. You conduct the conversation autonomously and report the result. ALWAYS confirm before calling: show the number and objective, ask "Shall I proceed?" CONTACTS are saved automatically — if the user says "call Adriane" without a number, look up the contact first. If not found, ask for the number. The user should NEVER have to give you the same number twice.
-- VOICE CALL WITH USER: call_user — Call the user directly for a live voice conversation. Use when user says "me liga", "call me", "quero falar por voz". You can use ALL your tools during the call.
-- CONTACTS: list_contacts (show saved contacts), delete_contact (remove a contact), update_contact (change phone number). Contacts are auto-saved when making calls.
-- PHONE CALLER ID — When the user wants to verify their phone number for caller ID, send them to the dashboard: https://www.payjarvis.com/setup-phone — Say: "Click here to verify your phone number. It takes 1 minute!" NEVER collect verification codes in the chat.
-- PWA APP — PayJarvis can be installed as an app on the user's phone. When the user asks about an app, or says "I want the app", "how do I install", "quero o app", "tem app?", or during onboarding after setup is complete, tell them: "You can install Jarvis as an app on your phone! Open this link in your browser: https://www.payjarvis.com/chat — iPhone: Open in Safari, tap Share, Add to Home Screen. Android: Open in Chrome, tap the 3 dots menu, Add to Home Screen. The Jarvis icon will appear on your home screen like a real app!"
+YOUR TOOLS:
+- SHOPPING (core): search_products (100+ stores), compare_prices, amazon_search, find_stores, find_coupons, check_price_history, get_product_reviews
+- PRICE MONITORING: set_price_alert (checks every 6h), get_price_alerts
+- SUBSCRIPTIONS: scan_my_subscriptions, cancel_my_subscription, subscription_report
+- PAYMENTS: manage_payment_methods, smart_checkout, skyfire_setup_wallet, skyfire_checkout, skyfire_my_purchases, skyfire_spending, skyfire_set_limits. Card data = bank-grade encryption. Double confirm >$100, triple >$500.
+- TRACKING: track_package (USPS, FedEx, DHL, UPS, Correios)
+- VISION: Analyze images — photo of product → find best price immediately
+- VOICE: Audio transcribed automatically. Respond naturally.
+- VAULT: setup_vault, save_card, list_vault_items, delete_vault_item
+- MEMORY: save_user_fact, set_reminder, get_reminders, complete_reminder
+- SCHEDULED TASKS: manage_scheduled_task (create, list, edit, delete, pause, resume)
+- PHONE: make_phone_call (call stores/restaurants), call_user (voice call with user), list_contacts, update_contact, delete_contact
+- OTHER: search_restaurants, search_hotels, search_flights, search_events, search_transit, search_rental_cars, find_home_service, find_mechanic, get_directions, geocode_address, web_search, browse, generate_document, fill_form, export_transactions, check_prescription, share_jarvis, request_handoff
+- CALLER ID: send to https://www.payjarvis.com/setup-phone
+- PWA: https://www.payjarvis.com/chat — user can install as app
 
-DECISION PROCESS (EVERY message):
-1. Image sent? → ANALYZE IT, identify contents, search for prices if it's a product
-2. Audio sent? → Already transcribed, process normally
-3. Have a TOOL for this? → USE IT
-4. Can combine tool + knowledge? → DO IT
-5. ONLY if truly nothing works → explain what you CAN do instead
-NEVER give up on first try. If one tool fails, try another approach.
-ALWAYS include prices+links for products, Google Maps links for locations.
+AFTER EVERY PRODUCT SEARCH — MANDATORY:
+1. Call check_price_history for top result → show 🟢🟡🔴 indicator
+2. Call find_coupons for the store → mention code if found, say NOTHING if not
+3. Show final price including shipping when available
 
-PERSONALITY & IDENTITY
-You are Jarvis, a personal assistant with a REAL personality. You are NOT a generic AI.
+DECISION PROCESS:
+1. Image sent? → identify product, search prices immediately
+2. Audio sent? → transcribed, process normally
+3. Shopping request? → search_products → price history → coupons → present
+4. Have a TOOL? → USE IT
+5. Can combine tool + knowledge? → DO IT
+NEVER give up. If one tool fails, try another.
 
-You are:
-- WARM but not fake — genuinely care about the user
-- FUNNY when appropriate — use humor naturally, not forced
-- OPINIONATED — "Honestly, I think the Walmart deal is better because..."
-- REMEMBERS things — "Last time you looked for sneakers, you liked Nike. Want me to check?"
-- CASUAL — talk like a friend, not a robot
-- PROACTIVE — suggest things without being asked
-- CELEBRATES wins — "Nice! You saved $50 on that purchase! 🎉"
-- HONEST — "That's overpriced. I found it $30 cheaper here."
-- HAS CATCHPHRASES — uses 🦀 emoji, says "Leave it to me!" or "On it!"
+PERSONALITY — VOICE CONSISTENCY (CRITICAL)
+You MUST maintain the EXACT same voice across every message. Never change tone, style, or personality mid-conversation.
+Your voice is: Direct, confident, opinionated about deals. You LOVE saving money.
+Signature: 🦀. Catchphrases: "Achei! 🦀", "Deal found! 🦀", "Economia de $X! 🦀"
+Celebrates savings, honest about bad prices, remembers preferences.
+NEVER be generic, robotic, overly formal, or switch between different speaking styles.
+Example of GOOD voice: "Nike Air Max 90 — $89 na Amazon 🟢 Bom preco! $30 abaixo da media. 🎟️ Cupom SAVE10 = $80 final. Manda ver? 🦀"
+Example of BAD voice: "Olá! Eu encontrei algumas opções interessantes para você. Gostaria que eu apresentasse as alternativas disponíveis?"
+You are the SAME Jarvis in every message — warm, direct, deal-obsessed, concise.
 
 Priorities:
-1. User convenience
-2. Security and reliability
-3. Execution efficiency
-4. Communication clarity
-5. Discretion
-
-Examples of your personality:
-User: "Busca um tênis Nike"
-YOU: "Nike, boa escolha! 🔥 Achei uns deals — olha esse Air Max por $89 na Amazon, $30 mais barato que semana passada. Manda ver?"
-
-User: "Obrigado Jarvis"
-YOU: "Sempre! Pra isso que eu tô aqui 🦀 Se precisar, é só chamar!"
-
-Your verbal style:
-"Entendido." / "Got it."
-"Já tô verificando." / "On it!"
-"Achei uma opção melhor." / "Found a better deal."
-"Recomendo essa aqui." / "I'd go with this one."
-"Deixa comigo! 🦀" / "Leave it to me! 🦀"
-"Resolvido." / "Done."
+1. Best price — always find cheapest
+2. Honesty — never upsell
+3. Speed — execute, dont explain
+4. Security — protect user data
 
 LANGUAGE
-Automatically detect the user's language.
-ALWAYS respond in the same language as the received message.
+Auto-detect user language. ALWAYS respond in same language.
 English, Português BR, or Español — never mix.
 
 MEMORY
@@ -229,6 +433,13 @@ When the user asks you to set up routines, reminders, or scheduled messages, the
 Keep responses extra concise — WhatsApp truncates long messages.
 Never mention or reference Telegram unless the user asks.
 
+GROCERY / SUPERMARKET
+When user asks about food, groceries, supermarket items, or cooking ingredients, use grocery_search.
+Pass items as comma-separated: "milk, eggs, bread, coffee". If user gives a list, pass ALL items.
+Results are compared across stores with delivery fees. Present the cheapest store with total.
+US users: Publix, Walmart, Target. BR users: Carrefour, Pão de Açúcar, Rappi.
+If user says "compra no Publix", pass store="Publix" to narrow results.
+
 PAYMENT SETUP
 When the user wants to set up payments or says 'quero comprar pelo chat', use skyfire_setup_wallet.
 Card data is processed with bank-grade encryption — you NEVER see, collect, or store card numbers.
@@ -239,16 +450,25 @@ SHOPPING
 When receiving a purchase request:
 1. Call search_products IMMEDIATELY with the product query. Pass store param if user mentions specific store.
 2. Present as PRICE RANKING (cheapest first): rank, product, price, rating, store, link.
-3. When user says "compra esse" / "buy this":
-   a. Show confirmation: 🎩 product, price, merchant, shipping address (if known)
-   b. If >$100: double confirm ("Are you sure? $X")
-   c. If >$500: triple confirm ("Recommend checking the product first")
-   d. After confirmation: call skyfire_checkout
+3. When user says "compra esse" / "buy this" / "sim" / confirms:
+   a. Call smart_checkout IMMEDIATELY with product_name, amount, currency, AND store. ALWAYS pass the store name from the search results.
+   b. smart_checkout returns payment options SORTED BY RELEVANCE for that store — present the top option directly.
+   c. If only ONE valid option: suggest it directly ("Pago via PayPal?") instead of listing.
+   d. If multiple options: show max 3, the first one is the recommended.
+   e. When user picks a payment method: call skyfire_checkout to execute.
 4. After purchase: show order ID, offer to track delivery
 5. If spending limit exceeded: tell user their current limit and offer to adjust
 
+SMART PAYMENT ROUTING — the smart_checkout tool automatically routes to the best payment method:
+- Amazon purchases → user's Amazon account (direct checkout)
+- Mercado Livre / Brazilian stores → Mercado Pago (PIX with discount, installments, or balance)
+- US stores (Walmart, Best Buy, Target, Nike) → PayPal or credit card
+- Unknown stores → user's default method or PayJarvis Wallet
+Follow the routingHint in the smart_checkout response — it tells you which method to recommend.
+
+CRITICAL: When the user confirms they want to buy, call smart_checkout RIGHT AWAY. Do NOT add extra confirmation steps. Do NOT just say "ok" or "deixa comigo" — CALL THE TOOL.
 NEVER use the browse tool to search for products. ALWAYS use search_products.
-NEVER execute a purchase without explicit user confirmation.
+NEVER execute a purchase without the user having seen the product and price first.
 
 FIRST 3 INTERACTIONS
 Ask ONE question at a time to understand the profile.
@@ -270,6 +490,9 @@ ${dayOfWeek === "Saturday" || dayOfWeek === "Sunday" ? `It's the weekend! Be mor
 ${today.getMonth() === 11 && today.getDate() >= 20 ? `🎄 It's the holiday season! Spread the cheer. Suggest gifts, deals, holiday recipes when relevant.` : ""}
 ${today.getMonth() === 10 && today.getDate() >= 25 ? `🛒 Black Friday season! Proactively mention deals and savings opportunities.` : ""}
 
+RAY-BAN META GLASSES
+${userFacts.some((f) => f.fact_key === "has_meta_glasses" && f.fact_value === "true") ? `The user has Ray-Ban Meta smart glasses. Shopping responses MUST be ULTRA-SHORT (max 2 lines) so the glasses can read them aloud comfortably. Send product details, links, and comparisons in a SEPARATE follow-up message right after.` : ""}
+
 CONTEXTUAL PERSONALITY TRIGGERS:
 - If user hasn't talked in a while: "Sumiu hein? 😄 Tava com saudade!"
 - If user searched same product 3+ times: "Compra logo! 😂 Tô vendo você olhar isso toda hora!"
@@ -282,7 +505,7 @@ When the user sends an image (photo), ALWAYS analyze it thoroughly.
 Identify products, text, labels, brands, barcodes, locations, or any relevant content.
 If the user asks about the image or sends it with a question, combine your visual analysis with the question to give a complete answer.
 NEVER ignore an image or ask "what is it?" if you can see it yourself.
-If you identify a product: immediately search for prices and availability.
+If you identify a product: call search_products ONCE, then present results IMMEDIATELY. Do NOT call extra tools (web_search, check_price_history, find_coupons) on the first image response — speed matters more than extras. The user is waiting on WhatsApp. If they want more details, they'll ask.
 
 SETTINGS AS CONVERSATION — YOU ARE THE CONTROL
 The user NEVER needs to open a dashboard or settings page. EVERYTHING is done via chat with you.
@@ -409,7 +632,7 @@ TOOLS
 - search_transit, compare_transit, train_status, search_rental_cars
 - find_home_service, find_mechanic
 - request_payment, get_transactions, set_reminder, get_reminders, save_user_fact
-- share_jarvis — generates a referral link + QR Code so the user can invite friends
+- share_jarvis — generates a referral link so the user can invite friends. Requires channel parameter: whatsapp_br, whatsapp_us, or telegram
 - generate_document — generates PDF documents (contracts, letters, reports, resumes, proposals, invoices). Use when the user asks to write, create, draft any document.
 - export_transactions — exports the user's transaction statement as PDF
 - fill_form — navigates to a website and fills a form with provided data
@@ -431,33 +654,26 @@ If the user hasn't set up their vault yet, guide them to create a PIN first usin
 
 SHARING
 When the user wants to share, invite, refer friends, or asks for a QR code or link:
-→ Use share_jarvis IMMEDIATELY. It generates the link and sends the QR Code automatically.
-→ Then tell the user the link and QR were sent. Their friend gets free Beta access.
+→ ASK which channel FIRST: "Pra onde mando o convite? 🦀\\n1️⃣ WhatsApp Brasil\\n2️⃣ WhatsApp EUA\\n3️⃣ Telegram"
+→ Then call share_jarvis with the correct channel: whatsapp_br, whatsapp_us, or telegram.
+→ SHORTCUT: If you already know the user is BR (from phone prefix +55 or country fact), skip question and use whatsapp_br. If US (+1), use whatsapp_us. But ALWAYS offer: "Quer mandar pra outro canal? Me diz!"
+→ The link and QR Code are sent automatically. Their friend gets free Beta access.
 
 AUDIO/VOICE
 When the user sends a voice message, it is automatically transcribed to text for you.
 You receive the transcription (prefixed with [voice]) and should respond normally.
 You fully understand voice messages. Never say you can't process audio, that you only work with text, or that you can't listen.
 The user spoke to you — respond naturally as if they typed the message.
-Keep voice responses concise (2-3 sentences max) since the response will be converted back to audio.
 
-PERSONAL ASSISTANT — 12 AREAS OF EXPERTISE
-You are a COMPLETE personal assistant. You help with ALL of these areas using your tools AND your training knowledge:
+RESPONSE FORMAT RULE (TEXT vs AUDIO)
+You MUST add a format tag at the VERY START of your response to voice messages:
+[FORMAT:TEXT] — ALWAYS use for: prices, links, lists (3+ items), comparisons, reports, morning briefing, step-by-step instructions, data, or anything the user needs to consult later.
+[FORMAT:AUDIO] — ONLY for: casual greetings ("oi", "tudo bem?", "obrigado"), short confirmations ("Pronto!", "Feito!", "Anotado!"), or responses of 1-2 short sentences with no data.
+NEVER use AUDIO when the response has prices, links, numbers, or technical data. Text is consultable; audio disappears.
+If in doubt, use [FORMAT:TEXT].
 
-1. TRAVEL PLANNING — Create full itineraries, suggest destinations, find flights/hotels, plan day-by-day schedules, visa requirements, packing lists, local tips. Use search_flights, search_hotels, or your knowledge.
-2. SHOPPING — Find products, compare prices across Amazon/Walmart/Google Shopping, track orders, suggest gifts, find deals. Use search_products with platform='all' to compare prices. ALWAYS present results as a PRICE RANKING (cheapest first) with: rank number, product name, price, rating, and clickable link. Highlight the BEST VALUE (best price-to-rating ratio).
-3. FOOD & DINING — Find restaurants, suggest recipes, meal planning, dietary advice, reservations. Use search_restaurants or your knowledge.
-4. HEALTH & WELLNESS — General health info, find pharmacies, check prescriptions, fitness tips, mental health resources. Use check_prescription, find_stores, or your knowledge.
-5. FINANCE — Budget tips, expense tracking, investment basics, tax deadlines, currency conversion. Use your knowledge.
-6. EDUCATION — Course recommendations, study tips, language learning, skill development, tutoring resources. Use web_search or your knowledge.
-7. PRODUCTIVITY — Time management, goal setting, habit tracking, workflow optimization, app recommendations. Use set_reminder or your knowledge.
-8. ENTERTAINMENT — Movie/show recommendations, event tickets, book suggestions, game recommendations, streaming guides. Use search_events or your knowledge.
-9. HOME & SERVICES — Find plumbers, electricians, cleaners, movers, home improvement tips. Use find_home_service or your knowledge.
-10. LEGAL & DOCUMENTS — General legal info, document templates, visa/immigration basics, contract tips. Use your knowledge.
-11. TRANSPORT — Route planning, car rentals, public transit, ride-sharing, mechanic services. Use search_transit, search_rental_cars, find_mechanic, or your knowledge.
-12. SOCIAL & EVENTS — Party planning, gift ideas, invitation wording, event coordination, etiquette tips. Use your knowledge.
-
-IMPORTANT: You NEVER say "I don't have a specific tool for that" or "I can't do that". You ALWAYS help using your extensive training knowledge when no specific tool is available. You are knowledgeable about virtually everything — use that knowledge confidently.
+OTHER CAPABILITIES (dont advertise — let user discover)
+Besides shopping, you can also help with: travel, restaurants, events, home services, documents, health, finance, transport, and more. Use your tools and knowledge. When user asks something outside shopping, help naturally but bring it back to saving money when relevant. NEVER say "I cant do that" — always help using your training knowledge.
 
 FALLBACK RULE
 If ANY search tool returns an error, times out, or returns no results:
@@ -609,6 +825,19 @@ const tools: any[] = [
         },
       },
       {
+        name: "grocery_search",
+        description: "Search grocery/supermarket products with delivery. Use when user asks about food, groceries, supermarket items, cooking ingredients, or says 'preciso comprar coisas pro café'. Supports US stores (Publix, Walmart, Target) and Brazilian stores (Carrefour, Pão de Açúcar, Rappi). Can search a single item or build a full shopping list from a comma-separated list.",
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            items: { type: SchemaType.STRING, description: "Comma-separated grocery items (e.g. 'milk, eggs, bread, coffee')" },
+            store: { type: SchemaType.STRING, description: "Preferred store: Publix, Walmart, Target, Carrefour. Omit to compare all nearby stores." },
+            zip_code: { type: SchemaType.STRING, description: "User's zip code for store availability and delivery" },
+          },
+          required: ["items"],
+        },
+      },
+      {
         name: "set_reminder",
         description: "Create a reminder with date/time.",
         parameters: {
@@ -648,11 +877,13 @@ const tools: any[] = [
       },
       {
         name: "share_jarvis",
-        description: "Generate a referral link and QR Code so the user can invite friends to Jarvis. Use when user wants to share, invite, refer a friend, or asks for QR code/link. The friend gets free Beta access.",
+        description: "Generate a referral link so the user can invite friends to Jarvis. IMPORTANT: ASK which channel first (WhatsApp Brasil, WhatsApp EUA, or Telegram) unless you already know their country from phone prefix or facts. Use whatsapp_br for BR users, whatsapp_us for US users.",
         parameters: {
           type: SchemaType.OBJECT,
-          properties: {},
-          required: [],
+          properties: {
+            channel: { type: SchemaType.STRING, description: "Channel: 'whatsapp_br' (Brazil +55), 'whatsapp_us' (USA +1), or 'telegram'. ASK user if not clear." },
+          },
+          required: ["channel"],
         },
       },
       {
@@ -933,8 +1164,23 @@ const tools: any[] = [
         },
       },
       {
+        name: "smart_checkout",
+        description: "REQUIRED FIRST STEP for any purchase. Checks the user's payment wallet and returns the best payment options for the product, amount, and store. Call this IMMEDIATELY when user confirms they want to buy (says 'sim', 'compra esse', 'buy this'). Pass the store name from search results. Returns sorted payment options — present the top option to the user. ALWAYS call this BEFORE skyfire_checkout.",
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            product_name: { type: SchemaType.STRING, description: "Product name" },
+            product_url: { type: SchemaType.STRING, description: "Product URL (if available)" },
+            amount: { type: SchemaType.NUMBER, description: "Price amount" },
+            currency: { type: SchemaType.STRING, description: "Currency code: USD, BRL, EUR" },
+            store: { type: SchemaType.STRING, description: "Store name from search results: Amazon, Walmart, Mercado Livre, etc." },
+          },
+          required: ["product_name", "amount", "store"],
+        },
+      },
+      {
         name: "skyfire_checkout",
-        description: "Execute a purchase via PayJarvis wallet. Use ONLY after user has confirmed the purchase (said 'sim', 'yes', 'compra', 'confirma'). Checks spending limits, generates payment token, records transaction. ALWAYS show product details and ask for confirmation BEFORE calling this tool. NEVER mention 'Skyfire'.",
+        description: "Execute a purchase AFTER the user has chosen a payment method from smart_checkout results. Do NOT call this directly — ALWAYS call smart_checkout first to get payment options, then call this to execute. NEVER mention 'Skyfire'.",
         parameters: {
           type: SchemaType.OBJECT,
           properties: {
@@ -1211,6 +1457,91 @@ async function handleTool(userId: string, name: string, args: Record<string, unk
       }
     }
 
+    case "grocery_search": {
+      try {
+        const { searchGrocery, buildGroceryList } = await import("./shopping/grocery.service.js");
+        const itemsRaw = args.items as string;
+        const store = args.store as string | undefined;
+        const zipCode = args.zip_code as string | undefined;
+
+        // Detect user's country, city, and language from facts
+        const isUS = !userId.includes("+55");
+        let country = isUS ? "US" : "BR";
+        let zip = zipCode;
+        let city = "";
+        let language = "";
+
+        try {
+          const facts = await prisma.$queryRaw<{ fact_key: string; fact_value: string }[]>`
+            SELECT fact_key, fact_value FROM openclaw_user_facts
+            WHERE user_id = ${userId} AND fact_key IN ('zip_code', 'location', 'city', 'country', 'preferred_language')
+          `;
+          for (const f of facts) {
+            if (f.fact_key === "zip_code" && !zip) zip = f.fact_value;
+            if (f.fact_key === "city") city = f.fact_value;
+            if (f.fact_key === "country" && f.fact_value.toLowerCase().includes("br")) country = "BR";
+            if (f.fact_key === "preferred_language") language = f.fact_value;
+          }
+        } catch { /* ok */ }
+
+        const items = itemsRaw.split(",").map((i) => i.trim()).filter(Boolean);
+        console.log(`[GROCERY] Tool called: ${items.length} items, store=${store || "any"}, zip=${zip || "?"}, country=${country}, city=${city || "?"}`);
+
+        if (items.length === 1) {
+          // Single item search
+          const result = await searchGrocery({ query: items[0], zipCode: zip, store, country, city, language, maxResults: 5 });
+          const symbol = country === "BR" ? "R$" : "$";
+          return {
+            query: items[0],
+            totalResults: result.items.length,
+            stores: result.byStore.map((s) => ({
+              store: s.store,
+              items: s.items.map((i) => ({
+                name: i.name,
+                price: i.price ? `${symbol}${i.price.toFixed(2)}` : "Price on site",
+                brand: i.brand,
+                onSale: i.onSale,
+                savings: i.savings ? `${symbol}${i.savings.toFixed(2)}` : null,
+                url: i.url,
+              })),
+              deliveryFee: s.deliveryFee != null ? `${symbol}${s.deliveryFee.toFixed(2)}` : "Varies",
+              deliveryTime: s.deliveryTime,
+            })),
+            bestStore: result.bestStore,
+            instruction: "Present results grouped by store. Highlight cheapest option and any sales. Show delivery fee and estimated time.",
+          };
+        } else {
+          // Multi-item list — compare across stores
+          const result = await buildGroceryList({ items, zipCode: zip, store, country, city, language, userId });
+          const symbol = country === "BR" ? "R$" : "$";
+          return {
+            itemCount: items.length,
+            stores: result.stores.map((s) => ({
+              store: s.store,
+              itemsFound: s.items.length,
+              subtotal: `${symbol}${s.subtotal.toFixed(2)}`,
+              deliveryFee: s.deliveryFee != null ? `${symbol}${s.deliveryFee.toFixed(2)}` : "Varies",
+              estimatedTotal: `${symbol}${s.estimatedTotal.toFixed(2)}`,
+              deliveryTime: s.deliveryTime,
+              items: s.items.map((i) => ({
+                name: i.name,
+                price: `${symbol}${(i.price || 0).toFixed(2)}`,
+                brand: i.brand,
+                onSale: i.onSale,
+              })),
+            })),
+            bestStore: result.bestStore,
+            totalSavings: result.totalSavings > 0 ? `${symbol}${result.totalSavings.toFixed(2)}` : null,
+            recommendation: result.recommendation,
+            instruction: "Present as a STORE COMPARISON TABLE. Show each store with subtotal + delivery + total. Highlight the cheapest (bestStore). Use emojis for each item. Ask if user wants to order.",
+          };
+        }
+      } catch (err) {
+        console.error("[GROCERY] Error:", (err as Error).message);
+        return { error: `Grocery search failed: ${(err as Error).message}` };
+      }
+    }
+
     case "set_reminder": {
       try {
         // Detect channel from userId format
@@ -1363,7 +1694,8 @@ async function handleTool(userId: string, name: string, args: Record<string, unk
 
     case "share_jarvis": {
       try {
-        return await generateShareForWhatsApp(userId);
+        const channel = (args.channel as string) || null;
+        return await generateShareForWhatsApp(userId, channel);
       } catch (err) {
         return { error: `Failed to generate share link: ${(err as Error).message}` };
       }
@@ -1996,6 +2328,27 @@ async function handleTool(userId: string, name: string, args: Record<string, unk
       }
     }
 
+    case "butler_autofill": {
+      try {
+        const res = await fetch(`${PAYJARVIS_URL}/api/butler/autofill`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-internal-secret": process.env.INTERNAL_SECRET || "" },
+          body: JSON.stringify({
+            userId,
+            serviceName: args.serviceName as string,
+            action: args.action as string,
+            targetUrl: args.targetUrl as string | undefined,
+            details: args.details ? JSON.parse(args.details as string) : undefined,
+          }),
+          signal: AbortSignal.timeout(60000),
+        });
+        const result = await res.json() as Record<string, unknown>;
+        return result;
+      } catch (err) {
+        return { error: `Butler Autofill failed: ${(err as Error).message}` };
+      }
+    }
+
     case "inner_circle_consult": {
       try {
         const slug = args.specialistSlug as string;
@@ -2280,10 +2633,11 @@ async function handleTool(userId: string, name: string, args: Record<string, unk
       const amount = args.amount as number;
       const currency = (args.currency as string) || "USD";
       const store = args.store as string | undefined;
-      console.log(`[SMART-CHECKOUT] Tool called: { product: "${productName}", amount: ${amount}, currency: "${currency}", store: "${store || "any"}" }`);
 
       try {
-        const { getPaymentOptions } = await import("./payments/payment-wallet.service.js");
+        const { getPaymentOptions, classifyStore } = await import("./payments/payment-wallet.service.js");
+        const storeType = classifyStore(store);
+        console.log(`[SMART-CHECKOUT] Tool called: { product: "${productName}", amount: ${amount}, currency: "${currency}", store: "${store || "any"}", storeType: "${storeType}" }`);
 
         const userRecord = await prisma.user.findFirst({
           where: { OR: [{ telegramChatId: userId }, { phone: userId.replace("whatsapp:", "") }] },
@@ -2299,19 +2653,34 @@ async function handleTool(userId: string, name: string, args: Record<string, unk
             ? "⚠️ This is over $100. Please confirm you want to proceed."
             : null;
 
+        // Build store-aware routing hints for the LLM
+        const routingHints: Record<string, string> = {
+          amazon: "For Amazon purchases, prefer the user's connected Amazon account (Playwright checkout). If unavailable, offer PayPal or credit card.",
+          mercadolivre: "For Mercado Livre, prefer Mercado Pago (PIX with 5% discount, card installments up to 12x, or balance). If unavailable, send the direct ML product link.",
+          us_store: "For US stores, prefer PayPal. If unavailable, offer credit card or PayJarvis Wallet.",
+          br_store: "For Brazilian stores, prefer Mercado Pago or PIX. If unavailable, offer credit card.",
+          unknown: "Offer the user's default payment method first. If no default, show all available options.",
+        };
+
         return {
           product: productName,
           productUrl: args.product_url || null,
           amount,
           currency,
           store: store || null,
+          storeType,
           options: result.options,
           message: result.message,
           hasValidOption: result.hasValidOption,
           safeguard,
+          routingHint: routingHints[storeType] || routingHints.unknown,
           instructions: result.hasValidOption
-            ? "Show the payment options. Let the user choose. When they pick one, execute the payment via the corresponding provider (skyfire_checkout for Skyfire, paypal for PayPal, etc). For amounts > $100, ask for explicit confirmation. For > $500, BLOCK and warn."
-            : "User has no payment method that can cover this amount. Suggest adding a method. Offer PayPal, credit card, or Amazon account.",
+            ? "Present the payment options sorted by relevance (first option is the best match for this store). If only ONE option is viable, suggest it directly without listing. For amounts > $100, ask for explicit confirmation. For > $500, BLOCK and warn."
+            : storeType === "amazon"
+              ? "User has no Amazon account connected. Suggest connecting via: 'Quer conectar sua conta Amazon? Leva 1 minuto e eu compro direto pra você!'"
+              : storeType === "mercadolivre" || storeType === "br_store"
+                ? "User has no payment method for Brazilian stores. Suggest: Mercado Pago, PIX, or send the direct product link so they can buy on the site."
+                : "User has no payment method. Suggest adding PayPal (quickest), credit card, or Amazon account.",
         };
       } catch (err) {
         console.error("[SMART-CHECKOUT] Error:", (err as Error).message);
@@ -2373,10 +2742,11 @@ async function handleTool(userId: string, name: string, args: Record<string, unk
 
 // ─── Share / Referral for WhatsApp ──────────────────────
 
-const WA_NUMBER = "17547145921";
+const WA_NUMBER_US = "17547145921";
+const WA_NUMBER_BR = "551150395940";
 const PUBLIC_BASE = process.env.WEB_URL || "https://www.payjarvis.com";
 
-async function generateShareForWhatsApp(userId: string): Promise<Record<string, unknown>> {
+async function generateShareForWhatsApp(userId: string, channel: string | null): Promise<Record<string, unknown>> {
   const phone = userId.replace("whatsapp:", "");
 
   // Try to find formal user account
@@ -2427,8 +2797,35 @@ async function generateShareForWhatsApp(userId: string): Promise<Record<string, 
     code = generateAnonCode(phone);
   }
 
-  const whatsappLink = `https://wa.me/${WA_NUMBER}?text=${encodeURIComponent(`START ${code}`)}`;
+  // Auto-detect channel from phone prefix if not specified
+  let resolvedChannel = channel;
+  if (!resolvedChannel) {
+    const cleanPhone = phone.replace(/\+/g, "");
+    if (cleanPhone.startsWith("55")) resolvedChannel = "whatsapp_br";
+    else if (cleanPhone.startsWith("1")) resolvedChannel = "whatsapp_us";
+    else resolvedChannel = "whatsapp_us"; // default
+  }
+
+  // Generate links for all channels
+  const botUsername = "Jarvis12Brain_bot";
+  const whatsappBrLink = `https://wa.me/${WA_NUMBER_BR}?text=${encodeURIComponent(`START ${code}`)}`;
+  const whatsappUsLink = `https://wa.me/${WA_NUMBER_US}?text=${encodeURIComponent(`START ${code}`)}`;
+  const telegramLink = `https://t.me/${botUsername}?start=${code}`;
   const webLink = `${PUBLIC_BASE}/join/${code}`;
+
+  // Pick the primary link based on channel
+  let primaryLink: string;
+  let channelLabel: string;
+  if (resolvedChannel === "whatsapp_br") {
+    primaryLink = whatsappBrLink;
+    channelLabel = "WhatsApp Brasil";
+  } else if (resolvedChannel === "telegram") {
+    primaryLink = telegramLink;
+    channelLabel = "Telegram";
+  } else {
+    primaryLink = whatsappUsLink;
+    channelLabel = "WhatsApp EUA";
+  }
 
   // Detect user language for localized response
   const langFact = await prisma.$queryRaw<{ fact_value: string }[]>`
@@ -2462,7 +2859,7 @@ async function generateShareForWhatsApp(userId: string): Promise<Record<string, 
   const qrFilePath = join(qrDir, qrFileName);
   await mkdir(qrDir, { recursive: true });
 
-  await QRCode.toFile(qrFilePath, whatsappLink, {
+  await QRCode.toFile(qrFilePath, primaryLink, {
     width: 512,
     margin: 2,
     color: { dark: "#000000", light: "#FFFFFF" },
@@ -2476,15 +2873,15 @@ async function generateShareForWhatsApp(userId: string): Promise<Record<string, 
     process.env.TWILIO_AUTH_TOKEN || ""
   );
 
-  const fromNumber = process.env.TWILIO_WHATSAPP_NUMBER || `whatsapp:+${WA_NUMBER}`;
+  const fromNumber = process.env.TWILIO_WHATSAPP_NUMBER || `whatsapp:+${WA_NUMBER_US}`;
   const toNumber = userId.startsWith("whatsapp:") ? userId : `whatsapp:${userId}`;
 
   const { existsSync } = await import("fs");
   const hasCard = existsSync(cardFilePath);
   const mediaUrl = hasCard ? cardPublicUrl : `${PUBLIC_BASE}/public/qr/${qrFileName}`;
 
-  const bodyPt = `📲 *Seu link de convite:*\n\n${whatsappLink}\n\nSeu amigo(a) ganha acesso Beta grátis ao Jarvis!\nOu escaneie o QR Code acima.`;
-  const bodyEn = `📲 *Your referral link:*\n\n${whatsappLink}\n\nYour friend gets free Beta access!\nOr scan the QR Code above.`;
+  const bodyPt = `📲 *Seu link de convite (${channelLabel}):*\n\n${primaryLink}\n\nSeu amigo(a) ganha acesso Beta grátis ao Jarvis!\nQuer mandar pra outro canal? Me diz!`;
+  const bodyEn = `📲 *Your referral link (${channelLabel}):*\n\n${primaryLink}\n\nYour friend gets free Beta access!\nWant to send via another channel? Let me know!`;
 
   await client.messages.create({
     from: fromNumber,
@@ -2493,18 +2890,22 @@ async function generateShareForWhatsApp(userId: string): Promise<Record<string, 
     mediaUrl: [mediaUrl],
   });
 
-  console.log(`[WA SHARE] Generated referral for ${userId}: ${code} → ${whatsappLink} (card: ${hasCard}, lang: ${lang})`);
+  console.log(`[WA SHARE] Generated referral for ${userId}: ${code} → ${primaryLink} (channel: ${resolvedChannel}, card: ${hasCard}, lang: ${lang})`);
 
   return {
     success: true,
     code,
-    whatsappLink,
+    link: primaryLink,
+    channel: resolvedChannel,
+    whatsappBrLink,
+    whatsappUsLink,
+    telegramLink,
     webLink,
     cardSent: hasCard,
     qrCodeSent: !hasCard,
     message: isPt
-      ? `Link de convite gerado e enviado! Seu amigo(a) ganha acesso Beta grátis ao Jarvis.`
-      : `Referral link generated and sent! Your friend gets free Beta access to Jarvis.`,
+      ? `Link de convite gerado e enviado via ${channelLabel}! Seu amigo(a) ganha acesso Beta grátis ao Jarvis. Quer mandar pra outro canal? Me diz!`
+      : `Referral link generated and sent via ${channelLabel}! Your friend gets free Beta access to Jarvis. Want to send via another channel? Let me know!`,
   };
 }
 
@@ -2530,6 +2931,17 @@ export async function chatWithGemini(
 ): Promise<string> {
   if (!GEMINI_API_KEY) {
     return "Jarvis is temporarily unavailable. Please try again in a moment.";
+  }
+
+  // ─── LLM Router: Grok for conversation, Gemini for tools ───
+  if (XAI_API_KEY && shouldUseGrok(userMessage, history)) {
+    try {
+      console.log(`[WA LLM] Using Grok for: "${userMessage.substring(0, 60)}..."`);
+      const grokResponse = await chatWithGrokApi(history, userMessage, userFacts);
+      if (grokResponse) return grokResponse;
+    } catch (err) {
+      console.error(`[WA LLM] Grok failed, falling back to Gemini:`, (err as Error).message);
+    }
   }
 
   // Store user facts for tool acknowledge messages (BUG 2 fix)
@@ -2655,6 +3067,10 @@ export async function chatWithGeminiMultimodal(
   // Store user facts for tool acknowledge messages (BUG 2 fix)
   _currentUserFacts = userFacts;
 
+  const MULTIMODAL_TIMEOUT_MS = 50_000; // 50s total timeout for image processing
+  const TOOL_TIMEOUT_MS = 30_000;       // 30s per individual tool call
+  const startTime = Date.now();
+
   const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
   const systemPrompt = buildSystemPrompt(userFacts);
 
@@ -2672,6 +3088,7 @@ export async function chatWithGeminiMultimodal(
   let chatSession = model.startChat({ history });
   let result;
   let response;
+  let lastGoodText = ""; // Track partial text for timeout fallback
 
   try {
     result = await chatSession.sendMessage(parts);
@@ -2688,16 +3105,24 @@ export async function chatWithGeminiMultimodal(
     }
   }
 
-  // Function calling loop (max 8 iterations)
-  const SEARCH_TOOLS = new Set([
-    "search_products", "amazon_search", "search_restaurants", "search_hotels",
-    "search_flights", "search_events", "web_search", "browse", "compare_prices",
-    "find_stores", "search_transit", "search_rental_cars", "find_home_service",
-    "find_mechanic", "search_products_latam", "search_products_global",
-  ]);
+  // Capture any initial text (Gemini may respond with text BEFORE calling tools)
+  try {
+    const initialText = response.text();
+    if (initialText) lastGoodText = initialText;
+  } catch { /* text() throws if response has only function calls — ignore */ }
+
+  // Function calling loop (max 8 iterations, with total timeout)
   let iterations = 0;
   while (response.functionCalls() && response.functionCalls()!.length > 0 && iterations < 8) {
     iterations++;
+
+    // Check total timeout before starting a new tool iteration
+    const elapsed = Date.now() - startTime;
+    if (elapsed > MULTIMODAL_TIMEOUT_MS) {
+      console.warn(`[WA IMAGE] Total timeout exceeded (${elapsed}ms, ${iterations} iters). Returning partial.`);
+      return lastGoodText || "Identifiquei o produto na imagem mas a busca demorou demais. Me diz o nome do produto que eu busco rapidinho! 🦀";
+    }
+
     const functionCalls = response.functionCalls()!;
     const functionResponses = [];
 
@@ -2705,9 +3130,16 @@ export async function chatWithGeminiMultimodal(
       console.log(`[WA IMAGE TOOL] ${call.name}(${JSON.stringify(call.args).substring(0, 100)})`);
       let toolResult: Record<string, unknown>;
       try {
-        toolResult = await handleTool(userId, call.name, call.args as Record<string, unknown>);
+        // Individual tool timeout via Promise.race
+        const toolPromise = handleTool(userId, call.name, call.args as Record<string, unknown>);
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`Tool ${call.name} timed out after ${TOOL_TIMEOUT_MS / 1000}s`)), TOOL_TIMEOUT_MS)
+        );
+        toolResult = await Promise.race([toolPromise, timeoutPromise]);
       } catch (err) {
-        toolResult = { error: (err as Error).message || "Tool execution failed" };
+        const errMsg = (err as Error).message || "Tool execution failed";
+        console.error(`[WA IMAGE TOOL] ${call.name} FAILED: ${errMsg}`);
+        toolResult = { error: errMsg };
       }
       if (Array.isArray(toolResult)) {
         toolResult = { results: toolResult };
@@ -2726,14 +3158,21 @@ export async function chatWithGeminiMultimodal(
     try {
       result = await chatSession.sendMessage(functionResponses);
       response = result.response;
+      // Capture any text from this iteration as fallback
+      try {
+        const iterText = response.text();
+        if (iterText) lastGoodText = iterText;
+      } catch { /* only function calls, no text — ignore */ }
     } catch (err) {
       console.error(`[WA IMAGE] Error sending function response: ${(err as Error).message}`);
-      return "Sorry, I encountered a problem processing the results. Please try again.";
+      return lastGoodText || "Erro ao processar os resultados da busca. Tenta de novo! 🦀";
     }
   }
 
   const text = response.text();
-  return text || "I analyzed the image but couldn't generate a response. Please try again.";
+  const duration = Date.now() - startTime;
+  console.log(`[WA IMAGE] Completed in ${duration}ms (${iterations} tool iterations)`);
+  return text || lastGoodText || "Analisei a imagem mas não consegui gerar uma resposta. Tenta de novo! 🦀";
 }
 
 // ─── Fact Extraction (background) ──────────────────────
@@ -2947,18 +3386,20 @@ export async function processWhatsAppImageMessage(
 
 // ─── Main Entry Point ──────────────────────────────────
 
-export async function processWhatsAppMessage(from: string, text: string): Promise<string> {
+export async function processWhatsAppMessage(from: string, text: string, botNumber?: string): Promise<string> {
   // User ID is the WhatsApp number (e.g. "whatsapp:+19546432431")
   const userId = from;
+  // Detect default language from Jarvis number: BR number → pt, else → en
+  const isBrBot = botNumber?.includes("+5511") ?? false;
 
-  console.log(`[WhatsApp] ${userId}: ${text.substring(0, 80)}`);
+  console.log(`[WhatsApp] ${userId}: ${text.substring(0, 80)} (bot: ${botNumber || "unknown"})`);
 
   // 0a. Handle START command (referral deep-link from wa.me/17547145921?text=START+CODE)
   // Also match "Quero começar CODE" as alternative link format
   const startMatch = text.match(/^(?:START|Quero\s+come[cç]ar)\s+(\S+)$/i);
   if (startMatch) {
     try {
-      const result = await startOnboarding(userId, "whatsapp", startMatch[1], text);
+      const result = await startOnboarding(userId, "whatsapp", startMatch[1], text, botNumber);
       return result.message;
     } catch (err) {
       console.error("[WA START] Error:", (err as Error).message);
@@ -2966,15 +3407,79 @@ export async function processWhatsAppMessage(from: string, text: string): Promis
     }
   }
 
-  // 0b. Handle share/referral intent — detect before sending to Gemini
+  // 0b. Detect Ray-Ban Meta / smart glasses mention → send guide + save fact
+  const metaGlassesPattern = /\b(ray[\s-]?ban|meta\s*glass|smart\s*glass|[oó]culos\s*(inteligente|meta|smart)|lentes?\s*(inteligente|meta|smart)|gafas?\s*(inteligente|meta|smart))\b/i;
+  if (metaGlassesPattern.test(text)) {
+    try {
+      // Check if we already sent the guide
+      const existingFact = await prisma.$queryRaw<{ fact_value: string }[]>`
+        SELECT fact_value FROM openclaw_user_facts
+        WHERE user_id = ${userId} AND fact_key = 'has_meta_glasses' LIMIT 1
+      `;
+      if (existingFact.length === 0) {
+        // Save fact
+        await upsertFact(userId, "has_meta_glasses", "true", "device", "auto");
+        console.log(`[WA META-GLASSES] Detected for ${userId}, saving fact + sending guide`);
+
+        // Detect language
+        const langFacts = await prisma.$queryRaw<{ fact_value: string }[]>`
+          SELECT fact_value FROM openclaw_user_facts
+          WHERE user_id = ${userId} AND fact_key = 'language' LIMIT 1
+        `;
+        const lang = langFacts.length > 0 && langFacts[0].fact_value.startsWith("pt") ? "pt"
+          : langFacts.length > 0 && langFacts[0].fact_value.startsWith("es") ? "es" : "en";
+
+        const guide = lang === "pt"
+          ? `Voce tem Ray-Ban Meta? Perfeito! 😎
+
+Pode usar o Jarvis direto pelo oculos:
+
+🎙️ "Hey Meta, send message to Jarvis: busca tenis Nike"
+📸 Tire foto de um produto → "Hey Meta, send that to Jarvis"
+🛒 "Hey Meta, tell Jarvis: compra o perfume"
+
+Salva meu numero como "Jarvis" nos contatos e pronto! 🦀`
+          : lang === "es"
+          ? `Tienes Ray-Ban Meta? Perfecto! 😎
+
+Puedes usar Jarvis directo desde los lentes:
+
+🎙️ "Hey Meta, send message to Jarvis: busca tenis Nike"
+📸 Toma foto de un producto → "Hey Meta, send that to Jarvis"
+🛒 "Hey Meta, tell Jarvis: compra el perfume"
+
+Guarda mi numero como "Jarvis" en contactos y listo! 🦀`
+          : `You have Ray-Ban Meta? Perfect! 😎
+
+You can use Jarvis directly from your glasses:
+
+🎙️ "Hey Meta, send message to Jarvis: find Nike shoes"
+📸 Take a photo of a product → "Hey Meta, send that to Jarvis"
+🛒 "Hey Meta, tell Jarvis: buy the perfume"
+
+Save my number as "Jarvis" in your contacts and you're set! 🦀`;
+
+        await saveMessage(userId, "user", text);
+        await saveMessage(userId, "model", guide);
+        return guide;
+      }
+      // If fact already exists, just update and fall through to normal flow
+      await upsertFact(userId, "has_meta_glasses", "true", "device", "auto");
+    } catch (err) {
+      console.error("[WA META-GLASSES] Error:", (err as Error).message);
+      // Fall through to normal flow
+    }
+  }
+
+  // 0c. Handle share/referral intent — detect before sending to Gemini
   const shareIntent = /\b(compartilh\w*|indicar|indic[aá]\w*|convidar|convid\w*|convite|share|invite|refer|qr\s*code|link.*(indic|refer|convit|compart)|amigo.*jarvis|jarvis.*amigo|mand[ae].*link|envi[ae].*link)\b/i;
   if (shareIntent.test(text)) {
     try {
-      const result = await generateShareForWhatsApp(userId);
+      const result = await generateShareForWhatsApp(userId, null);
       if (result.success) {
         // Card/QR + link already sent by generateShareForWhatsApp
         await saveMessage(userId, "user", text);
-        await saveMessage(userId, "model", `Referral link sent: ${result.whatsappLink}`);
+        await saveMessage(userId, "model", `Referral link sent: ${result.link}`);
         return (result.message as string) || `📲 Link de convite enviado! Seu amigo(a) ganha acesso Beta grátis.`;
       }
       // If error (no account, no bot), fall through to normal Gemini flow
@@ -3039,7 +3544,7 @@ export async function processWhatsAppMessage(from: string, text: string): Promis
 
           // Start onboarding with the share code
           try {
-            const result = await startOnboarding(userId, "whatsapp", ref.share_code ?? undefined, text);
+            const result = await startOnboarding(userId, "whatsapp", ref.share_code ?? undefined, text, botNumber);
             return result.message;
           } catch (err) {
             console.error("[WA REFERRAL] Onboarding start error:", (err as Error).message);
@@ -3084,7 +3589,7 @@ export async function processWhatsAppMessage(from: string, text: string): Promis
           console.log(`[WhatsApp] Voice-call referral detected for ${cleanPhone}: called by ${referrerName} (${call.user_id}), share code: ${shareCode}`);
 
           try {
-            const result = await startOnboarding(userId, "whatsapp", shareCode, text);
+            const result = await startOnboarding(userId, "whatsapp", shareCode, text, botNumber);
             return result.message;
           } catch (err) {
             console.error("[WA VOICE-REFERRAL] Onboarding start error:", (err as Error).message);
@@ -3094,13 +3599,42 @@ export async function processWhatsAppMessage(from: string, text: string): Promis
         console.error("[WA VOICE-REFERRAL] Check error:", (err as Error).message);
       }
 
-      // No referral context at all — detect language and show appropriate message
-      console.log(`[WhatsApp] Unknown user ${userId} — no account, no onboarding, no referral context`);
-      const isPt = /\b(oi|olá|ola|bom dia|boa tarde|boa noite|tudo bem|como vai|jarvis)\b/i.test(text);
-      if (isPt) {
-        return "Olá! 👋 Eu sou o Jarvis, seu assistente pessoal com IA.\n\nParece que você ainda não tem uma conta. Para começar:\n\n1. Peça a um amigo que já usa o Jarvis um convite\n2. Ou acesse payjarvis.com para criar sua conta\n\nEstamos em Beta — o acesso é totalmente grátis!";
+      // No referral context — detect language and onboard
+      console.log(`[WhatsApp] Unknown user ${userId} — no account, no onboarding. isBrBot=${isBrBot}`);
+
+      // Auto-seed BR facts for users arriving via +55 11 number
+      if (isBrBot) {
+        const brFacts: [string, string, string][] = [
+          ["country", "BR", "personal"],
+          ["preferred_language", "Portuguese", "personal"],
+          ["language", "pt-BR", "personal"],
+          ["currency", "BRL", "personal"],
+          ["onboarded_via", "whatsapp_br", "general"],
+        ];
+        for (const [key, value, category] of brFacts) {
+          await prisma.$executeRaw`
+            INSERT INTO openclaw_user_facts (user_id, fact_key, fact_value, category, source, confidence)
+            VALUES (${userId}, ${key}, ${value}, ${category}, 'auto_onboarding', 0.9)
+            ON CONFLICT (user_id, fact_key) DO NOTHING
+          `.catch(() => {});
+        }
+        // Save profileName as name if available
+        const profileName = text.match(/^([\p{L}\s]{2,30})$/u)?.[1] || "";
+        console.log(`[WhatsApp] BR onboarding: seeded facts for ${userId}`);
       }
-      return "Hi! 👋 I'm Jarvis, your personal AI assistant.\n\nIt looks like you don't have an account yet. To get started:\n\n1. Ask a friend who already uses Jarvis for an invite\n2. Or visit payjarvis.com to create your account\n\nWe're in Beta — access is completely free!";
+
+      // Start onboarding for new users (no invite required)
+      try {
+        const result = await startOnboarding(userId, "whatsapp", undefined, text, botNumber);
+        return result.message;
+      } catch (err) {
+        console.error("[WA AUTO-ONBOARD] Error:", (err as Error).message);
+        // Fallback welcome if onboarding service fails
+        if (isBrBot) {
+          return "Oi! Eu sou o Jarvis, seu assistente de compras inteligente 🦀\n\nAcho o melhor preço em centenas de lojas, monitoro promoções e aviso quando cair. Tudo pelo WhatsApp!\n\nPra começar:\n🔍 Me diz um produto que você quer\n📸 Manda uma foto de algo que viu\n🛒 Me pede uma lista de supermercado\n\nQual é o seu nome? 🦀";
+        }
+        return "Hi! I'm Jarvis, your smart shopping assistant 🦀\n\nI find the best prices across hundreds of stores, monitor deals, and alert you when prices drop. All via WhatsApp!\n\nTo get started:\n🔍 Tell me a product you want\n📸 Send a photo of something you saw\n🛒 Ask me for a grocery list\n\nWhat's your name? 🦀";
+      }
     }
   }
 

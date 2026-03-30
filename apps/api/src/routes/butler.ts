@@ -17,6 +17,7 @@ import {
   getButlerStatus,
   logButlerAction,
 } from "../services/butler/butler-protocol.service.js";
+import { executeAutofill } from "../services/butler/butler-autofill.service.js";
 
 export async function butlerRoutes(app: FastifyInstance) {
 
@@ -154,6 +155,34 @@ export async function butlerRoutes(app: FastifyInstance) {
     if (!checkInternal(req, reply)) return;
     const status = await getButlerStatus();
     return { success: true, ...status };
+  });
+
+  // ─── Autofill — browser automation via stored credentials ───
+
+  // POST /api/butler/autofill
+  app.post("/api/butler/autofill", async (req: any, reply) => {
+    if (!checkInternal(req, reply)) return;
+    const { userId: rawId, serviceName, action, targetUrl, details } = req.body as {
+      userId: string;
+      serviceName: string;
+      action: string;
+      targetUrl?: string;
+      details?: Record<string, any>;
+    };
+
+    if (!rawId || !serviceName || !action) {
+      return reply.status(400).send({ error: "userId, serviceName, and action are required" });
+    }
+
+    const userId = await resolveUserId(rawId);
+    if (!userId) return reply.status(404).send({ error: "User not found" });
+
+    try {
+      const result = await executeAutofill({ userId, serviceName, action, targetUrl, details });
+      return result;
+    } catch (err) {
+      return reply.status(500).send({ error: (err as Error).message });
+    }
   });
 
   // ─── Google OAuth (connect Gmail/Calendar/Contacts) ───
