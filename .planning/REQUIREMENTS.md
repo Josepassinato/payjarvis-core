@@ -86,12 +86,40 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (populated by roadmapper) | | |
+| INFRA-01 | Phase 1 — VPS Disk Cleanup | Pending |
+| INFRA-02 | Phase 1 — VPS Disk Cleanup | Pending |
+| INFRA-03 | Phase 5 — Supabase → VPS Migration | Pending |
+| INFRA-04 | Phase 5 — Supabase → VPS Migration | Pending |
+| INFRA-05 | Phase 5 — Supabase → VPS Migration | Pending |
+| BUTL-01 | Phase 3 — Butler Protocol Autofill | Pending |
+| BUTL-02 | Phase 3 — Butler Protocol Autofill | Pending |
+| BUTL-03 | Phase 3 — Butler Protocol Autofill | Pending |
+| BUTL-04 | Phase 3 — Butler Protocol Autofill | Pending |
+| BUTL-05 | Phase 3 — Butler Protocol Autofill | Pending |
+| BUTL-06 | Phase 3 — Butler Protocol Autofill | Pending |
+| BUTL-07 | Phase 3 — Butler Protocol Autofill | Pending |
+| SHOP-01 | Phase 4 — Shopping Planner Approval | Pending |
+| SHOP-02 | Phase 4 — Shopping Planner Approval | Pending |
+| SHOP-03 | Phase 4 — Shopping Planner Approval | Pending |
+| SHOP-04 | Phase 4 — Shopping Planner Approval | Pending |
+| SHOP-05 | Phase 4 — Shopping Planner Approval | Pending |
+| SHOP-06 | Phase 4 — Shopping Planner Approval | Pending |
+| SHOP-07 | Phase 4 — Shopping Planner Approval | Pending |
+| SHOP-08 | Phase 4 — Shopping Planner Approval | Pending |
+| AUDIO-01 | Phase 2 — Audio Routing + Ray-Ban Meta | Pending |
+| AUDIO-02 | Phase 2 — Audio Routing + Ray-Ban Meta | Pending |
+| AUDIO-03 | Phase 2 — Audio Routing + Ray-Ban Meta | Pending |
+| AUDIO-04 | Phase 2 — Audio Routing + Ray-Ban Meta | Pending |
+| META-01 | Phase 2 — Audio Routing + Ray-Ban Meta | Pending |
+| META-02 | Phase 2 — Audio Routing + Ray-Ban Meta | Pending |
+| META-03 | Phase 2 — Audio Routing + Ray-Ban Meta | Pending |
+| META-04 | Phase 2 — Audio Routing + Ray-Ban Meta | Pending |
+| META-05 | Phase 2 — Audio Routing + Ray-Ban Meta | Pending |
 
 **Coverage:**
 - v1.0 requirements: 25 total
-- Mapped to phases: 0
-- Unmapped: 25 ⚠️
+- Mapped to phases: 25
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-03-30*
