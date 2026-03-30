@@ -632,6 +632,8 @@ TOOLS
 - search_transit, compare_transit, train_status, search_rental_cars
 - find_home_service, find_mechanic
 - request_payment, get_transactions, set_reminder, get_reminders, save_user_fact
+- grocery_search — search grocery/supermarket products, compare stores, build shopping lists
+- shopping_plan_action — approve, modify, or reject a shopping plan. Use when user responds with 'sim', 'aprova', 'confirma', 'cancela', 'remove item X', 'troca loja'. Requires listId and action (approve_all, approve_partial, reject, swap_store)
 - share_jarvis — generates a referral link so the user can invite friends. Requires channel parameter: whatsapp_br, whatsapp_us, or telegram
 - generate_document — generates PDF documents (contracts, letters, reports, resumes, proposals, invoices). Use when the user asks to write, create, draft any document.
 - export_transactions — exports the user's transaction statement as PDF
@@ -835,6 +837,21 @@ const tools: any[] = [
             zip_code: { type: SchemaType.STRING, description: "User's zip code for store availability and delivery" },
           },
           required: ["items"],
+        },
+      },
+      {
+        name: "shopping_plan_action",
+        description: "Approve, modify, or reject a shopping plan. Use when user responds to a shopping plan with approval ('sim', 'aprova', 'confirma', 'manda ver'), rejection ('cancela', 'nao quero'), or modifications ('remove item X', 'troca a loja', 'tira o item 3'). Always show the plan first via shopping_planner before using this tool.",
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            listId: { type: SchemaType.STRING, description: "Shopping list ID from the plan" },
+            action: { type: SchemaType.STRING, description: "Action: approve_all | approve_partial | reject | swap_store" },
+            approvedItemIds: { type: SchemaType.STRING, description: "Comma-separated IDs of approved items (for approve_partial)" },
+            rejectedItemIds: { type: SchemaType.STRING, description: "Comma-separated IDs of rejected items" },
+            swapRequests: { type: SchemaType.STRING, description: "JSON array of [{itemId, newStore}] for store swaps" },
+          },
+          required: ["listId", "action"],
         },
       },
       {
@@ -1539,6 +1556,47 @@ async function handleTool(userId: string, name: string, args: Record<string, unk
       } catch (err) {
         console.error("[GROCERY] Error:", (err as Error).message);
         return { error: `Grocery search failed: ${(err as Error).message}` };
+      }
+    }
+
+    case "shopping_plan_action": {
+      try {
+        const body = {
+          userId,
+          action: args.action as string,
+          approvedItemIds: (args.approvedItemIds as string)
+            ? (args.approvedItemIds as string).split(",").map((s: string) => s.trim())
+            : undefined,
+          rejectedItemIds: (args.rejectedItemIds as string)
+            ? (args.rejectedItemIds as string).split(",").map((s: string) => s.trim())
+            : undefined,
+          swapRequests: (args.swapRequests as string) ? JSON.parse(args.swapRequests as string) : undefined,
+        };
+        const VOICE_SECRET = process.env.INTERNAL_SECRET || "";
+        const res = await fetch(`${PAYJARVIS_URL}/api/shopping/lists/${args.listId}/approve`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-internal-secret": VOICE_SECRET },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(30000),
+        });
+        const data = (await res.json()) as any;
+        if (data.success) {
+          const status = body.action === "reject" ? "rejected" : "approved";
+          return {
+            status,
+            message:
+              status === "rejected"
+                ? "Shopping plan cancelled."
+                : data.data?.priceChanged
+                  ? "Some prices changed since the plan was created. Please review the updated prices."
+                  : "Shopping plan approved! Items are ready.",
+            priceChanged: data.data?.priceChanged || false,
+            changes: data.data?.changes || [],
+          };
+        }
+        return { error: data.error || "Shopping plan action failed" };
+      } catch (err) {
+        return { error: `Shopping plan action failed: ${(err as Error).message}` };
       }
     }
 
