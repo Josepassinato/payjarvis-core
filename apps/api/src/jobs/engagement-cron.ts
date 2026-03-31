@@ -17,6 +17,7 @@ import {
   runSmartTips,
   runBirthdayCheck,
 } from "../services/engagement/proactive-messages.service.js";
+import { checkRenewalAlerts, checkSubscriptionWaste } from "../services/subscriptions/subscription-cron.service.js";
 
 // Morning briefing: 8AM EST = 12:00 UTC
 cron.schedule("0 12 * * *", async () => {
@@ -60,6 +61,24 @@ cron.schedule("5 12 * * *", async () => {
     await runBirthdayCheck();
   } catch (err) {
     console.error("[ENGAGEMENT-CRON] Birthday check error:", err);
+  }
+});
+
+// Subscription renewal alerts: daily 10AM UTC (6AM EST)
+cron.schedule("0 10 * * *", async () => {
+  try {
+    await checkRenewalAlerts();
+  } catch (err) {
+    console.error("[ENGAGEMENT-CRON] Subscription renewal alerts error:", err);
+  }
+});
+
+// Subscription waste detection: 1st of each month 14:00 UTC (10AM EST)
+cron.schedule("0 14 1 * *", async () => {
+  try {
+    await checkSubscriptionWaste();
+  } catch (err) {
+    console.error("[ENGAGEMENT-CRON] Subscription waste detection error:", err);
   }
 });
 

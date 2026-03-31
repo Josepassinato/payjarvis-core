@@ -421,8 +421,8 @@ export async function processTrialAlerts(): Promise<void> {
     if (info) {
       const lang = detectLang(info.chatId);
       const msg = lang === "pt"
-        ? "The Beta period is ending soon.\n\nKeep your assistant for $20/month?\n\n1. Yes, keep Jarvis\n2. Not now"
-        : "The Beta period is ending soon.\n\nKeep your executive assistant for $20/month?\n\n1. Yes, keep Jarvis\n2. Not now";
+        ? "O periodo Beta esta acabando.\n\nManter seu agente de compras por $20/mes?\n\n1. Sim, manter Jarvis\n2. Agora nao"
+        : "The Beta period is ending soon.\n\nKeep your shopping agent for $20/month?\n\n1. Yes, keep Jarvis\n2. Not now";
       await sendAlert(info.platform, info.chatId, msg);
     }
     await prisma.llmCredit.update({ where: { id: credit.id }, data: { alertDay55Sent: true } });

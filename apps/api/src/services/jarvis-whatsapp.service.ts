@@ -309,7 +309,7 @@ export async function upsertFact(userId: string, key: string, value: string, cat
 
 // ─── System Prompt (same as openclaw/gemini.js) ────────
 
-function buildSystemPrompt(userFacts: { fact_key: string; fact_value: string }[]) {
+function buildSystemPrompt(userFacts: { fact_key: string; fact_value: string }[], options: { glassesMode?: boolean } = {}) {
   const isNewUser = userFacts.length === 0;
   const knownKeys = userFacts.map((f) => f.fact_key.replace(/_/g, " ")).join(", ");
 
@@ -491,7 +491,19 @@ ${today.getMonth() === 11 && today.getDate() >= 20 ? `🎄 It's the holiday seas
 ${today.getMonth() === 10 && today.getDate() >= 25 ? `🛒 Black Friday season! Proactively mention deals and savings opportunities.` : ""}
 
 RAY-BAN META GLASSES
-${userFacts.some((f) => f.fact_key === "has_meta_glasses" && f.fact_value === "true") ? `The user has Ray-Ban Meta smart glasses. Shopping responses MUST be ULTRA-SHORT (max 2 lines) so the glasses can read them aloud comfortably. Send product details, links, and comparisons in a SEPARATE follow-up message right after.` : ""}
+${options.glassesMode ? `⚡ GLASSES MODE ACTIVE — the user is sending this message FROM their Ray-Ban Meta smart glasses via Meta AI voice relay.
+STRICT RULES for glasses mode:
+1. MAX 2 sentences. The glasses will READ your response ALOUD.
+2. NO links, NO URLs, NO markdown formatting, NO asterisks.
+3. NO emoji spam — max 1 emoji per response.
+4. NO numbered lists. Summarize in natural speech.
+5. Lead with the answer, not filler. "Nike Air Max 90 por 89 dolares na Amazon, preco bom" NOT "Encontrei algumas opcoes pra voce..."
+6. Prices: say "89 dolares" not "$89.00". Say "120 reais" not "R$120".
+7. If the user wants details, links, or comparisons, say "Mandei os detalhes no chat" and send a SECOND follow-up message with full data.
+8. Product searches: give ONLY the #1 best option with price. Not 3-5 options.
+9. Confirmations: "Pronto", "Feito", "Anotado" — one word when possible.
+10. Think: how would a human assistant whisper the answer in your ear?` :
+userFacts.some((f) => f.fact_key === "has_meta_glasses" && f.fact_value === "true") ? `The user has Ray-Ban Meta smart glasses. Shopping responses MUST be ULTRA-SHORT (max 2 lines) so the glasses can read them aloud. Send details and links in a SEPARATE follow-up message.` : ""}
 
 CONTEXTUAL PERSONALITY TRIGGERS:
 - If user hasn't talked in a while: "Sumiu hein? 😄 Tava com saudade!"
@@ -2938,8 +2950,9 @@ async function generateShareForWhatsApp(userId: string, channel: string | null):
   const hasCard = existsSync(cardFilePath);
   const mediaUrl = hasCard ? cardPublicUrl : `${PUBLIC_BASE}/public/qr/${qrFileName}`;
 
-  const bodyPt = `📲 *Seu link de convite (${channelLabel}):*\n\n${primaryLink}\n\nSeu amigo(a) ganha acesso Beta grátis ao Jarvis!\nQuer mandar pra outro canal? Me diz!`;
-  const bodyEn = `📲 *Your referral link (${channelLabel}):*\n\n${primaryLink}\n\nYour friend gets free Beta access!\nWant to send via another channel? Let me know!`;
+  // Always include both WA links so the invitee picks the right one for their country
+  const bodyPt = `📲 *Seu link de convite:*\n\n🇧🇷 Brasil: ${whatsappBrLink}\n🇺🇸 EUA: ${whatsappUsLink}\n\nSeu amigo(a) ganha acesso Beta grátis ao Jarvis!\nQuer mandar via Telegram? Me diz!`;
+  const bodyEn = `📲 *Your referral link:*\n\n🇧🇷 Brazil: ${whatsappBrLink}\n🇺🇸 USA: ${whatsappUsLink}\n\nYour friend gets free Beta access!\nWant to send via Telegram? Let me know!`;
 
   await client.messages.create({
     from: fromNumber,
@@ -2985,7 +2998,8 @@ export async function chatWithGemini(
   history: { role: string; parts: { text: string }[] }[],
   userMessage: string,
   userId: string,
-  userFacts: { fact_key: string; fact_value: string }[]
+  userFacts: { fact_key: string; fact_value: string }[],
+  options: { glassesMode?: boolean } = {}
 ): Promise<string> {
   if (!GEMINI_API_KEY) {
     return "Jarvis is temporarily unavailable. Please try again in a moment.";
@@ -3006,7 +3020,7 @@ export async function chatWithGemini(
   _currentUserFacts = userFacts;
 
   const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-  const systemPrompt = buildSystemPrompt(userFacts);
+  const systemPrompt = buildSystemPrompt(userFacts, options);
 
   const model = genAI.getGenerativeModel({
     model: "gemini-2.5-flash",
@@ -3529,6 +3543,27 @@ Save my number as "Jarvis" in your contacts and you're set! 🦀`;
     }
   }
 
+  // 0b2. Glasses mode detection — voice-relayed commands from Meta AI
+  let glassesMode = false;
+  try {
+    const glassesFact = await prisma.$queryRaw<{ fact_value: string }[]>`
+      SELECT fact_value FROM openclaw_user_facts
+      WHERE user_id = ${userId} AND fact_key = 'has_meta_glasses' LIMIT 1
+    `;
+    const hasGlasses = glassesFact.length > 0 && glassesFact[0].fact_value === "true";
+    if (hasGlasses) {
+      const isVoiceRelay = (
+        text.length < 120 &&
+        !/[.!?;:,]/.test(text.replace(/[.!?]$/, "")) &&
+        /^(busca|procura|compra|acha|encontra|quanto|qual|onde|find|buy|search|get|look|how much|where|compare|track)/i.test(text.trim())
+      );
+      if (isVoiceRelay) {
+        glassesMode = true;
+        console.log(`[WA META-GLASSES] Glasses mode ON for ${userId}: "${text.substring(0, 50)}"`);
+      }
+    }
+  } catch { /* non-blocking */ }
+
   // 0c. Handle share/referral intent — detect before sending to Gemini
   const shareIntent = /\b(compartilh\w*|indicar|indic[aá]\w*|convidar|convid\w*|convite|share|invite|refer|qr\s*code|link.*(indic|refer|convit|compart)|amigo.*jarvis|jarvis.*amigo|mand[ae].*link|envi[ae].*link)\b/i;
   if (shareIntent.test(text)) {
@@ -3840,7 +3875,7 @@ Save my number as "Jarvis" in your contacts and you're set! 🦀`;
         const premiumRes = await fetch(`http://localhost:4000/api/premium/process`, {
           method: "POST",
           headers: { "Content-Type": "application/json", "x-internal-secret": process.env.INTERNAL_SECRET || "" },
-          body: JSON.stringify({ userId, text, platform: "whatsapp" }),
+          body: JSON.stringify({ userId, text, platform: "whatsapp", glassesMode }),
           signal: AbortSignal.timeout(90000),
         });
         const premiumData = await premiumRes.json() as { success: boolean; response: string; documents?: { pdfPath: string; title: string }[] };
@@ -3872,20 +3907,20 @@ Save my number as "Jarvis" in your contacts and you're set! 🦀`;
         } else {
           // Fallback to standard
           console.warn("[WA PREMIUM] Fallback to standard:", premiumData);
-          response = await chatWithGemini(history, text, userId, userFacts);
+          response = await chatWithGemini(history, text, userId, userFacts, { glassesMode });
           await saveMessage(userId, "user", text);
           await saveMessage(userId, "model", response);
         }
       } catch (err) {
         // Fallback to standard if premium service unavailable
         console.warn("[WA PREMIUM] Service unavailable, fallback:", (err as Error).message);
-        response = await chatWithGemini(history, text, userId, userFacts);
+        response = await chatWithGemini(history, text, userId, userFacts, { glassesMode });
         await saveMessage(userId, "user", text);
         await saveMessage(userId, "model", response);
       }
     } else {
       // ═══ STANDARD PIPELINE ═══
-      response = await chatWithGemini(history, text, userId, userFacts);
+      response = await chatWithGemini(history, text, userId, userFacts, { glassesMode });
       await saveMessage(userId, "user", text);
       await saveMessage(userId, "model", response);
     }

@@ -14,6 +14,7 @@
  */
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
+import { prisma } from "@payjarvis/database";
 import { processWhatsAppMessage, processWhatsAppImageMessage } from "../services/jarvis-whatsapp.service.js";
 import twilio from "twilio";
 const { validateRequest } = twilio;
@@ -194,6 +195,41 @@ export async function whatsappWebhookRoutes(app: FastifyInstance) {
       const text = (body.Body || "").trim();
       const profileName = body.ProfileName || "";
       const messageSid = body.MessageSid || "";
+
+      // ─── Auto-detect language from Jarvis number contacted ───
+      // BR number (+551150395940) → Portuguese, all others → English (unless user has saved preference)
+      const isBrNumber = botNumber.includes("+5511");
+      if (isBrNumber) {
+        // Set PT-BR as default for users contacting via BR number (async, non-blocking)
+        (async () => {
+          try {
+            const existing = await prisma.$queryRaw<{ fact_value: string }[]>`
+              SELECT fact_value FROM openclaw_user_facts
+              WHERE user_id = ${from} AND fact_key = 'language' LIMIT 1
+            `;
+            // Only set if user has no language preference yet
+            if (existing.length === 0) {
+              await prisma.$executeRaw`
+                INSERT INTO openclaw_user_facts (user_id, fact_key, fact_value, category, source, confidence)
+                VALUES (${from}, 'language', 'pt-BR', 'personal', 'bot_number_detection', 0.8)
+                ON CONFLICT (user_id, fact_key) DO NOTHING
+              `;
+              await prisma.$executeRaw`
+                INSERT INTO openclaw_user_facts (user_id, fact_key, fact_value, category, source, confidence)
+                VALUES (${from}, 'preferred_language', 'Portuguese', 'personal', 'bot_number_detection', 0.8)
+                ON CONFLICT (user_id, fact_key) DO NOTHING
+              `;
+              await prisma.$executeRaw`
+                INSERT INTO openclaw_user_facts (user_id, fact_key, fact_value, category, source, confidence)
+                VALUES (${from}, 'bot_number', ${botNumber}, 'general', 'auto', 0.9)
+                ON CONFLICT (user_id, fact_key) DO UPDATE SET fact_value = ${botNumber}
+              `;
+              request.log.info({ from, botNumber }, "[WhatsApp] Auto-set language to pt-BR (BR number)");
+            }
+          } catch { /* non-blocking */ }
+        })();
+      }
+
       const numMedia = parseInt(body.NumMedia || "0", 10);
       const mediaUrl0 = body.MediaUrl0 || "";
       const mediaContentType0 = body.MediaContentType0 || "";
@@ -221,6 +257,7 @@ export async function whatsappWebhookRoutes(app: FastifyInstance) {
         { from, profileName, messageSid, text: text.substring(0, 80), numMedia, isAudio, isImage, isLocation, mediaContentType0 },
         "[WhatsApp] Incoming message"
       );
+      console.log(`[DEBUG-WH] Incoming: from=${from} text="${text.substring(0, 40)}" numMedia=${numMedia} isImage=${isImage} isAudio=${isAudio} contentType0=${mediaContentType0}`);
 
       // Respond 200 immediately to Twilio (prevents 15s timeout retry)
       reply.status(200).send({ status: "processing" });
@@ -306,7 +343,7 @@ export async function whatsappWebhookRoutes(app: FastifyInstance) {
 
       sendProcessingReaction();
       try {
-        const responseText = await processWhatsAppMessage(from, text);
+        const responseText = await processWhatsAppMessage(from, text, botNumber);
         if (responseText) {
           await sendWhatsAppMessage(from, responseText, botNumber);
         }
@@ -339,6 +376,77 @@ export async function whatsappWebhookRoutes(app: FastifyInstance) {
     // GET /webhook/whatsapp — health check
     fastify.get("/webhook/whatsapp", async (_request, reply) => {
       return reply.send({ status: "ok", channel: "whatsapp", provider: "twilio", mode: "production", audio: true });
+    });
+
+    // ─── TEMPORARY: Meta WhatsApp Verification Call Handler ───
+    // Answers incoming voice calls, records them, and sends transcription to admin Telegram
+    fastify.all("/webhook/meta-verify", async (request: FastifyRequest, reply: FastifyReply) => {
+      const body = (request.body || {}) as Record<string, string>;
+      const callSid = body.CallSid || "unknown";
+      const from = body.From || "unknown";
+      const digits = body.Digits || "";
+      const speechResult = body.SpeechResult || "";
+      const recordingUrl = body.RecordingUrl || "";
+      const transcriptionText = body.TranscriptionText || "";
+
+      request.log.info({ callSid, from, digits, speechResult, recordingUrl, transcriptionText }, "[META-VERIFY] Incoming");
+
+      // If we got speech recognition result, log and notify
+      if (speechResult) {
+        request.log.info(`[META-VERIFY] SPEECH RESULT: ${speechResult}`);
+        try {
+          const { sendTelegramNotification } = await import("../services/notifications.js");
+          const adminChatId = process.env.TELEGRAM_ADMIN_CHAT_ID || "";
+          if (adminChatId) {
+            await sendTelegramNotification(adminChatId, `🔐 META VERIFICATION (speech): ${speechResult}\nFrom: ${from}\nCall: ${callSid}`);
+          }
+        } catch { /* best effort */ }
+      }
+
+      // If we got digits (DTMF), log them immediately
+      if (digits) {
+        request.log.info(`[META-VERIFY] DIGITS RECEIVED: ${digits}`);
+        // Send to admin Telegram
+        try {
+          const { sendTelegramNotification } = await import("../services/notifications.js");
+          const adminChatId = process.env.TELEGRAM_ADMIN_CHAT_ID || "";
+          if (adminChatId) {
+            await sendTelegramNotification(adminChatId, `🔐 META VERIFICATION CODE (DTMF): ${digits}\nFrom: ${from}\nCall: ${callSid}`);
+          }
+        } catch { /* best effort */ }
+      }
+
+      // If transcription came back, send it
+      if (transcriptionText) {
+        request.log.info(`[META-VERIFY] TRANSCRIPTION: ${transcriptionText}`);
+        try {
+          const { sendTelegramNotification } = await import("../services/notifications.js");
+          const adminChatId = process.env.TELEGRAM_ADMIN_CHAT_ID || "";
+          if (adminChatId) {
+            await sendTelegramNotification(adminChatId, `🔐 META VERIFICATION (transcription): ${transcriptionText}\nFrom: ${from}`);
+          }
+        } catch { /* best effort */ }
+      }
+
+      // If recording URL, send it
+      if (recordingUrl) {
+        request.log.info(`[META-VERIFY] RECORDING: ${recordingUrl}`);
+        try {
+          const { sendTelegramNotification } = await import("../services/notifications.js");
+          const adminChatId = process.env.TELEGRAM_ADMIN_CHAT_ID || "";
+          if (adminChatId) {
+            await sendTelegramNotification(adminChatId, `🎙️ META VERIFICATION RECORDING: ${recordingUrl}.mp3\nFrom: ${from}`);
+          }
+        } catch { /* best effort */ }
+      }
+
+      // Return TwiML: Record from second 0 — capture EVERYTHING Meta says
+      const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Record maxLength="120" transcribe="true" transcribeCallback="https://www.payjarvis.com/webhook/meta-verify" playBeep="false" trim="do-not-trim" action="https://www.payjarvis.com/webhook/meta-verify" method="POST"/>
+</Response>`;
+
+      return reply.type("text/xml").send(twiml);
     });
   });
 }
@@ -406,12 +514,38 @@ async function processAudioMessage(
   }
 
   // ─── Step 3: Process transcription through Jarvis LLM ───
-  const responseText = await processWhatsAppMessage(from, `[voice] ${transcription}`);
+  const rawResponse = await processWhatsAppMessage(from, `[voice] ${transcription}`);
   const tLLM = Date.now();
 
-  if (!responseText) return;
+  if (!rawResponse) return;
 
-  // ─── Step 4: TTS — convert response to audio ───
+  // ─── Step 3.5: Determine response format (TEXT vs AUDIO) ───
+  const { format, text: responseText } = parseResponseFormat(rawResponse);
+  const sendAsAudio = format === "AUDIO";
+
+  request.log.info(
+    { from, format, sendAsAudio, hasFormatTag: rawResponse !== responseText },
+    "[WhatsApp Audio] Format decision"
+  );
+
+  if (!sendAsAudio) {
+    // ─── LLM chose TEXT format — send as text message ───
+    await sendWhatsAppMessage(from, responseText, botNumber);
+    const tSend = Date.now();
+    request.log.info(
+      {
+        from, lang, totalMs: tSend - t0,
+        downloadMs: tDownload - t0,
+        sttMs: tSTT - tDownload,
+        llmMs: tLLM - tSTT,
+        sendMs: tSend - tLLM,
+      },
+      "[WhatsApp Audio] Complete — text sent (FORMAT:TEXT)"
+    );
+    return;
+  }
+
+  // ─── Step 4: TTS — convert response to audio (only for casual/short responses) ───
   let audioSent = false;
   const oggPath = await textToSpeech(responseText, lang);
   const tTTS = Date.now();
@@ -435,7 +569,7 @@ async function processAudioMessage(
           ttsMs: tTTS - tLLM,
           sendMs: tSend - tTTS,
         },
-        "[WhatsApp Audio] Complete — audio sent"
+        "[WhatsApp Audio] Complete — audio sent (FORMAT:AUDIO)"
       );
     } catch (err) {
       request.log.warn({ err: (err as Error).message }, "[WhatsApp Audio] TTS send failed, falling back to text");
@@ -448,6 +582,59 @@ async function processAudioMessage(
     request.log.info({ from }, "[WhatsApp Audio] TTS unavailable — sending text fallback");
     await sendWhatsAppMessage(from, responseText, botNumber);
   }
+}
+
+// ─── Response Format Parser ───
+// Parses [FORMAT:TEXT] or [FORMAT:AUDIO] tag from LLM response.
+// Falls back to content-based heuristic when no tag is present.
+function parseResponseFormat(response: string): { format: "TEXT" | "AUDIO"; text: string } {
+  // Check for explicit LLM format tag
+  const tagMatch = response.match(/^\[FORMAT:(TEXT|AUDIO)\]\s*/i);
+  if (tagMatch) {
+    return {
+      format: tagMatch[1].toUpperCase() as "TEXT" | "AUDIO",
+      text: response.slice(tagMatch[0].length),
+    };
+  }
+
+  // Fallback heuristic: analyze content to decide
+  if (shouldForceText(response)) {
+    return { format: "TEXT", text: response };
+  }
+
+  // Short casual responses → audio
+  return { format: "AUDIO", text: response };
+}
+
+// Content-based heuristic: returns true if response should be sent as text
+function shouldForceText(text: string): boolean {
+  // Has prices ($, R$, USD, BRL, €)
+  if (/[\$€£]|\d+[.,]\d{2}|R\$|USD|BRL|EUR/i.test(text)) return true;
+
+  // Has URLs or links
+  if (/https?:\/\/|www\.|\.com|\.br|\.org/i.test(text)) return true;
+
+  // Has list markers (numbered or bulleted, 3+ items)
+  const listItems = text.match(/(?:^|\n)\s*(?:\d+[.)]\s|[-•*]\s)/g);
+  if (listItems && listItems.length >= 3) return true;
+
+  // Has emoji-numbered lists (1️⃣, 2️⃣, etc.)
+  const emojiList = text.match(/[1-9]️⃣/g);
+  if (emojiList && emojiList.length >= 3) return true;
+
+  // Too long for audio (more than ~150 words or 3 lines)
+  const lines = text.split("\n").filter((l) => l.trim().length > 0);
+  if (lines.length > 3) return true;
+  if (text.split(/\s+/).length > 150) return true;
+
+  // Has table-like structure
+  if (/\|.*\|.*\|/.test(text)) return true;
+
+  // Has technical data patterns (percentages, measurements)
+  const numberMatches = text.match(/\d+/g);
+  if (numberMatches && numberMatches.length >= 5) return true;
+
+  return false;
 }
 
 // ─── Image processing pipeline ───
@@ -495,11 +682,40 @@ async function processImageMessage(
     }
   }
 
-  // 3. Process image through Gemini Vision via jarvis-whatsapp service
+  // 3. Process image through Gemini Vision via jarvis-whatsapp service (with 60s safety timeout)
   const mimeType = imageContentType || "image/jpeg";
-  const responseText = await processWhatsAppImageMessage(from, imageBase64, mimeType, userText);
+  const IMAGE_PIPELINE_TIMEOUT_MS = 60_000;
+  const imgStart = Date.now();
+
+  console.log(`[DEBUG-IMG] 1. Image received from ${from}, size=${imgBuffer.length}, caption="${userText.substring(0, 60)}"`);
+
+  let responseText: string;
+  try {
+    console.log(`[DEBUG-IMG] 2. Calling processWhatsAppImageMessage...`);
+    const processingPromise = processWhatsAppImageMessage(from, imageBase64, mimeType, userText);
+    const timeoutPromise = new Promise<string>((resolve) =>
+      setTimeout(() => {
+        console.log(`[DEBUG-IMG] TIMEOUT! Pipeline exceeded ${IMAGE_PIPELINE_TIMEOUT_MS}ms. Sending fallback.`);
+        resolve("A análise da imagem demorou mais que o esperado. Me diz o nome do produto que eu busco pra você! 🦀");
+      }, IMAGE_PIPELINE_TIMEOUT_MS)
+    );
+    responseText = await Promise.race([processingPromise, timeoutPromise]);
+    console.log(`[DEBUG-IMG] 3. Got response (${Date.now() - imgStart}ms): "${responseText.substring(0, 150)}..."`);
+  } catch (err) {
+    console.log(`[DEBUG-IMG] ERROR! Pipeline threw: ${(err as Error).message}`);
+    request.log.error({ err: (err as Error).message, from }, "[WhatsApp Image] Pipeline error");
+    responseText = "Erro ao processar a imagem. Tenta mandar de novo ou me diz o que procura! 🦀";
+  }
 
   if (responseText) {
-    await sendWhatsAppMessage(from, responseText, botNumber);
+    console.log(`[DEBUG-IMG] 4. Sending response to WhatsApp (${responseText.length} chars)...`);
+    try {
+      await sendWhatsAppMessage(from, responseText, botNumber);
+      console.log(`[DEBUG-IMG] 5. Response SENT to ${from} (total ${Date.now() - imgStart}ms)`);
+    } catch (sendErr) {
+      console.error(`[DEBUG-IMG] SEND FAILED: ${(sendErr as Error).message}`);
+    }
+  } else {
+    console.error(`[DEBUG-IMG] NO RESPONSE TEXT! Pipeline returned empty/null.`);
   }
 }

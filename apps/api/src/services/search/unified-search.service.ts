@@ -15,6 +15,7 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { prisma } from "@payjarvis/database";
 import { redisGet, redisSet } from "../redis.js";
+import { recordPrices } from "../shopping/price-history.service.js";
 
 // ─── Unified Result Interface ────────────────────────
 export interface UnifiedProduct {
@@ -53,14 +54,15 @@ export interface SearchOptions {
 
 // ─── Config ──────────────────────────────────────────
 const TIMEOUT = {
-  serpapi: 6000,
-  mercadoLivre: 6000,
+  serpapi: 8000,        // 8s (was 6s — too tight under load)
+  mercadoLivre: 8000,
   apify: 15000,
-  grounding: 22000,
-  browserAgent: 20000,
+  grounding: 12000,     // 12s (was 22s — no need to wait that long)
+  browserAgent: 12000,  // 12s (was 20s)
 } as const;
 
 const PARALLEL_TIMEOUT = 25000; // Global timeout: return whatever we have after 25s
+const EARLY_RETURN_MS = 8000;   // If a high-priority source succeeds within 8s, return immediately
 const CACHE_TTL = 3600;         // 1 hour
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
@@ -128,31 +130,73 @@ export async function unifiedProductSearch(opts: SearchOptions): Promise<Unified
     sources.push({ name: "browser", fn: () => withTimeout(searchBrowserAgent(query, store, maxResults), TIMEOUT.browserAgent), priority: 5 });
   }
 
-  // ─── Run ALL sources in parallel ───────────────────
+  // ─── Run ALL sources in parallel with early return ──
   const methodsAttempted: string[] = [];
-
-  const parallelResults = await withTimeout(
-    Promise.allSettled(sources.map(s => s.fn())),
-    PARALLEL_TIMEOUT,
-  ).catch(() => {
-    // If global timeout, return whatever settled so far
-    console.log(`[UNIFIED-SEARCH] Global timeout (${PARALLEL_TIMEOUT}ms) — using partial results`);
-    return sources.map(() => ({ status: "rejected" as const, reason: new Error("Global timeout") }));
-  });
-
-  // ─── Collect successful results ────────────────────
   const successfulSources: Array<{ name: string; products: UnifiedProduct[]; priority: number }> = [];
 
-  parallelResults.forEach((result, i) => {
-    methodsAttempted.push(sources[i].name);
-    if (result.status === "fulfilled" && result.value.length > 0) {
-      console.log(`[UNIFIED-SEARCH] ✓ ${sources[i].name} returned ${result.value.length} results`);
-      successfulSources.push({ name: sources[i].name, products: result.value, priority: sources[i].priority });
-    } else {
-      const reason = result.status === "rejected" ? (result.reason as Error).message : "0 results";
-      console.log(`[UNIFIED-SEARCH] ✗ ${sources[i].name}: ${reason}`);
-    }
+  // Start all sources running
+  const sourcePromises = sources.map((s, i) =>
+    s.fn()
+      .then((products) => ({ index: i, products, error: null as string | null }))
+      .catch((err) => ({ index: i, products: [] as UnifiedProduct[], error: (err as Error).message }))
+  );
+
+  // Early return: resolve as soon as a high-priority source (priority <= 2) returns 2+ results
+  // OR after EARLY_RETURN_MS, whichever comes first. Other sources keep running for enrichment up to PARALLEL_TIMEOUT.
+  const earlyReturnPromise = new Promise<void>((resolve) => {
+    let resolved = false;
+    const checkEarly = (result: { index: number; products: UnifiedProduct[]; error: string | null }) => {
+      if (resolved) return;
+      const src = sources[result.index];
+      methodsAttempted.push(src.name);
+      if (result.products.length > 0) {
+        console.log(`[UNIFIED-SEARCH] ✓ ${src.name} returned ${result.products.length} results`);
+        successfulSources.push({ name: src.name, products: result.products, priority: src.priority });
+        // Early return if high-priority source with results
+        if (src.priority <= 2 && result.products.length >= 1) {
+          resolved = true;
+          console.log(`[UNIFIED-SEARCH] EARLY RETURN: ${src.name} (priority ${src.priority}, ${result.products.length} results)`);
+          resolve();
+        }
+      } else {
+        console.log(`[UNIFIED-SEARCH] ✗ ${src.name}: ${result.error || "0 results"}`);
+      }
+    };
+    sourcePromises.forEach((p) => p.then(checkEarly));
+    // Safety: resolve after EARLY_RETURN_MS even if no early return triggered
+    setTimeout(() => { if (!resolved) { resolved = true; resolve(); } }, EARLY_RETURN_MS);
   });
+
+  // Wait for early return OR the timeout
+  await earlyReturnPromise;
+
+  // If no results yet, wait for remaining sources up to PARALLEL_TIMEOUT
+  if (successfulSources.length === 0) {
+    console.log(`[UNIFIED-SEARCH] No early results — waiting for remaining sources...`);
+    const remainingResults = await withTimeout(
+      Promise.allSettled(sourcePromises),
+      PARALLEL_TIMEOUT - EARLY_RETURN_MS,
+    ).catch(() => {
+      console.log(`[UNIFIED-SEARCH] Global timeout — using partial results`);
+      return [] as PromiseSettledResult<{ index: number; products: UnifiedProduct[]; error: string | null }>[];
+    });
+
+    for (const result of remainingResults) {
+      if (result.status === "fulfilled") {
+        const r = result.value;
+        const src = sources[r.index];
+        if (!methodsAttempted.includes(src.name)) {
+          methodsAttempted.push(src.name);
+          if (r.products.length > 0) {
+            console.log(`[UNIFIED-SEARCH] ✓ ${src.name} returned ${r.products.length} results (late)`);
+            successfulSources.push({ name: src.name, products: r.products, priority: src.priority });
+          } else {
+            console.log(`[UNIFIED-SEARCH] ✗ ${src.name}: ${r.error || "0 results"} (late)`);
+          }
+        }
+      }
+    }
+  }
 
   // ─── Merge and deduplicate ─────────────────────────
   if (successfulSources.length > 0) {
@@ -192,6 +236,9 @@ export async function unifiedProductSearch(opts: SearchOptions): Promise<Unified
 
     // Cache successful results
     redisSet(cacheKey, JSON.stringify(searchResult), CACHE_TTL).catch(() => {});
+
+    // Record prices for history tracking (async, non-blocking)
+    recordSearchPrices(finalProducts).catch(() => {});
 
     return searchResult;
   }
@@ -450,6 +497,22 @@ async function searchBrowserAgent(query: string, store: string, maxResults: numb
     reviewCount: parseInt(p.reviews) || null,
     store: store || "Online",
   }));
+}
+
+// ─── Price History Integration ───────────────────────
+
+async function recordSearchPrices(products: UnifiedProduct[]): Promise<void> {
+  const items = products
+    .filter(p => p.price !== null && p.price > 0)
+    .map(p => ({
+      identifier: p.asin || p.title,
+      store: p.store,
+      price: p.price!,
+      currency: p.currency,
+    }));
+  if (items.length > 0) {
+    await recordPrices(items);
+  }
 }
 
 // ─── Helpers ─────────────────────────────────────────

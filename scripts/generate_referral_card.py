@@ -114,9 +114,9 @@ def wrap_text(draw, text, fnt, max_width):
 CONTENT = {
     "en": {
         "badge": "You're Invited!",
-        "headline": "Your friend {name}\nis giving you a personal\nAI assistant \u2014 for FREE!",
-        "subtitle": "Jarvis helps with shopping, travel,\nrestaurants, documents and more",
-        "icons": "SHOP  .  TRAVEL  .  FOOD  .  DOCS  .  VOICE  .  MAPS",
+        "headline": "Your friend {name}\nis giving you a smart\nshopping agent \u2014 for FREE!",
+        "subtitle": "Finds the best price, monitors deals\nand buys for you",
+        "icons": "SHOP  .  DEALS  .  COMPARE  .  TRACK  .  VOICE  .  SAVE",
         "cta": "Tap the link below to get started",
         "trust": "Zero-Knowledge Encryption",
         "domain": "payjarvis.com",
@@ -124,9 +124,9 @@ CONTENT = {
     },
     "pt": {
         "badge": "Voce foi Convidado!",
-        "headline": "Seu amigo {name}\nesta te dando um assistente\npessoal com IA \u2014 DE GRACA!",
-        "subtitle": "O Jarvis ajuda com compras, viagens,\nrestaurantes, documentos e mais",
-        "icons": "COMPRAS  .  VIAGENS  .  FOOD  .  DOCS  .  VOZ  .  MAPAS",
+        "headline": "Seu amigo {name}\nesta te dando um agente\nde compras inteligente \u2014 DE GRACA!",
+        "subtitle": "Acha o melhor preco, monitora\npromocoes e compra pra voce",
+        "icons": "COMPRAS  .  OFERTAS  .  COMPARA  .  RASTREIA  .  VOZ  .  ECONOMIA",
         "cta": "Toque no link abaixo para comecar",
         "trust": "Criptografia Zero-Knowledge",
         "domain": "payjarvis.com",

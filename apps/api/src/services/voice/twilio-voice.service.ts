@@ -12,7 +12,7 @@
  * - Random greeting variations (not always the same opening)
  * - stability 0.4 for more natural voice variation
  * - Confirmation echoing (repeat back key info)
- * - Emotional awareness in Gemini prompts
+ * - Emotional awareness in Grok prompts
  * - Micro-pauses via SSML/silence
  *
  * CALL BRIEFING:
@@ -25,7 +25,6 @@
 
 import Twilio from "twilio";
 import { prisma } from "@payjarvis/database";
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import { writeFileSync, readFileSync, unlinkSync, existsSync, mkdirSync } from "fs";
 import { join } from "path";
 import { createHash } from "crypto";
@@ -38,6 +37,9 @@ const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN || "";
 const DEFAULT_FROM = process.env.TWILIO_VOICE_NUMBER || process.env.TWILIO_WHATSAPP_NUMBER?.replace("whatsapp:", "") || "+17547145921";
 const BASE_URL = process.env.PAYJARVIS_PUBLIC_URL || "https://www.payjarvis.com";
 const INTERNAL_SECRET = process.env.INTERNAL_SECRET || "";
+const XAI_API_KEY = process.env.XAI_API_KEY || "";
+const XAI_BASE_URL = "https://api.x.ai/v1";
+const GROK_MODEL = "grok-3-mini";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY || "";
 
@@ -382,17 +384,7 @@ function getClient() {
   return _client;
 }
 
-// ─── Gemini Client ───────────────────────────────────
-
-let _genai: GoogleGenerativeAI | null = null;
-
-function getGenAI(): GoogleGenerativeAI {
-  if (!_genai) {
-    if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY required for voice calls");
-    _genai = new GoogleGenerativeAI(GEMINI_API_KEY);
-  }
-  return _genai;
-}
+// ─── Grok Client ────────────────────────────────────
 
 // ─── TTS: ElevenLabs (streaming) → Gemini → Polly ───
 
@@ -884,7 +876,7 @@ export async function makeCall(params: {
     }
   }
 
-  // Build conversation plan with Gemini (inject intelligence + playbook if available)
+  // Build conversation plan with Grok (inject intelligence + playbook if available)
   let plan = briefing
     ? buildBriefingSystemPrompt(briefing)
     : await buildCallPlan(objective, details || "", businessName || "", lang);
@@ -1364,7 +1356,7 @@ async function notifyUserFromDb(callId: string, status: string, durationSec: num
     return;
   }
 
-  // If no result yet and we have transcript, generate summary via Gemini
+  // If no result yet and we have transcript, generate summary via Grok
   let result = dbCall.result;
   const transcript = (dbCall.transcript || []) as CallTurn[];
 
@@ -1375,7 +1367,7 @@ async function notifyUserFromDb(callId: string, status: string, durationSec: num
         ? `\nORIGINAL REQUEST: ${dbCall.briefing.objective || ""} ${dbCall.briefing.keyMessages?.join(", ") || ""}`
         : "";
 
-      result = await geminiGenerate(`Resuma o resultado desta chamada telefônica em 2-3 frases objetivas.
+      result = await grokGenerate(`Resuma o resultado desta chamada telefônica em 2-3 frases objetivas.
 O que foi resolvido? O que a pessoa disse de relevante? Há ações pendentes?
 
 OBJETIVO: ${dbCall.objective}
@@ -1482,19 +1474,40 @@ export async function saveVerifiedCallerId(userId: string, phoneNumber: string):
   console.log(`[VOICE] Verified caller ID saved for ${userId}: ${phoneNumber}`);
 }
 
-// ─── Gemini Conversation Engine ──────────────────────
+// ─── Grok Conversation Engine ───────────────────────
 
-async function geminiGenerate(prompt: string): Promise<string> {
-  const genai = getGenAI();
-  const model = genai.getGenerativeModel({ model: "gemini-2.5-flash" });
-  const result = await model.generateContent(prompt);
-  return result.response?.text() || "";
+async function grokGenerate(prompt: string): Promise<string> {
+  if (!XAI_API_KEY) throw new Error("XAI_API_KEY required for voice calls");
+
+  const response = await fetch(`${XAI_BASE_URL}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${XAI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: GROK_MODEL,
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.7,
+      max_tokens: 2048,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => "unknown");
+    throw new Error(`Grok API error ${response.status}: ${errorText}`);
+  }
+
+  const data = (await response.json()) as {
+    choices?: { message?: { content?: string } }[];
+  };
+  return data.choices?.[0]?.message?.content || "";
 }
 
 async function buildCallPlan(objective: string, details: string, businessName: string, language: string): Promise<string> {
   const langName = { en: "English", pt: "Portuguese", es: "Spanish", fr: "French" }[language] || "English";
 
-  const text = await geminiGenerate(`You are planning a phone call to "${businessName || "a business"}".
+  const text = await grokGenerate(`You are planning a phone call to "${businessName || "a business"}".
 
 OBJECTIVE: ${objective}
 DETAILS: ${details || "None provided"}
@@ -1696,7 +1709,7 @@ If the objective is met, start with "DONE:" followed by a summary.
 Otherwise, just write what to say next.`;
   }
 
-  const text = (await geminiGenerate(prompt)).trim();
+  const text = (await grokGenerate(prompt)).trim();
 
   if (text.startsWith("DONE:")) {
     const summary = text.replace("DONE:", "").trim();
@@ -1734,7 +1747,7 @@ async function generateCallSummary(call: ActiveCall): Promise<string> {
     ? `\nORIGINAL REQUEST: ${call.briefing.objective || ""} ${call.briefing.keyMessages?.join(", ") || ""}`
     : "";
 
-  const text = await geminiGenerate(`Resuma o resultado desta chamada telefônica em 2-3 frases objetivas.
+  const text = await grokGenerate(`Resuma o resultado desta chamada telefônica em 2-3 frases objetivas.
 O que foi resolvido? O que a pessoa disse de relevante? Há ações pendentes?
 
 OBJETIVO: ${call.objective}
@@ -2014,8 +2027,8 @@ export async function analyzeCallAndLearn(call: ActiveCall): Promise<void> {
   const phone = call.to;
 
   try {
-    // Ask Gemini to analyze the call
-    const analysis = await geminiGenerate(`Analyze this phone call transcript and classify it.
+    // Ask Grok to analyze the call
+    const analysis = await grokGenerate(`Analyze this phone call transcript and classify it.
 
 TRANSCRIPT:
 ${transcript}
@@ -2034,13 +2047,13 @@ Respond in EXACTLY this JSON format (no markdown, no explanation):
 
     if (!analysis) return;
 
-    // Parse JSON from Gemini response
+    // Parse JSON from Grok response
     let parsed: Record<string, unknown>;
     try {
       const jsonMatch = analysis.match(/\{[\s\S]*\}/);
       parsed = JSON.parse(jsonMatch?.[0] || "{}");
     } catch {
-      console.warn("[VOICE-INTEL] Failed to parse Gemini analysis");
+      console.warn("[VOICE-INTEL] Failed to parse Grok analysis");
       return;
     }
 

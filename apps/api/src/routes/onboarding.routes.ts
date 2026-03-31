@@ -943,13 +943,14 @@ Rules: Return ONLY the JSON, no explanation, no markdown fences. If a field is n
             }
           }
         } else if (fc.name === "share_bot") {
-          const args = fc.args as { platform?: string };
-          const platform = (args.platform || "telegram").toLowerCase();
+          const args = fc.args as { channel?: string };
+          const channel = (args.channel || "telegram").toLowerCase();
           const INTERNAL_SECRET = process.env.INTERNAL_SECRET || "";
+          const platformForApi = channel === "telegram" ? "telegram" : "whatsapp";
 
           try {
             const shareRes = await fetch(
-              `${process.env.WEB_URL || "https://www.payjarvis.com"}/api/bots/${botId}/share/generate?telegramId=${chatId}&platform=${platform}`,
+              `${process.env.WEB_URL || "https://www.payjarvis.com"}/api/bots/${botId}/share/generate?telegramId=${chatId}&platform=${platformForApi}`,
               {
                 headers: { "x-internal-secret": INTERNAL_SECRET },
                 signal: AbortSignal.timeout(10_000),
@@ -964,9 +965,14 @@ Rules: Return ONLY the JSON, no explanation, no markdown fences. If a field is n
             } else {
               const { code, qrCodeBase64 } = shareData.data;
               const botUsername = (config as any).telegramBotUsername || "Jarvis12Brain_bot";
-              const link = platform === "telegram"
-                ? `https://t.me/${botUsername}?start=${code}`
-                : `https://wa.me/17547145921?text=${encodeURIComponent("START " + code)}`;
+              let link: string;
+              if (channel === "telegram") {
+                link = `https://t.me/${botUsername}?start=${code}`;
+              } else if (channel === "whatsapp_br") {
+                link = `https://wa.me/551150395940?text=${encodeURIComponent("START " + code)}`;
+              } else {
+                link = `https://wa.me/17547145921?text=${encodeURIComponent("START " + code)}`;
+              }
 
               // Send QR code as photo
               if (qrCodeBase64) {

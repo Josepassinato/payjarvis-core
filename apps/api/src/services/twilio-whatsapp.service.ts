@@ -12,8 +12,21 @@ import Twilio from "twilio";
 const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID || "";
 const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN || "";
 const FROM_NUMBER = process.env.TWILIO_WHATSAPP_NUMBER || "whatsapp:+17547145921";
+const FROM_NUMBER_BR = process.env.TWILIO_WHATSAPP_NUMBER_BR || "whatsapp:+551150395940";
 const WELCOME_TEMPLATE_SID = process.env.TWILIO_WELCOME_TEMPLATE_SID || "";
 const REFERRAL_TEMPLATE_SID = process.env.TWILIO_REFERRAL_TEMPLATE_SID || "";
+
+/**
+ * Auto-route sender: BR numbers (+55) must be sent from BR Twilio number
+ * to avoid error 63058 (US number cannot deliver to BR destinations).
+ */
+function autoRouteSender(to: string, requestedFrom?: string): string {
+  const cleanTo = to.replace("whatsapp:", "").replace("+", "");
+  if (cleanTo.startsWith("55")) {
+    return FROM_NUMBER_BR;
+  }
+  return requestedFrom || FROM_NUMBER;
+}
 
 let _client: ReturnType<typeof Twilio> | null = null;
 
@@ -67,7 +80,7 @@ export async function sendWhatsAppMessage(to: string, body: string, replyFrom?: 
 
   // Ensure whatsapp: prefix
   const toNumber = to.startsWith("whatsapp:") ? to : `whatsapp:${to}`;
-  const sender = replyFrom || FROM_NUMBER;
+  const sender = autoRouteSender(toNumber, replyFrom);
 
   const chunks = splitMessage(body);
   let lastSid = "";
@@ -92,7 +105,7 @@ export async function sendWhatsAppMessage(to: string, body: string, replyFrom?: 
 export async function sendWhatsAppAudio(to: string, audioUrl: string, replyFrom?: string): Promise<string> {
   const client = getClient();
   const toNumber = to.startsWith("whatsapp:") ? to : `whatsapp:${to}`;
-  const sender = replyFrom || FROM_NUMBER;
+  const sender = autoRouteSender(toNumber, replyFrom);
 
   const message = await client.messages.create({
     from: sender,
@@ -112,7 +125,7 @@ export async function sendWhatsAppAudio(to: string, audioUrl: string, replyFrom?
 export async function sendWhatsAppDocument(to: string, documentUrl: string, caption?: string, replyFrom?: string): Promise<string> {
   const client = getClient();
   const toNumber = to.startsWith("whatsapp:") ? to : `whatsapp:${to}`;
-  const sender = replyFrom || FROM_NUMBER;
+  const sender = autoRouteSender(toNumber, replyFrom);
 
   const message = await client.messages.create({
     from: sender,
@@ -139,7 +152,7 @@ export async function sendWhatsAppReaction(
   try {
     const client = getClient();
     const toNumber = to.startsWith("whatsapp:") ? to : `whatsapp:${to}`;
-    const sender = replyFrom || FROM_NUMBER;
+    const sender = autoRouteSender(toNumber, replyFrom);
 
     await client.messages.create({
       from: sender,

@@ -326,6 +326,145 @@ export class PayPalProvider extends BasePaymentProvider {
     }
   }
 
+  // ─── Subscription/Recurring Transaction Detection ───
+
+  /**
+   * Search PayPal transactions for a date range.
+   * Uses the Reporting/Transactions API to find recurring payments.
+   */
+  async searchTransactions(
+    startDate: string,
+    endDate: string,
+  ): Promise<Array<{
+    transactionId: string;
+    date: string;
+    amount: number;
+    currency: string;
+    merchantName: string;
+    subject: string;
+    status: string;
+  }>> {
+    const token = await this.getAccessToken();
+
+    const params = new URLSearchParams({
+      start_date: startDate,
+      end_date: endDate,
+      fields: "all",
+      page_size: "100",
+      page: "1",
+    });
+
+    try {
+      const res = await fetch(
+        `${this.baseUrl}/v1/reporting/transactions?${params}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          signal: AbortSignal.timeout(15000),
+        },
+      );
+
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        console.error(`[PAYPAL] Transaction search failed (${res.status}): ${body}`);
+        return [];
+      }
+
+      const data = (await res.json()) as {
+        transaction_details?: Array<{
+          transaction_info?: {
+            transaction_id?: string;
+            transaction_initiation_date?: string;
+            transaction_amount?: { value?: string; currency_code?: string };
+            transaction_subject?: string;
+            transaction_status?: string;
+          };
+          payer_info?: { payer_name?: { alternate_full_name?: string } };
+          cart_info?: { item_details?: Array<{ item_name?: string }> };
+        }>;
+      };
+
+      return (data.transaction_details ?? []).map((td) => {
+        const info = td.transaction_info ?? {};
+        const amount = parseFloat(info.transaction_amount?.value ?? "0");
+        const merchantName =
+          td.payer_info?.payer_name?.alternate_full_name ??
+          td.cart_info?.item_details?.[0]?.item_name ??
+          "Unknown";
+
+        return {
+          transactionId: info.transaction_id ?? "",
+          date: info.transaction_initiation_date ?? "",
+          amount: Math.abs(amount),
+          currency: info.transaction_amount?.currency_code ?? "USD",
+          merchantName,
+          subject: info.transaction_subject ?? "",
+          status: info.transaction_status ?? "",
+        };
+      });
+    } catch (err) {
+      console.error("[PAYPAL] Transaction search error:", (err as Error).message);
+      return [];
+    }
+  }
+
+  /**
+   * List active billing subscriptions.
+   * Uses PayPal Subscriptions API (v1/billing/subscriptions).
+   */
+  async getActiveSubscriptions(): Promise<Array<{
+    subscriptionId: string;
+    planName: string;
+    status: string;
+    amount: number;
+    currency: string;
+    nextBillingDate: string | null;
+    lastPaymentDate: string | null;
+    lastPaymentAmount: number | null;
+    merchantName: string;
+  }>> {
+    const token = await this.getAccessToken();
+
+    // PayPal doesn't have a list-all-subscriptions endpoint for the buyer.
+    // We search recent transactions and detect recurring patterns.
+    // For merchant-created subscriptions, we'd need subscription IDs.
+    // This method is a placeholder for when subscription IDs are available.
+    console.log("[PAYPAL] getActiveSubscriptions — using transaction-based detection");
+    return [];
+  }
+
+  /**
+   * Cancel a PayPal billing subscription.
+   */
+  async cancelSubscription(
+    subscriptionId: string,
+    reason: string = "Not needed anymore",
+  ): Promise<{ success: boolean; message: string }> {
+    const token = await this.getAccessToken();
+
+    try {
+      const res = await fetch(
+        `${this.baseUrl}/v1/billing/subscriptions/${subscriptionId}/cancel`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ reason }),
+        },
+      );
+
+      if (res.status === 204 || res.ok) {
+        return { success: true, message: "Subscription cancelled successfully" };
+      }
+
+      const body = await res.text().catch(() => "");
+      return { success: false, message: `Cancel failed (${res.status}): ${body}` };
+    } catch (err) {
+      return { success: false, message: (err as Error).message };
+    }
+  }
+
   /**
    * Normalize PayPal API errors into a structured format.
    * Never exposes client_secret or access tokens.

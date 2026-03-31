@@ -11,6 +11,7 @@ interface StepConfig {
   step: number;
   day: number;
   banner: string;
+  bannerPt?: string;
   en: string;
   pt: string;
   es: string;
@@ -18,9 +19,9 @@ interface StepConfig {
 
 const STEPS: StepConfig[] = [
   { step: 0, day: 0, banner: "banner_day0_welcome.png",
-    en: "Your personal assistant is ready!\n\nShopping, Travel, Health, Learning — all in one conversation.\n\nSend 'Hi' to get started!",
-    pt: "Seu assistente pessoal está pronto!\n\nShopping, Viagem, Saúde, Aprendizado — tudo em uma conversa.\n\nManda um 'Oi' pra começar!",
-    es: "¡Tu asistente personal está listo!\n\nCompras, Viajes, Salud, Aprendizaje — todo en una conversación.\n\n¡Envía 'Hola' para empezar!" },
+    en: "Your shopping agent is ready! 🦀\n\nI find the best price, compare stores, and monitor deals for you.\n\nSend a product name to get started!",
+    pt: "Seu agente de compras esta pronto! 🦀\n\nAcho o melhor preco, comparo lojas e monitoro ofertas pra voce.\n\nManda o nome de um produto pra comecar!",
+    es: "Tu agente de compras esta listo! 🦀\n\nEncuentro el mejor precio, comparo tiendas y monitoreo ofertas.\n\nEnvia el nombre de un producto para empezar!" },
   { step: 1, day: 3, banner: "banner_day3_voice.png",
     en: "Did you know you can talk to Jarvis by voice?\n\nSend an audio message and get a voice response — like talking to a friend.\n\nTry it now: record an audio!",
     pt: "Sabia que você pode falar com o Jarvis por áudio?\n\nMande um áudio e receba a resposta em voz — como falar com um amigo.\n\nTesta agora: grave um áudio!",
@@ -33,7 +34,7 @@ const STEPS: StepConfig[] = [
     en: "Share your location and unlock nearby results!\n\nRestaurants, hotels, events — all near you with real ratings and Google Maps links.\n\nSend your location now!",
     pt: "Compartilhe sua localização e desbloqueie resultados perto de você!\n\nRestaurantes, hotéis, eventos — tudo perto com avaliações reais e links do Google Maps.\n\nEnvia sua localização agora!",
     es: "¡Comparte tu ubicación y desbloquea resultados cercanos!\n\nRestaurantes, hoteles, eventos — todo cerca de ti con calificaciones reales y enlaces de Google Maps.\n\n¡Envía tu ubicación ahora!" },
-  { step: 4, day: 10, banner: "banner_pwa_install.png",
+  { step: 4, day: 10, banner: "banner_pwa_install.png", bannerPt: "banner_pwa_install_pt.png",
     en: "Install Jarvis on your phone!\n\nOpen payjarvis.com/chat in your browser and add it to your Home Screen. One tap and I'm always here — like a real app!\n\niPhone: Safari → Share → Add to Home Screen\nAndroid: Chrome → Menu ⋮ → Add to Home Screen",
     pt: "Instale o Jarvis no seu celular!\n\nAbra payjarvis.com/chat no navegador e adicione à Tela Inicial. Um toque e eu estou sempre aqui — como um app de verdade!\n\niPhone: Safari → Compartilhar → Adicionar à Tela de Início\nAndroid: Chrome → Menu ⋮ → Adicionar à tela inicial",
     es: "¡Instala Jarvis en tu celular!\n\nAbre payjarvis.com/chat en tu navegador y agrégalo a la Pantalla de Inicio. ¡Un toque y siempre estoy aquí — como una app real!\n\niPhone: Safari → Compartir → Agregar a Inicio\nAndroid: Chrome → Menú ⋮ → Agregar a Inicio" },
@@ -45,23 +46,27 @@ const STEPS: StepConfig[] = [
     en: "Full travel planning unlocked!\n\nComplete day-by-day itineraries, flights, hotels, and local tips for any destination.\n\nTry: 'Plan a 5-day trip to Lisbon'",
     pt: "Planejamento de viagem completo!\n\nRoteiros dia-a-dia, voos, hotéis e dicas locais para qualquer destino.\n\nTesta: 'Faz um roteiro de 5 dias em Lisboa'",
     es: "¡Planificación de viajes completa!\n\nItinerarios día a día, vuelos, hoteles y tips locales para cualquier destino.\n\nPrueba: 'Planifica un viaje de 5 días a Lisboa'" },
-  { step: 7, day: 18, banner: "banner_day18_documents.png",
+  { step: 7, day: 15, banner: "banner_day15_smartglasses.png",
+    en: "Got Ray-Ban Meta? Use Jarvis hands-free! 😎\n\n🎙️ 'Hey Meta, send message to Jarvis: find Nike shoes'\n📸 Photo → 'Hey Meta, send that to Jarvis'\n🛒 'Hey Meta, tell Jarvis: buy the perfume'\n\nSave my number as 'Jarvis' in your contacts!",
+    pt: "Tem Ray-Ban Meta? Use o Jarvis sem as maos! 😎\n\n🎙️ 'Hey Meta, send message to Jarvis: busca tenis Nike'\n📸 Foto → 'Hey Meta, send that to Jarvis'\n🛒 'Hey Meta, tell Jarvis: compra o perfume'\n\nSalva meu numero como 'Jarvis' nos contatos!",
+    es: "Tienes Ray-Ban Meta? Usa Jarvis manos libres! 😎\n\n🎙️ 'Hey Meta, send message to Jarvis: busca tenis Nike'\n📸 Foto → 'Hey Meta, send that to Jarvis'\n🛒 'Hey Meta, tell Jarvis: compra el perfume'\n\nGuarda mi numero como 'Jarvis' en contactos!" },
+  { step: 8, day: 18, banner: "banner_day18_documents.png",
     en: "Document assistant activated!\n\nContracts, reports, letters — generated as PDF and sent directly to you.\n\nTry: 'Write a service contract'",
     pt: "Assistente de documentos ativo!\n\nContratos, relatórios, cartas — gerados em PDF e enviados direto pra você.\n\nTesta: 'Escreve um contrato de serviços'",
     es: "¡Asistente de documentos activado!\n\nContratos, reportes, cartas — generados en PDF y enviados directamente.\n\nPrueba: 'Escribe un contrato de servicios'" },
-  { step: 8, day: 21, banner: "banner_day21_fullpower.png",
-    en: "You have a complete concierge!\n\n12 areas of expertise: Shopping, Travel, Health, Finance, Education, and more.\n\nJarvis is ready for anything. What do you need today?",
-    pt: "Você tem um concierge completo!\n\n12 áreas: Shopping, Viagem, Saúde, Finanças, Educação e muito mais.\n\nO Jarvis está pronto pra tudo. O que você precisa hoje?",
-    es: "¡Tienes un concierge completo!\n\n12 áreas: Compras, Viajes, Salud, Finanzas, Educación y mucho más.\n\nJarvis está listo para todo. ¿Qué necesitas hoy?" },
+  { step: 9, day: 21, banner: "banner_day21_fullpower.png",
+    en: "Your shopping agent is fully loaded! 🦀\n\nPrice history, coupons, subscription management, and 100+ stores.\n\nWhat are you looking to buy today?",
+    pt: "Seu agente de compras esta completo! 🦀\n\nHistorico de precos, cupons, gestao de assinaturas e 100+ lojas.\n\nO que voce quer comprar hoje?",
+    es: "Tu agente de compras esta completo! 🦀\n\nHistorial de precios, cupones, gestion de suscripciones y 100+ tiendas.\n\nQue quieres comprar hoy?" },
 ];
 
 // Welcome sequence messages for step 0
 const WELCOME_EN = [
-  { delay: 1000, text: "Hi! I'm Jarvis — your personal shopping assistant.\n\n🔒 Your data is protected with Zero-Knowledge encryption. Not even we can see it.\n\nAsk me anything. I'm here 24/7!" },
+  { delay: 1000, text: "Hey! I'm Jarvis, your shopping agent 🦀\n\nI find the best price across 100+ stores and alert you when prices drop.\n\nSend me a product name to get started!" },
 ];
 
 const WELCOME_PT = [
-  { delay: 1000, text: "Oi! Eu sou o Jarvis — seu assistente pessoal de compras.\n\n🔒 Seus dados são protegidos com criptografia Zero-Knowledge. Nem nós conseguimos ver.\n\nMe pergunta qualquer coisa. Estou aqui 24/7!" },
+  { delay: 1000, text: "Oi! Eu sou o Jarvis, seu agente de compras 🦀\n\nAcho o melhor preco em 100+ lojas e aviso quando o preco cair.\n\nManda o nome de um produto pra comecar!" },
 ];
 
 const WELCOME_ES = [
@@ -192,10 +197,18 @@ export async function initSequence(
   await new Promise((r) => setTimeout(r, 8000));
 
   let pricingMsg: string;
-  if (hasReferral) {
-    pricingMsg = `${referredByName} invited you — you're in Beta, enjoy full access for free!\n\nWhat's your name?`;
+  if (lang === "pt") {
+    pricingMsg = hasReferral
+      ? `${referredByName} te convidou — você está no Beta, aproveite acesso completo grátis!\n\nQual é o seu nome?`
+      : "Você está no Beta — aproveite acesso completo grátis!\n\nQual é o seu nome?";
+  } else if (lang === "es") {
+    pricingMsg = hasReferral
+      ? `${referredByName} te invitó — estás en Beta, ¡disfruta acceso completo gratis!\n\n¿Cuál es tu nombre?`
+      : "Estás en Beta — ¡disfruta acceso completo gratis!\n\n¿Cuál es tu nombre?";
   } else {
-    pricingMsg = "You're in Beta — enjoy full access for free!\n\nWhat's your name?";
+    pricingMsg = hasReferral
+      ? `${referredByName} invited you — you're in Beta, enjoy full access for free!\n\nWhat's your name?`
+      : "You're in Beta — enjoy full access for free!\n\nWhat's your name?";
   }
 
   await sendText(platform, chatId, pricingMsg);
@@ -260,11 +273,10 @@ export async function processPendingSequences(): Promise<void> {
         continue;
       }
 
-      // Send banner
-      await sendPhoto(seq.platform, seq.chatId, `${BANNER_BASE_URL}/${stepToSend.banner}`);
-
-      // Send text
+      // Send banner (use PT variant if available)
       const lang = await detectLang(seq.chatId);
+      const bannerFile = lang === "pt" && stepToSend.bannerPt ? stepToSend.bannerPt : stepToSend.banner;
+      await sendPhoto(seq.platform, seq.chatId, `${BANNER_BASE_URL}/${bannerFile}`);
       const text = lang === "pt" ? stepToSend.pt : lang === "es" ? stepToSend.es : stepToSend.en;
       if (text) {
         await new Promise((r) => setTimeout(r, 1000));

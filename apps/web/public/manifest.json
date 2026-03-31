@@ -1,7 +1,7 @@
 {
-  "name": "PayJarvis — Your AI Assistant",
-  "short_name": "Jarvis",
-  "description": "Personal AI assistant for shopping, travel, restaurants and more",
+  "name": "PayJarvis — Agente de Compras Inteligente",
+  "short_name": "PayJarvis",
+  "description": "Acha o melhor preço, compara, monitora e compra pra você",
   "start_url": "/chat",
   "display": "standalone",
   "background_color": "#0f0f19",

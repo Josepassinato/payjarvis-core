@@ -601,4 +601,85 @@ export async function voiceRoutes(app: FastifyInstance) {
       return reply.status(500).send({ success: false, error: (err as Error).message });
     }
   });
+
+  // ─── Verification Code Capture (Meta WhatsApp) ─────────────────────
+  // Answers incoming call, records audio, transcribes, sends code to José via Telegram
+
+  app.post("/api/webhooks/capture-code", async (request: FastifyRequest, reply: FastifyReply) => {
+    const body = request.body as Record<string, string>;
+    const from = body.From || "unknown";
+    console.log(`[VERIFY-CODE] Incoming call from ${from}`);
+
+    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Pause length="3"/>
+  <Record maxLength="30" transcribe="true"
+    transcribeCallback="https://www.payjarvis.com/api/webhooks/transcription-result"
+    recordingStatusCallback="https://www.payjarvis.com/api/webhooks/recording-status"
+    playBeep="false"/>
+  <Pause length="5"/>
+  <Say language="pt-BR">Obrigado.</Say>
+</Response>`;
+
+    return reply.type("text/xml").send(twiml);
+  });
+
+  app.post("/api/webhooks/transcription-result", async (request: FastifyRequest, reply: FastifyReply) => {
+    const body = request.body as Record<string, string>;
+    const text = body.TranscriptionText || "";
+    console.log(`[VERIFY-CODE] Transcription: "${text}"`);
+
+    // Extract 6-digit code
+    const codeMatch = text.match(/(\d[\s-]?\d[\s-]?\d[\s-]?\d[\s-]?\d[\s-]?\d)/);
+    const code = codeMatch ? codeMatch[1].replace(/[\s-]/g, "") : null;
+
+    const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+    const CHAT_ID = process.env.ADMIN_TELEGRAM_CHAT_ID;
+
+    if (code && BOT_TOKEN && CHAT_ID) {
+      console.log(`[VERIFY-CODE] Code found: ${code}`);
+      try {
+        await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chat_id: CHAT_ID, text: `🔑 Código de verificação Meta WhatsApp: ${code}` }),
+        });
+        console.log(`[VERIFY-CODE] Code sent to Telegram`);
+      } catch (err) {
+        console.error(`[VERIFY-CODE] Failed to send to Telegram:`, (err as Error).message);
+      }
+    } else {
+      // Send full transcription even without code match
+      if (BOT_TOKEN && CHAT_ID) {
+        await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chat_id: CHAT_ID, text: `📞 Transcrição da ligação de verificação:\n"${text}"\n\n(código não detectado automaticamente — verifique manualmente)` }),
+        }).catch(() => {});
+      }
+    }
+
+    return reply.status(200).send({ received: true });
+  });
+
+  app.post("/api/webhooks/recording-status", async (request: FastifyRequest, reply: FastifyReply) => {
+    const body = request.body as Record<string, string>;
+    const recordingUrl = body.RecordingUrl || "";
+    const status = body.RecordingStatus || "";
+    console.log(`[VERIFY-CODE] Recording ${status}: ${recordingUrl}`);
+
+    if (recordingUrl) {
+      const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+      const CHAT_ID = process.env.ADMIN_TELEGRAM_CHAT_ID;
+      if (BOT_TOKEN && CHAT_ID) {
+        await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chat_id: CHAT_ID, text: `🎙️ Gravação da verificação: ${recordingUrl}.mp3` }),
+        }).catch(() => {});
+      }
+    }
+
+    return reply.status(200).send({ received: true });
+  });
 }

@@ -200,13 +200,13 @@ const banners = [
     ],
     badge: { text: '🎁 Bem-vindo ao clube!', bg: 'linear-gradient(90deg, #38BDF8, #818CF8)' },
     headline: 'Prazer, eu sou o Jarvis! 👋',
-    sub: 'Seu amigo esperto pra compras, viagens, saúde, finanças e muito mais',
+    sub: 'Acha o melhor preço, monitora promoções e compra pra você',
     chatTitle: '💬 COMO USAR',
     messages: `
       <div class="msg-row"><div class="msg-label user" style="color:#22C55E">você</div></div>
       <div class="msg-row"><div class="msg-user">Oi! 👋</div></div>
       <div class="msg-row"><div class="msg-label bot" style="color:#38BDF8">jarvis</div></div>
-      <div class="msg-row"><div class="msg-bot">E aí! 😄 Sou o Jarvis, seu assistente pessoal. Posso ajudar com compras, viagens, restaurantes, documentos e muito mais. Bora?</div></div>
+      <div class="msg-row"><div class="msg-bot">E aí! 😄 Sou o Jarvis, seu agente de compras inteligente. Acho o melhor preço, monitoro promoções e compro pra você. Bora?</div></div>
     `,
     cta: { text: "Manda um 'Oi' e vem! 💬", bg: 'linear-gradient(90deg, #38BDF8, #818CF8)' },
   },

@@ -25,6 +25,41 @@ export interface FormattedPaymentOptions {
   hasValidOption: boolean;
 }
 
+// ─── Store Classification ──────────────────────────────────────────────
+
+export type StoreType = "amazon" | "mercadolivre" | "us_store" | "br_store" | "unknown";
+
+/** Classify a store name/URL into a routing category */
+export function classifyStore(store?: string): StoreType {
+  if (!store) return "unknown";
+  const s = store.toLowerCase().trim();
+  if (s.includes("amazon")) return "amazon";
+  if (s.includes("mercadoli") || s.includes("mercado li") || s === "ml") return "mercadolivre";
+  if (s.includes("walmart") || s.includes("bestbuy") || s.includes("best buy") ||
+      s.includes("target") || s.includes("macys") || s.includes("macy's") ||
+      s.includes("nike") || s.includes("costco") || s.includes("ebay") ||
+      s.includes("publix") || s.includes("cvs") || s.includes("walgreens")) return "us_store";
+  if (s.includes(".com.br") || s.includes("magazine") || s.includes("magalu") ||
+      s.includes("americanas") || s.includes("casasbahia") || s.includes("casas bahia") ||
+      s.includes("shopee") || s.includes("kabum") || s.includes("ponto frio") ||
+      s.includes("submarino") || s.includes("extra.com") || s.includes("dafiti")) return "br_store";
+  return "unknown";
+}
+
+/** Get the affinity score of a provider for a given store type (higher = better match) */
+function getStoreAffinity(provider: string, storeType: StoreType): number {
+  const affinityMap: Record<string, Record<StoreType, number>> = {
+    AMAZON:      { amazon: 100, mercadolivre: 0, us_store: 0, br_store: 0, unknown: 0 },
+    MERCADOPAGO: { amazon: 0, mercadolivre: 100, us_store: 0, br_store: 80, unknown: 20 },
+    PIX:         { amazon: 0, mercadolivre: 60, us_store: 0, br_store: 90, unknown: 10 },
+    PAYPAL:      { amazon: 30, mercadolivre: 0, us_store: 80, br_store: 10, unknown: 50 },
+    STRIPE:      { amazon: 20, mercadolivre: 0, us_store: 70, br_store: 30, unknown: 60 },
+    CREDIT_CARD: { amazon: 20, mercadolivre: 0, us_store: 70, br_store: 30, unknown: 60 },
+    SKYFIRE:     { amazon: 10, mercadolivre: 10, us_store: 40, br_store: 10, unknown: 70 },
+  };
+  return affinityMap[provider]?.[storeType] ?? 30;
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────
 
 function resolveDisplayName(method: PaymentMethod): string {
@@ -41,6 +76,7 @@ function isStoreProvider(provider: string): boolean {
 /** Check if a provider is currency-restricted */
 function getCurrencyRestriction(provider: string): string | null {
   if (provider === "PIX") return "BRL";
+  if (provider === "MERCADOPAGO") return "BRL";
   return null;
 }
 
@@ -132,11 +168,18 @@ export async function getPaymentOptions(
   store?: string, // e.g. "amazon" — filter store-specific methods
 ): Promise<FormattedPaymentOptions> {
   const methods = await getUserPaymentMethods(userId);
+  const storeType = classifyStore(store);
 
   if (methods.length === 0) {
+    // Suggest the best method based on store type
+    const suggestion = storeType === "amazon"
+      ? "Want me to help you connect your Amazon account?"
+      : storeType === "mercadolivre" || storeType === "br_store"
+        ? "Want me to help you set up Mercado Pago or PIX?"
+        : "Want me to help you add PayPal, a credit card, or another option?";
     return {
       options: [],
-      message: "You don't have any payment method set up yet. Want me to help you add PayPal, a credit card, or another option?",
+      message: `You don't have any payment method set up yet. ${suggestion}`,
       hasValidOption: false,
     };
   }
@@ -149,14 +192,22 @@ export async function getPaymentOptions(
     if (option) options.push(option);
   }
 
-  // Sort: default first, then canPay=true, then by provider name
+  // Sort by store affinity (native method first), then canPay, then default
   options.sort((a, b) => {
-    if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1;
+    // 1. canPay always beats can't-pay
     if (a.canPay !== b.canPay) return a.canPay ? -1 : 1;
-    return a.provider.localeCompare(b.provider);
+    // 2. Store affinity score (higher = better match for this store)
+    const affinityA = getStoreAffinity(a.provider, storeType);
+    const affinityB = getStoreAffinity(b.provider, storeType);
+    if (affinityA !== affinityB) return affinityB - affinityA;
+    // 3. User's default preference
+    if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1;
+    return 0;
   });
 
-  const message = formatPaymentOptions(options, amount, currency);
+  console.log(`[SMART-ROUTING] store="${store || "?"}" storeType=${storeType} options=[${options.map(o => `${o.provider}(aff:${getStoreAffinity(o.provider, storeType)},pay:${o.canPay})`).join(", ")}]`);
+
+  const message = formatPaymentOptions(options, amount, currency, storeType);
   const hasValidOption = options.some((o) => o.canPay);
 
   return { options, message, hasValidOption };
@@ -222,6 +273,19 @@ async function evaluateMethod(
       }
       break;
     }
+    case "MERCADOPAGO": {
+      // Mercado Pago only works for BRL purchases
+      if (currency.toUpperCase() !== "BRL") {
+        return null;
+      }
+      const mpBalance = typeof meta.balance === "number" ? meta.balance : null;
+      if (mpBalance !== null) {
+        base.balance = mpBalance;
+        base.displayName = `Mercado Pago (R$${mpBalance.toFixed(2)})`;
+      }
+      base.canPay = true;
+      break;
+    }
     case "PAYPAL":
     case "STRIPE":
     case "CREDIT_CARD":
@@ -247,6 +311,7 @@ export function formatPaymentOptions(
   options: PaymentOption[],
   amount: number,
   currency: string,
+  storeType: StoreType = "unknown",
 ): string {
   if (options.length === 0) {
     return "You don't have any payment method set up yet. Want me to help you add PayPal, a credit card, or another option?";
@@ -261,7 +326,9 @@ export function formatPaymentOptions(
     if (opt.canPay) {
       const emoji = emojis[idx] ?? `${idx + 1}.`;
       const defaultTag = opt.isDefault ? " ⭐" : "";
-      lines.push(`${emoji} ${opt.displayName}${defaultTag}`);
+      // Tag the best match for the store
+      const bestTag = idx === 0 && getStoreAffinity(opt.provider, storeType) >= 70 ? " (recommended)" : "";
+      lines.push(`${emoji} ${opt.displayName}${defaultTag}${bestTag}`);
       idx++;
     }
   }

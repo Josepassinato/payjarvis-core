@@ -1,9 +1,10 @@
 /**
- * TTS Service — Gemini TTS → ElevenLabs → edge-tts fallback chain
+ * TTS Service — Grok TTS → Gemini TTS → ElevenLabs → edge-tts fallback chain
  *
  * Converts text to OGG Opus audio files.
- * Primary: Gemini 2.5 Flash TTS (REST API, included in Gemini billing)
- * Secondary: ElevenLabs (if API key configured)
+ * Primary: Grok TTS (xAI, voice "leo" — masculine, authoritative)
+ * Secondary: Gemini 2.5 Flash TTS (REST API, included in Gemini billing)
+ * Tertiary: ElevenLabs (if API key configured)
  * Fallback: edge-tts (free, always available)
  *
  * Used by WhatsApp and Telegram voice reply handlers.
@@ -15,6 +16,10 @@ import { join } from "path";
 import { tmpdir } from "os";
 
 // ─── Config ─────────────────────────────────────────
+
+const XAI_API_KEY = process.env.XAI_API_KEY || "";
+const XAI_TTS_URL = "https://api.x.ai/v1/tts";
+const XAI_VOICE_ID = "leo"; // masculine, authoritative voice
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const GEMINI_TTS_MODEL = "gemini-2.5-flash-preview-tts";
@@ -108,7 +113,55 @@ function convertPcmToOgg(pcmPath: string): Promise<string> {
   });
 }
 
-// ─── Gemini TTS Provider (Primary) ──────────────────
+// ─── Grok TTS Provider (Primary) ────────────────────
+
+async function grokTTS(text: string, lang: string): Promise<string> {
+  if (!XAI_API_KEY) throw new Error("XAI_API_KEY not configured");
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
+  try {
+    const res = await fetch(XAI_TTS_URL, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${XAI_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        text,
+        voice_id: XAI_VOICE_ID,
+        language: lang === "pt" ? "pt" : lang,
+        output_format: {
+          codec: "mp3",
+          sample_rate: 24000,
+          bit_rate: 128000,
+        },
+      }),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeout);
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`Grok TTS API ${res.status}: ${body.slice(0, 200)}`);
+    }
+
+    const mp3Path = tmpFile("mp3");
+    const buffer = Buffer.from(await res.arrayBuffer());
+    writeFileSync(mp3Path, buffer);
+
+    const oggPath = await convertToOgg(mp3Path);
+    cleanupFiles(mp3Path);
+    return oggPath;
+  } catch (err) {
+    clearTimeout(timeout);
+    throw err;
+  }
+}
+
+// ─── Gemini TTS Provider (Secondary) ────────────────
 
 async function geminiTTS(text: string, lang: string): Promise<string> {
   if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY not configured");
@@ -261,7 +314,7 @@ function stripMarkdown(text: string): string {
 /**
  * Convert text to OGG Opus voice note.
  * Returns path to temporary .ogg file (caller must delete after use).
- * Chain: Gemini TTS → ElevenLabs → edge-tts
+ * Chain: Grok TTS → Gemini TTS → ElevenLabs → edge-tts
  *
  * @param text - Text to convert
  * @param lang - Language code (pt, en, es, fr, etc.)
@@ -275,7 +328,18 @@ export async function textToSpeech(text: string, lang = "pt"): Promise<string | 
   const clean = stripMarkdown(truncated);
   if (!clean) return null;
 
-  // 1. Try Gemini TTS (primary — best quality, included in Gemini billing)
+  // 1. Try Grok TTS (primary — masculine "leo" voice, $4.20/1M chars)
+  if (XAI_API_KEY) {
+    try {
+      const oggPath = await grokTTS(clean, lang);
+      console.log("[TTS] Grok (leo) OK, lang:", lang);
+      return oggPath;
+    } catch (err) {
+      console.error("[TTS] Grok failed:", (err as Error).message);
+    }
+  }
+
+  // 2. Try Gemini TTS (secondary — included in Gemini billing)
   if (GEMINI_API_KEY) {
     try {
       const oggPath = await geminiTTS(clean, lang);
@@ -286,7 +350,7 @@ export async function textToSpeech(text: string, lang = "pt"): Promise<string | 
     }
   }
 
-  // 2. Try ElevenLabs (secondary)
+  // 3. Try ElevenLabs (tertiary)
   if (ELEVENLABS_API_KEY) {
     try {
       const oggPath = await elevenLabsTTS(clean, lang);
@@ -297,7 +361,7 @@ export async function textToSpeech(text: string, lang = "pt"): Promise<string | 
     }
   }
 
-  // 3. Fallback: edge-tts (free, always available)
+  // 4. Fallback: edge-tts (free, always available)
   try {
     const oggPath = await edgeTTS(clean, lang);
     console.log("[TTS] edge-tts OK, lang:", lang);

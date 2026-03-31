@@ -5,15 +5,15 @@ import { ServiceWorkerRegister } from "@/components/sw-register";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "PayJarvis — AI Shopping Assistant",
-  description: "Your AI-powered personal shopping assistant. Compare prices, voice conversations, travel planning, and more.",
+  title: "PayJarvis — Agente de Compras Inteligente",
+  description: "Acha o melhor preço, compara, monitora e compra pra você",
   icons: {
     icon: "/favicon.ico",
     apple: "/apple-touch-icon.png",
   },
   openGraph: {
-    title: "PayJarvis — AI Shopping Assistant",
-    description: "Your AI-powered personal shopping assistant. Compare prices, voice conversations, travel planning, and more.",
+    title: "PayJarvis — Agente de Compras Inteligente",
+    description: "Acha o melhor preço, compara, monitora e compra pra você",
     images: ["/og-image.png"],
     siteName: "PayJarvis",
   },
@@ -21,8 +21,8 @@ export const metadata: Metadata = {
     "theme-color": "#00BFFF",
     "apple-mobile-web-app-capable": "yes",
     "apple-mobile-web-app-status-bar-style": "black-translucent",
-    "application-name": "Jarvis",
-    "apple-mobile-web-app-title": "Jarvis",
+    "application-name": "PayJarvis",
+    "apple-mobile-web-app-title": "PayJarvis",
   },
   manifest: "/manifest.json",
 };

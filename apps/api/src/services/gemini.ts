@@ -6,9 +6,9 @@ function buildDefaultPrompt(ownerName: string, botName: string, capabilities: st
     ? `\n\nYour capabilities:\n${capabilities.map(c => `- ${c}`).join("\n")}`
     : "";
 
-  return `You are ${botName}, a personal assistant for ${ownerName}.
+  return `You are ${botName}, a smart shopping agent working for ${ownerName}.
 
-You are intelligent, proactive, and discreet. You respond in ${language}.${capList}
+You find the best prices, compare stores, monitor deals, and save money. You respond in ${language}.${capList}
 
 CORE RULE — SELF-AWARENESS
 Before responding, check your available tools. NEVER say "I can't" or "I don't know" when you have a tool that helps.
@@ -134,9 +134,9 @@ const amazonSearchParams: FunctionDeclarationSchema = {
 const shareBotParams: FunctionDeclarationSchema = {
   type: SchemaType.OBJECT,
   properties: {
-    platform: { type: SchemaType.STRING, description: "Platform: 'telegram' or 'whatsapp'. Ask the user if not clear." },
+    channel: { type: SchemaType.STRING, description: "Channel for referral: 'whatsapp_br' (Brazil +55), 'whatsapp_us' (USA +1), or 'telegram'. ASK the user which one if not clear: 1) WhatsApp Brasil, 2) WhatsApp EUA, 3) Telegram. If user is BR, default whatsapp_br. If US, default whatsapp_us." },
   },
-  required: ["platform"],
+  required: ["channel"],
 };
 
 const credentialTools = [{
@@ -158,7 +158,7 @@ const credentialTools = [{
     },
     {
       name: "share_bot",
-      description: "Generate a referral/share link and QR code so the user can invite friends. Use when the user says: indicar, compartilhar, share, invite, convidar, QR code, link para amigo, referral. The friend gets free Beta access.",
+      description: "Generate a referral/share link so the user can invite friends. Use when the user says: indicar, compartilhar, share, invite, convidar, QR code, link para amigo, referral. IMPORTANT: ASK which channel first (WhatsApp Brasil, WhatsApp EUA, or Telegram) unless you already know their country. The friend gets free Beta access.",
       parameters: shareBotParams,
     },
     {

@@ -34,6 +34,13 @@ import * as cvs from "../services/pharmacy/cvs-client.js";
 import * as walgreens from "../services/pharmacy/walgreens-client.js";
 import { unifiedProductSearch } from "../services/search/unified-search.service.js";
 import { searchFlightsSerpApi, searchHotelsSerpApi, searchEventsSerpApi } from "../services/search/serpapi-travel.service.js";
+import { findCoupons, estimateSavings } from "../services/shopping/coupons.service.js";
+import { checkPriceHistory, recordPrice } from "../services/shopping/price-history.service.js";
+import { getProductReviews } from "../services/shopping/reviews.service.js";
+import {
+  scanAllSubscriptions, getSubscriptionSummary, cancelSubscription,
+  detectWaste, addSubscriptionManually, getSubscriptions,
+} from "../services/subscriptions/subscription-manager.service.js";
 
 export async function retailRoutes(app: FastifyInstance) {
   // ── SerpAPI Flights ─────────────────────────────────
@@ -168,6 +175,157 @@ export async function retailRoutes(app: FastifyInstance) {
       return reply.send({ success: true });
     } catch (err) {
       return reply.status(500).send({ success: false, error: "Failed to delete alert" });
+    }
+  });
+
+  // ═══ Shopping Tools ═══════════════════════════════════
+
+  // ── Find Coupons ─────────────────────────────────────
+  app.post("/api/shopping/coupons", async (request, reply) => {
+    const { store, purchaseAmount } = request.body as { store?: string; purchaseAmount?: number };
+    if (!store) return reply.status(400).send({ success: false, error: "store is required" });
+
+    try {
+      const coupons = await findCoupons(store);
+      const bestDeal = purchaseAmount ? estimateSavings(coupons, purchaseAmount) : null;
+      return reply.send({ success: true, data: { coupons, bestDeal } });
+    } catch (err) {
+      request.log.error(err, "[SHOPPING] coupons error");
+      return reply.status(500).send({ success: false, error: "Failed to find coupons" });
+    }
+  });
+
+  // ── Check Price History ──────────────────────────────
+  app.post("/api/shopping/price-history", async (request, reply) => {
+    const { productName, currentPrice, store, asin } = request.body as {
+      productName?: string; currentPrice?: number; store?: string; asin?: string;
+    };
+    if (!productName || currentPrice === undefined) {
+      return reply.status(400).send({ success: false, error: "productName and currentPrice required" });
+    }
+
+    try {
+      const history = await checkPriceHistory(productName, currentPrice, store, asin);
+      return reply.send({ success: true, data: history });
+    } catch (err) {
+      request.log.error(err, "[SHOPPING] price-history error");
+      return reply.status(500).send({ success: false, error: "Failed to check price history" });
+    }
+  });
+
+  // ── Record Price (internal — called by search pipeline) ──
+  app.post("/api/shopping/record-price", async (request, reply) => {
+    const { productIdentifier, store, price, currency } = request.body as {
+      productIdentifier?: string; store?: string; price?: number; currency?: string;
+    };
+    if (!productIdentifier || !store || price === undefined) {
+      return reply.status(400).send({ success: false, error: "productIdentifier, store, price required" });
+    }
+    try {
+      await recordPrice(productIdentifier, store, price, currency);
+      return reply.send({ success: true });
+    } catch (err) {
+      return reply.status(500).send({ success: false, error: "Failed to record price" });
+    }
+  });
+
+  // ── Product Reviews ──────────────────────────────────
+  app.post("/api/shopping/reviews", async (request, reply) => {
+    const { productName, store, asin } = request.body as {
+      productName?: string; store?: string; asin?: string;
+    };
+    if (!productName) {
+      return reply.status(400).send({ success: false, error: "productName is required" });
+    }
+
+    try {
+      const reviews = await getProductReviews(productName, store, asin);
+      return reply.send({ success: true, data: reviews });
+    } catch (err) {
+      request.log.error(err, "[SHOPPING] reviews error");
+      return reply.status(500).send({ success: false, error: "Failed to get reviews" });
+    }
+  });
+
+  // ═══ Subscription Management ════════════════════════
+
+  // ── Scan subscriptions from PayPal + MP ──────────────
+  app.post("/api/subscriptions/scan", async (request, reply) => {
+    const { userId } = request.body as { userId?: string };
+    if (!userId) return reply.status(400).send({ success: false, error: "userId required" });
+    try {
+      const subs = await scanAllSubscriptions(userId);
+      return reply.send({ success: true, data: subs });
+    } catch (err) {
+      request.log.error(err, "[SUBSCRIPTIONS] scan error");
+      return reply.status(500).send({ success: false, error: "Scan failed" });
+    }
+  });
+
+  // ── Get subscription summary ─────────────────────────
+  app.get("/api/subscriptions/:userId/summary", async (request, reply) => {
+    const { userId } = request.params as { userId: string };
+    try {
+      const summary = await getSubscriptionSummary(userId);
+      return reply.send({ success: true, data: summary });
+    } catch (err) {
+      return reply.status(500).send({ success: false, error: "Failed to get summary" });
+    }
+  });
+
+  // ── List subscriptions ───────────────────────────────
+  app.get("/api/subscriptions/:userId", async (request, reply) => {
+    const { userId } = request.params as { userId: string };
+    try {
+      const subs = await getSubscriptions(userId);
+      return reply.send({ success: true, data: subs });
+    } catch (err) {
+      return reply.status(500).send({ success: false, error: "Failed to list subscriptions" });
+    }
+  });
+
+  // ── Cancel subscription ──────────────────────────────
+  app.post("/api/subscriptions/cancel", async (request, reply) => {
+    const { userId, subscriptionId, reason } = request.body as {
+      userId?: string; subscriptionId?: string; reason?: string;
+    };
+    if (!userId || !subscriptionId) {
+      return reply.status(400).send({ success: false, error: "userId and subscriptionId required" });
+    }
+    try {
+      const result = await cancelSubscription(userId, subscriptionId, reason);
+      return reply.send({ success: result.success, data: result });
+    } catch (err) {
+      request.log.error(err, "[SUBSCRIPTIONS] cancel error");
+      return reply.status(500).send({ success: false, error: "Cancel failed" });
+    }
+  });
+
+  // ── Add subscription manually ────────────────────────
+  app.post("/api/subscriptions/add", async (request, reply) => {
+    const { userId, serviceName, amount, currency, billingCycle, paymentMethod } = request.body as {
+      userId?: string; serviceName?: string; amount?: number; currency?: string;
+      billingCycle?: string; paymentMethod?: string;
+    };
+    if (!userId || !serviceName || amount === undefined) {
+      return reply.status(400).send({ success: false, error: "userId, serviceName, amount required" });
+    }
+    try {
+      const sub = await addSubscriptionManually(userId, { serviceName, amount, currency, billingCycle, paymentMethod });
+      return reply.send({ success: true, data: sub });
+    } catch (err) {
+      return reply.status(500).send({ success: false, error: "Failed to add subscription" });
+    }
+  });
+
+  // ── Detect waste ─────────────────────────────────────
+  app.get("/api/subscriptions/:userId/waste", async (request, reply) => {
+    const { userId } = request.params as { userId: string };
+    try {
+      const waste = await detectWaste(userId);
+      return reply.send({ success: true, data: waste });
+    } catch (err) {
+      return reply.status(500).send({ success: false, error: "Failed to detect waste" });
     }
   });
 

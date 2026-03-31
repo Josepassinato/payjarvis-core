@@ -28,6 +28,7 @@
   "packageManager": "npm@10.9.4",
   "dependencies": {
     "@browserbasehq/sdk": "^2.8.0",
+    "@sentry/node": "^10.46.0",
     "bcryptjs": "^3.0.3",
     "composio-core": "^0.5.39",
     "jsonwebtoken": "^9.0.3",

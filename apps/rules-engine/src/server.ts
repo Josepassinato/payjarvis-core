@@ -1,3 +1,6 @@
+import './sentry.js';
+import Sentry from './sentry.js';
+
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import { Redis } from "ioredis";
@@ -9,6 +12,17 @@ const app = Fastify({ logger: true });
 const engine = new DecisionEngine();
 
 await app.register(cors, { origin: true });
+
+// Sentry error handler
+app.setErrorHandler((error: Error & { statusCode?: number }, request, reply) => {
+  Sentry.captureException(error, {
+    extra: { method: request.method, url: request.url },
+  });
+  app.log.error(error);
+  reply.status(error.statusCode ?? 500).send({
+    error: error.message || 'Internal Server Error',
+  });
+});
 
 // ─── Redis setup ──────────────────────────────────────
 

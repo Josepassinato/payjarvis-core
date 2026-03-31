@@ -5,7 +5,7 @@
  *        smart_tips, birthday, price_alert (existing, referenced here).
  */
 
-import { prisma } from "@payjarvis/database";
+import { prisma, Prisma } from "@payjarvis/database";
 import { sendTelegramNotification } from "../notifications.js";
 import { sendWhatsAppMessage } from "../twilio-whatsapp.service.js";
 import { redisGet, redisSet } from "../redis.js";
@@ -95,9 +95,18 @@ async function sendToUserChannel(user: UserWithChannel, message: string, type: s
 
 // ─── User Facts Helper ───
 
-async function getUserFacts(userId: string): Promise<Record<string, string>> {
+async function getUserFacts(userId: string, user?: UserWithChannel): Promise<Record<string, string>> {
+  // Facts are stored by telegramChatId or whatsapp:+phone, not by Prisma userId
+  const possibleIds = [userId];
+  if (user?.telegramChatId) possibleIds.push(user.telegramChatId);
+  if (user?.phone) {
+    const cleaned = user.phone.replace(/[^+\d]/g, "");
+    possibleIds.push(`whatsapp:${cleaned}`);
+    if (!cleaned.startsWith("+")) possibleIds.push(`whatsapp:+${cleaned}`);
+  }
+
   const rows = await prisma.$queryRaw<{ fact_key: string; fact_value: string }[]>`
-    SELECT fact_key, fact_value FROM openclaw_user_facts WHERE user_id = ${userId}
+    SELECT fact_key, fact_value FROM openclaw_user_facts WHERE user_id IN (${Prisma.join(possibleIds)})
   `;
   const map: Record<string, string> = {};
   for (const r of rows) map[r.fact_key] = r.fact_value;
@@ -146,6 +155,9 @@ interface WeatherResult {
   condition: string;
   conditionPt: string;
   emoji: string;
+  rainNext12h: boolean;
+  maxTempC: number;
+  minTempC: number;
 }
 
 async function getWeather(lat: number, lon: number, _cityName?: string): Promise<WeatherResult> {
@@ -154,7 +166,7 @@ async function getWeather(lat: number, lon: number, _cityName?: string): Promise
   if (cached) return JSON.parse(cached);
 
   try {
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(4)}&longitude=${lon.toFixed(4)}&current=temperature_2m,weather_code&temperature_unit=celsius&timezone=auto`;
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(4)}&longitude=${lon.toFixed(4)}&current=temperature_2m,weather_code&hourly=weather_code,temperature_2m&forecast_hours=12&temperature_unit=celsius&timezone=auto`;
     const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
     if (!res.ok) throw new Error(`Open-Meteo HTTP ${res.status}`);
     const data = await res.json() as any;
@@ -164,9 +176,17 @@ async function getWeather(lat: number, lon: number, _cityName?: string): Promise
     const code = data.current.weather_code ?? 0;
     const wmo = getWmoInfo(code);
 
-    const result: WeatherResult = { tempC, tempF, condition: wmo.en, conditionPt: wmo.pt, emoji: wmo.emoji };
+    // Check next 12h for rain (codes 51-67, 80-82, 95-99)
+    const hourlyWcodes: number[] = data.hourly?.weather_code ?? [];
+    const hourlyTemps: number[] = data.hourly?.temperature_2m ?? [];
+    const rainCodes = new Set([51, 53, 55, 61, 63, 65, 66, 67, 80, 81, 82, 95, 96, 99]);
+    const rainNext12h = hourlyWcodes.some((c: number) => rainCodes.has(c));
+    const maxTempC = hourlyTemps.length > 0 ? Math.round(Math.max(...hourlyTemps)) : tempC;
+    const minTempC = hourlyTemps.length > 0 ? Math.round(Math.min(...hourlyTemps)) : tempC;
+
+    const result: WeatherResult = { tempC, tempF, condition: wmo.en, conditionPt: wmo.pt, emoji: wmo.emoji, rainNext12h, maxTempC, minTempC };
     await redisSet(cacheKey, JSON.stringify(result), 1800); // 30 min cache
-    console.log(`[WEATHER] Open-Meteo OK: ${tempC}°C / ${tempF}°F, ${wmo.en} ${wmo.emoji}`);
+    console.log(`[WEATHER] Open-Meteo OK: ${tempC}°C / ${tempF}°F, ${wmo.en} ${wmo.emoji}, rain12h=${rainNext12h}`);
     return result;
   } catch (err) {
     console.error("[WEATHER] Open-Meteo failed:", (err as Error).message);
@@ -186,120 +206,370 @@ async function getWeather(lat: number, lon: number, _cityName?: string): Promise
             : condLower.includes("cloud") ? "☁️" : condLower.includes("rain") ? "🌧️"
             : condLower.includes("storm") || condLower.includes("thunder") ? "⛈️"
             : condLower.includes("snow") ? "❄️" : condLower.includes("fog") ? "🌫️" : "🌤️";
-          const result: WeatherResult = { tempC, tempF, condition, conditionPt: condition, emoji };
+          const rainNext12h = condLower.includes("rain") || condLower.includes("storm") || condLower.includes("shower");
+          const result: WeatherResult = { tempC, tempF, condition, conditionPt: condition, emoji, rainNext12h, maxTempC: tempC, minTempC: tempC };
           await redisSet(cacheKey, JSON.stringify(result), 1800);
           console.log(`[WEATHER] SerpAPI fallback OK: ${tempF}°F, ${condition}`);
           return result;
         }
       }
     } catch { /* both failed */ }
-    return { tempC: 0, tempF: 0, condition: "unavailable", conditionPt: "indisponível", emoji: "🌤️" };
+    return { tempC: 0, tempF: 0, condition: "unavailable", conditionPt: "indisponível", emoji: "🌤️", rainNext12h: false, maxTempC: 0, minTempC: 0 };
   }
 }
 
-// ─── News (SerpAPI) ───
+// ─── News (SerpAPI — returns multiple headlines with snippets) ───
 
-async function getTopNews(topic: string): Promise<string> {
+interface NewsItem { title: string; snippet: string }
+
+async function getTopNewsItems(topic: string, count: number = 3): Promise<NewsItem[]> {
   const key = process.env.SERPAPI_KEY;
-  if (!key) return "";
+  if (!key) return [];
 
-  const cached = await redisGet(`news:${topic}`);
-  if (cached) return cached;
+  const cacheKey = `news_items:${topic}`;
+  const cached = await redisGet(cacheKey);
+  if (cached) return JSON.parse(cached);
 
   try {
     const res = await fetch(
-      `https://serpapi.com/search.json?engine=google_news&q=${encodeURIComponent(topic)}&api_key=${key}&num=1`
+      `https://serpapi.com/search.json?engine=google_news&q=${encodeURIComponent(topic)}&api_key=${key}&num=${count}`
     );
     const data = await res.json() as any;
-    const headline = data.news_results?.[0]?.title ?? "";
-    if (headline) await redisSet(`news:${topic}`, headline, 7200);
-    return headline;
+    const items: NewsItem[] = (data.news_results ?? []).slice(0, count).map((r: any) => ({
+      title: r.title ?? "",
+      snippet: r.snippet ?? "",
+    })).filter((i: NewsItem) => i.title);
+    if (items.length > 0) await redisSet(cacheKey, JSON.stringify(items), 7200);
+    return items;
   } catch {
-    return "";
+    return [];
   }
 }
 
-// ─── Dollar Rate ───
+// ─── Dollar/Euro Rate ───
 
-async function getDollarRate(): Promise<string> {
-  const cached = await redisGet("fx:usd_brl");
-  if (cached) return cached;
+interface FxRates { brl: string; brlChange: string; eur: string; eurChange: string }
+
+async function getCurrencyRates(): Promise<FxRates> {
+  const cached = await redisGet("fx:briefing_rates");
+  if (cached) return JSON.parse(cached);
 
   try {
-    const res = await fetch("https://api.exchangerate-api.com/v4/latest/USD");
+    const res = await fetch("https://api.exchangerate-api.com/v4/latest/USD", { signal: AbortSignal.timeout(8000) });
     const data = await res.json() as any;
-    const rate = data.rates?.BRL?.toFixed(2) ?? "?";
-    await redisSet("fx:usd_brl", rate, 7200);
-    return rate;
+    const brl = data.rates?.BRL?.toFixed(2) ?? "?";
+    const eurRate = data.rates?.EUR;
+    const eurPerUsd = eurRate ? (1 / eurRate).toFixed(2) : "?";
+
+    // Try to get previous day rate for change calculation
+    const prevCached = await redisGet("fx:prev_brl");
+    let brlChange = "";
+    if (prevCached) {
+      const prev = parseFloat(prevCached);
+      const curr = parseFloat(brl);
+      if (!isNaN(prev) && !isNaN(curr) && prev > 0) {
+        const pct = ((curr - prev) / prev * 100).toFixed(1);
+        brlChange = curr >= prev ? `+${pct}%` : `${pct}%`;
+      }
+    }
+    // Store current as prev for next day
+    await redisSet("fx:prev_brl", brl, 86400 * 2);
+
+    const result: FxRates = { brl, brlChange, eur: eurPerUsd, eurChange: "" };
+    await redisSet("fx:briefing_rates", JSON.stringify(result), 7200);
+    return result;
   } catch {
-    return "?";
+    return { brl: "?", brlChange: "", eur: "?", eurChange: "" };
   }
 }
 
-// ─── Reminders Count ───
+// ─── Reminders for today ───
 
-async function getTodayRemindersCount(userId: string): Promise<number> {
+interface ReminderInfo { count: number; texts: string[] }
+
+async function getTodayReminders(userId: string): Promise<ReminderInfo> {
   const now = new Date();
   const endOfDay = new Date(now);
   endOfDay.setHours(23, 59, 59, 999);
 
-  const rows = await prisma.$queryRaw<{ count: bigint }[]>`
+  const rows = await prisma.$queryRaw<{ reminder_text: string }[]>`
+    SELECT reminder_text FROM openclaw_reminders
+    WHERE user_id = ${userId} AND remind_at BETWEEN ${now} AND ${endOfDay} AND sent = false
+    ORDER BY remind_at ASC LIMIT 3
+  `;
+  const countRows = await prisma.$queryRaw<{ count: bigint }[]>`
     SELECT COUNT(*) as count FROM openclaw_reminders
     WHERE user_id = ${userId} AND remind_at BETWEEN ${now} AND ${endOfDay} AND sent = false
   `;
-  return Number(rows[0]?.count ?? 0);
+  return {
+    count: Number(countRows[0]?.count ?? 0),
+    texts: rows.map(r => r.reminder_text),
+  };
+}
+
+// ─── Price Alerts (active, with price drops) ───
+
+interface PriceAlertDrop { query: string; currentPrice: number; targetPrice: number; currency: string }
+
+async function getActivePriceDrops(userId: string): Promise<PriceAlertDrop[]> {
+  try {
+    const alerts = await prisma.priceAlert.findMany({
+      where: {
+        userId,
+        active: true,
+        currentPrice: { not: null },
+      },
+      orderBy: { updatedAt: "desc" },
+      take: 3,
+    });
+
+    return alerts
+      .filter(a => a.currentPrice !== null && a.currentPrice <= a.targetPrice)
+      .map(a => ({
+        query: a.query,
+        currentPrice: a.currentPrice!,
+        targetPrice: a.targetPrice,
+        currency: a.currency,
+      }));
+  } catch {
+    return [];
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
-// MORNING BRIEFING
+// MORNING BRIEFING — 5 personalized sections
 // ═══════════════════════════════════════════════════════════
 
+// Detect user language
+function detectLang(facts: Record<string, string>, user: UserWithChannel): "pt" | "es" | "en" {
+  if (facts.language === "pt" || user.country === "BR" || facts.country === "BR") return "pt";
+  if (facts.language === "es") return "es";
+  return "en";
+}
+
+// ─── Geocoding (Open-Meteo Geocoding API — free, no key) ───
+
+async function geocodeCity(city: string, state?: string, country?: string): Promise<{ lat: number; lon: number; name: string } | null> {
+  const query = [city, state, country].filter(Boolean).join(", ");
+  const cacheKey = `geocode:${query.toLowerCase()}`;
+  const cached = await redisGet(cacheKey);
+  if (cached) return JSON.parse(cached);
+
+  try {
+    const res = await fetch(
+      `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=en`,
+      { signal: AbortSignal.timeout(5000) }
+    );
+    const data = await res.json() as any;
+    const result = data.results?.[0];
+    if (!result) return null;
+
+    const geo = { lat: result.latitude, lon: result.longitude, name: result.name };
+    await redisSet(cacheKey, JSON.stringify(geo), 86400 * 7); // cache 7 days
+    console.log(`[GEOCODE] ${query} → ${geo.lat}, ${geo.lon} (${geo.name})`);
+    return geo;
+  } catch (err) {
+    console.error(`[GEOCODE] Failed for ${query}:`, (err as Error).message);
+    return null;
+  }
+}
+
+// SECTION 1 — Weather + context (not just temp — what it MEANS for the day)
+async function buildWeatherSection(user: UserWithChannel, facts: Record<string, string>, lang: "pt" | "es" | "en"): Promise<string> {
+  let lat = user.latitude;
+  let lon = user.longitude;
+  let city = facts.city || facts.location || "";
+
+  // Fallback: geocode from user facts when no GPS coordinates
+  if (!lat || !lon) {
+    if (city) {
+      const geo = await geocodeCity(city, facts.state, facts.country);
+      if (geo) {
+        lat = geo.lat;
+        lon = geo.lon;
+        if (!city) city = geo.name;
+      }
+    }
+  }
+
+  if (!lat || !lon) return "";
+  if (!city) city = lang === "pt" ? "sua cidade" : "your area";
+
+  const w = await getWeather(lat, lon, city);
+  if (w.tempC === 0 && w.condition === "unavailable") return "";
+
+  const isUS = user.country === "US" || facts.country === "US" || lang === "en";
+  const temp = isUS ? `${w.tempF}°F` : `${w.tempC}°C`;
+
+  // Context-aware weather comment
+  let comment = "";
+  if (lang === "pt") {
+    if (w.tempC >= 30) comment = "dia quente!";
+    else if (w.tempC >= 25) comment = "dia lindo!";
+    else if (w.tempC >= 18) comment = "clima agradavel.";
+    else if (w.tempC >= 10) comment = "esfriou, se agasalha!";
+    else comment = "frio incomum, se proteja!";
+    if (w.rainNext12h && !comment.includes("chuva")) comment += " Leva guarda-chuva!";
+  } else {
+    if (w.tempF >= 90) comment = "hot one today!";
+    else if (w.tempF >= 75) comment = "beautiful day!";
+    else if (w.tempF >= 60) comment = "nice weather.";
+    else if (w.tempF >= 45) comment = "chilly — grab a jacket!";
+    else comment = "cold day, bundle up!";
+    if (w.rainNext12h && !comment.includes("rain")) comment += " Bring an umbrella!";
+  }
+
+  return `${w.emoji} ${temp} ${lang === "pt" ? "em" : "in"} ${city} — ${comment}`;
+}
+
+// SECTION 2 — Personalized alerts (price drops, reminders, etc.)
+async function buildAlertsSection(user: UserWithChannel, facts: Record<string, string>, lang: "pt" | "es" | "en"): Promise<string> {
+  const lines: string[] = [];
+
+  // Price alert drops
+  const drops = await getActivePriceDrops(user.id);
+  for (const d of drops) {
+    const curr = d.currency === "BRL" ? "R$" : "$";
+    const saved = Math.round(d.targetPrice - d.currentPrice);
+    if (lang === "pt") {
+      lines.push(`🔥 ${d.query} caiu $${saved}! Ta ${curr}${d.currentPrice.toFixed(0)}`);
+    } else {
+      lines.push(`🔥 ${d.query} dropped $${saved}! Now ${curr}${d.currentPrice.toFixed(0)}`);
+    }
+  }
+
+  // Today's reminders (show up to 2 with text)
+  const reminders = await getTodayReminders(user.id);
+  if (reminders.count > 0) {
+    const shown = reminders.texts.slice(0, 2);
+    for (const text of shown) {
+      lines.push(`📅 ${text}`);
+    }
+    if (reminders.count > 2) {
+      lines.push(lang === "pt" ? `+${reminders.count - 2} lembretes hoje` : `+${reminders.count - 2} more today`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+// SECTION 3 — News (2-3 headlines based on user interests, with context)
+async function buildNewsSection(facts: Record<string, string>, lang: "pt" | "es" | "en"): Promise<string> {
+  const topics = facts.news_interests || facts.interests || "technology";
+  // Split by comma and search first topic for better relevance
+  const mainTopic = topics.split(",")[0].trim();
+  const items = await getTopNewsItems(mainTopic, 3);
+  if (items.length === 0) return "";
+
+  return items.slice(0, 2).map(item => {
+    // Truncate title to ~60 chars for WhatsApp readability
+    const title = item.title.length > 60 ? item.title.substring(0, 57) + "..." : item.title;
+    return `📰 ${title}`;
+  }).join("\n");
+}
+
+// SECTION 4 — Rotating tip (never repeat for same user)
+const BRIEFING_TIPS_PT = [
+  "Sabia que posso ligar pra restaurante e reservar por voce? E so pedir!",
+  "Me manda uma foto de qualquer produto e eu acho o melhor preco!",
+  "Diga 'monitora o preco do [produto]' e te aviso quando cair!",
+  "Manda audio que eu entendo perfeitamente!",
+  "Posso rastrear qualquer encomenda — manda o codigo!",
+  "Diga 'compara preco de [produto]' e busco em 100+ lojas!",
+  "Posso gerar documentos como PDF — contratos, cartas, relatorios!",
+  "Busco voos, hoteis e restaurantes pra sua viagem!",
+  "Diga 'relatorio semanal' pra ver suas estatisticas!",
+  "Posso fazer ligacoes telefonicas por voce — e so pedir!",
+];
+
+const BRIEFING_TIPS_EN = [
+  "I can call restaurants and make reservations for you!",
+  "Send me a photo of any product and I'll find the best price!",
+  "Say 'monitor price of [product]' and I'll alert you when it drops!",
+  "Send me a voice message — I understand audio perfectly!",
+  "I can track any package — just send me the tracking code!",
+  "Say 'compare prices of [product]' and I'll search 100+ stores!",
+  "I can generate PDFs — contracts, letters, reports!",
+  "I can search flights, hotels, and restaurants for your trip!",
+  "Say 'weekly report' to see your usage stats!",
+  "I can make phone calls on your behalf — just ask!",
+];
+
+async function buildTipSection(userId: string, lang: "pt" | "es" | "en"): Promise<string> {
+  const tips = lang === "pt" ? BRIEFING_TIPS_PT : BRIEFING_TIPS_EN;
+  const sentKey = `briefing_tips:${userId}`;
+  const sentRaw = await redisGet(sentKey);
+  const sentIndices: number[] = sentRaw ? JSON.parse(sentRaw) : [];
+
+  const available = tips.map((_, i) => i).filter(i => !sentIndices.includes(i));
+  if (available.length === 0) {
+    // Reset cycle
+    await redisSet(sentKey, "[]", 86400 * 60);
+    return "";
+  }
+
+  const idx = available[Math.floor(Math.random() * available.length)];
+  sentIndices.push(idx);
+  await redisSet(sentKey, JSON.stringify(sentIndices), 86400 * 60);
+
+  return `💡 ${tips[idx]}`;
+}
+
+// SECTION 5 — Currency rates (only for Brazilians)
+async function buildCurrencySection(lang: "pt" | "es" | "en"): Promise<string> {
+  if (lang !== "pt") return "";
+  const rates = await getCurrencyRates();
+  if (rates.brl === "?") return "";
+  const change = rates.brlChange ? ` (${rates.brlChange})` : "";
+  return `💰 Dolar: R$${rates.brl}${change}`;
+}
+
+// MAIN: Build and send morning briefing
 export async function sendMorningBriefing(user: UserWithChannel) {
   const prefs = await getOrCreatePrefs(user.id);
   if (!prefs.morningBriefing) return;
 
-  const facts = await getUserFacts(user.id);
+  const facts = await getUserFacts(user.id, user);
   const name = facts.name || facts.first_name || user.fullName.split(" ")[0];
+  const lang = detectLang(facts, user);
 
-  // Weather
-  let weatherLine = "";
-  if (user.latitude && user.longitude) {
-    const city = facts.city || facts.location || "your area";
-    const w = await getWeather(user.latitude, user.longitude, city);
-    if (w.tempC !== 0 || w.condition !== "unavailable") {
-      const isUS = user.country === "US" || facts.country === "US";
-      const isPT = facts.language === "pt" || user.country === "BR" || facts.country === "BR";
-      const tempStr = isUS ? `${w.tempF}°F` : `${w.tempC}°C`;
-      const condStr = isPT ? w.conditionPt : w.condition;
-      weatherLine = `🌡️ ${tempStr} in ${city}, ${condStr} ${w.emoji}\n`;
+  // Build all 5 sections in parallel
+  const [weather, alerts, news, tip, currency] = await Promise.all([
+    buildWeatherSection(user, facts, lang),
+    buildAlertsSection(user, facts, lang),
+    buildNewsSection(facts, lang),
+    buildTipSection(user.id, lang),
+    buildCurrencySection(lang),
+  ]);
+
+  // Greeting
+  const greeting = lang === "pt" ? "Bom dia" : lang === "es" ? "Buenos dias" : "Morning";
+
+  // Assemble sections — only include non-empty ones
+  const sections: string[] = [];
+  if (weather) sections.push(weather);
+  if (alerts) sections.push(alerts);
+  if (news) sections.push(news);
+  if (tip) sections.push(tip);
+  if (currency) sections.push(currency);
+
+  const closing = lang === "pt" ? "Bom dia! 🦀" : lang === "es" ? "Buen dia! 🦀" : "Have a great day! 🦀";
+
+  let message = `${greeting} ${name}!\n\n${sections.join("\n\n")}\n\n${closing}`;
+
+  // Enforce 500 char limit — prioritize: alerts > weather > news > tip > currency
+  if (message.length > 500) {
+    const priority = [alerts, weather, news, tip, currency].filter(Boolean);
+    let trimmed = `${greeting} ${name}!\n\n`;
+    for (const section of priority) {
+      if (trimmed.length + section.length + closing.length + 4 > 500) break;
+      trimmed += section + "\n\n";
     }
+    message = trimmed + closing;
   }
 
-  // Reminders
-  const reminderCount = await getTodayRemindersCount(user.id);
-  const reminderLine = reminderCount > 0 ? `📅 You have ${reminderCount} reminder(s) today\n` : "";
-
-  // News
-  const newsTopic = facts.news_interests || facts.interests || "technology";
-  const headline = await getTopNews(newsTopic);
-  const newsLine = headline ? `📰 ${headline}\n` : "";
-
-  // Dollar rate for Brazilians
-  let fxLine = "";
-  if (user.country === "BR" || facts.country === "BR" || facts.language === "pt") {
-    const rate = await getDollarRate();
-    fxLine = `💰 Dólar: R$${rate}\n`;
-  }
-
-  const greeting = facts.language === "pt" ? "Bom dia" : facts.language === "es" ? "Buenos días" : "Good morning";
-  const cta = facts.language === "pt"
-    ? "Precisa de algo? É só falar! 🦀"
-    : facts.language === "es"
-    ? "¿Necesitas algo? ¡Solo dime! 🦀"
-    : "Need anything? Just say the word! 🦀";
-
-  const message = `${greeting} ${name}! ☀️\n${weatherLine}${reminderLine}${newsLine}${fxLine}\n${cta}`;
   await sendToUserChannel(user, message, "morning_briefing");
+  console.log(`[BRIEFING] Sent to ${name} (${lang}): ${message.length} chars`);
 }
 
 // ═══════════════════════════════════════════════════════════

@@ -180,7 +180,8 @@ export async function botShareRoutes(app: FastifyInstance) {
         const webUrl = `${BASE_URL}/join/${code}`;
         const botUsername = process.env.TELEGRAM_BOT_USERNAME ?? "Jarvis12Brain_bot";
         const telegramUrl = `https://t.me/${botUsername}?start=${code}`;
-        const whatsappUrl = `https://wa.me/17547145921?text=${encodeURIComponent(`START ${code}`)}`;
+        const whatsappBrUrl = `https://wa.me/551150395940?text=${encodeURIComponent(`START ${code}`)}`;
+        const whatsappUsUrl = `https://wa.me/17547145921?text=${encodeURIComponent(`START ${code}`)}`;
 
         const targetPlatform = (platform ?? "telegram").toLowerCase();
 
@@ -192,7 +193,10 @@ export async function botShareRoutes(app: FastifyInstance) {
         });
 
         // shareLink is the one the user forwards via messaging app
-        const shareLink = targetPlatform === "whatsapp" ? whatsappUrl : telegramUrl;
+        let shareLink: string;
+        if (targetPlatform === "whatsapp_br") shareLink = whatsappBrUrl;
+        else if (targetPlatform === "whatsapp" || targetPlatform === "whatsapp_us") shareLink = whatsappUsUrl;
+        else shareLink = telegramUrl;
 
         return {
           success: true,
@@ -201,7 +205,8 @@ export async function botShareRoutes(app: FastifyInstance) {
             url: shareLink,
             webUrl,
             telegramUrl,
-            whatsappUrl,
+            whatsappBrUrl,
+            whatsappUsUrl,
             qrCodeBase64,
             platform: targetPlatform,
           },
