@@ -1,3 +1,6 @@
+import './sentry.js';
+import Sentry from './sentry.js';
+
 import { readFileSync as readEnvFile } from "fs";
 import { resolve as resolvePath } from "path";
 // Load .env from monorepo root (PM2 cwd may not be project root)
@@ -84,6 +87,8 @@ import { butlerRoutes } from "./routes/butler.js";
 import { innerCircleRoutes } from "./routes/inner-circle.js";
 import { scheduledTaskRoutes } from "./routes/scheduled-tasks.js";
 import skyfireRoutes from "./routes/skyfire.js";
+import { glassesRoutes } from "./routes/glasses.js";
+import addressRoutes from "./routes/addresses.js";
 import { rateLimiter, webhookRateLimiter } from "./middleware/rate-limiter.js";
 
 // Cron jobs
@@ -146,6 +151,22 @@ const app = Fastify({
           },
         },
       },
+});
+
+// Sentry error handler — captures all unhandled route errors
+app.setErrorHandler((error: Error & { statusCode?: number }, request, reply) => {
+  Sentry.captureException(error, {
+    extra: {
+      method: request.method,
+      url: request.url,
+      params: request.params,
+      query: request.query,
+    },
+  });
+  app.log.error(error);
+  reply.status(error.statusCode ?? 500).send({
+    error: error.message || 'Internal Server Error',
+  });
 });
 
 const allowedOrigins = [
@@ -306,6 +327,12 @@ await app.register(scheduledTaskRoutes);
 
 // Skyfire — wallet-based payments, purchase tracking, webhooks
 await app.register(skyfireRoutes);
+
+// Glasses — AI product identification via camera/image (Gemini Vision)
+await app.register(glassesRoutes);
+
+// Addresses & KYC — structured US/BR addresses + KYC profile
+await app.register(addressRoutes);
 
 // Admin Dashboard — separate auth, overview, users, broadcast, revenue
 await app.register(adminAuthRoutes);

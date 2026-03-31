@@ -104,6 +104,17 @@ enum PaymentProvider {
   MERCADOPAGO
 }
 
+enum AddressCountry {
+  US
+  BR
+}
+
+enum AddressType {
+  SHIPPING
+  BILLING
+  BOTH
+}
+
 enum PaymentMethodStatus {
   CONNECTED
   PENDING
@@ -165,8 +176,39 @@ model User {
   llmCredits         LlmCredit?        @relation("UserCredits")
   zkVault            UserZkVault?
   secureItems        SecureItem[]
+  addresses          UserAddress[]
 
   @@map("users")
+}
+
+model UserAddress {
+  id             String         @id @default(cuid())
+  userId         String
+  label          String?        // "Home", "Office", "Mom's house"
+  type           AddressType    @default(SHIPPING)
+  country        AddressCountry
+  isDefault      Boolean        @default(false)
+
+  // Common fields
+  fullName       String         // recipient name
+  phone          String?        // delivery contact
+  street         String         // street + number
+  complement     String?        // apt, suite, floor
+  city           String
+  state          String         // US: 2-letter / BR: 2-letter (SP, RJ)
+  postalCode     String         // US: ZIP 5 or 5+4 / BR: CEP 8 digits
+
+  // BR-specific
+  neighborhood   String?        // bairro (required for BR)
+  cpf            String?        // CPF for Brazilian tax invoices
+
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("user_addresses")
 }
 
 model TelegramLinkCode {

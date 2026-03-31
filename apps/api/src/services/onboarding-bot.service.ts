@@ -2,7 +2,7 @@
  * Onboarding Bot Service — Conversational onboarding via Telegram/WhatsApp
  *
  * Flow (100% in chat, multilingual: EN/PT/ES):
- * name → bot_nickname → email_password → email_confirm → beta_choice → limits → stores → shipping_address → payment → complete
+ * name → bot_nickname → email_password → email_confirm → beta_choice → limits → stores → kyc_info → shipping_address → payment → complete
  */
 
 import { prisma } from "@payjarvis/database";
@@ -50,11 +50,11 @@ function detectLanguage(phone: string | null, firstMessage: string): Lang {
 const MSG = {
   greeting: {
     en: (referral: string) =>
-      `${referral}Hi! 👋 I'm PayJarvis, your personal shopping and research assistant.\n\n🔒 Your data is protected with Zero-Knowledge encryption. Not even we can see your sensitive information.\n\nI can help you with:\n🛒 Shop online for you\n🔍 Search and compare products\n💰 Control your spending automatically\n📋 Organize your personal tasks\n\nWhat's your name?`,
+      `${referral}Hey! I'm Jarvis, your shopping agent 🦀\n\nTell me what you're looking for and I'll find the best price across 100+ stores. I also monitor deals and alert you when prices drop.\n\nTo get started:\n🔍 Tell me a product you want\n📸 Send a photo of something you saw\n🔗 Send a link for me to track the price\n\nWhat's your name?`,
     pt: (referral: string) =>
-      `${referral}Olá! 👋 Eu sou o PayJarvis, seu assistente pessoal de compras e pesquisa.\n\n🔒 Seus dados são protegidos com criptografia Zero-Knowledge. Nem nós conseguimos ver suas informações sensíveis.\n\nEu posso te ajudar com:\n🛒 Comprar online por você\n🔍 Pesquisar e comparar produtos\n💰 Controlar seus gastos automaticamente\n📋 Organizar suas tarefas pessoais\n\nQual é o seu nome?`,
+      `${referral}Oi! Eu sou o Jarvis, seu agente de compras 🦀\n\nMe diz o que voce ta procurando e eu acho o melhor preco em 100+ lojas. Tambem monitoro promocoes e aviso quando cair.\n\nPra comecar:\n🔍 Me diz um produto que voce quer\n📸 Manda uma foto de algo que viu\n🔗 Manda um link pra eu monitorar o preco\n\nQual e o seu nome?`,
     es: (referral: string) =>
-      `${referral}¡Hola! 👋 Soy PayJarvis, tu asistente personal de compras e investigación.\n\n🔒 Tus datos están protegidos con cifrado Zero-Knowledge. Ni nosotros podemos ver tu información sensible.\n\nPuedo ayudarte con:\n🛒 Comprar online por ti\n🔍 Buscar y comparar productos\n💰 Controlar tus gastos automáticamente\n📋 Organizar tus tareas personales\n\n¿Cuál es tu nombre?`,
+      `${referral}Hola! Soy Jarvis, tu agente de compras 🦀\n\nDime lo que buscas y encuentro el mejor precio en 100+ tiendas. Tambien monitoreo ofertas y te aviso cuando bajan.\n\nPara empezar:\n🔍 Dime un producto que quieres\n📸 Manda una foto de algo que viste\n🔗 Manda un link para monitorear el precio\n\nCual es tu nombre?`,
   },
   referralIntro: {
     en: (name: string) => `Your friend ${name} invited you to try PayJarvis!\n\n`,
@@ -174,9 +174,49 @@ const MSG = {
     pt: "Agora eu consigo comprar na Amazon. Quer conectar?\n\n1️⃣ Sim — vamos configurar\n2️⃣ Depois — vou explorar primeiro",
     es: "Ahora puedo comprar en Amazon. ¿Quieres conectarla?\n\n1️⃣ Sí — vamos a configurar\n2️⃣ Después — voy a explorar primero",
   },
+  kycPrompt: {
+    en: (prefix: string) => `${prefix}To keep your account secure and enable purchases, I need a few details.\n\n🌍 What country are you in?\n\n1️⃣ US (United States)\n2️⃣ BR (Brazil)\n\nOr type "skip" to do this later.`,
+    pt: (prefix: string) => `${prefix}Para manter sua conta segura e habilitar compras, preciso de alguns dados.\n\n🌍 Em qual pais voce esta?\n\n1️⃣ US (Estados Unidos)\n2️⃣ BR (Brasil)\n\nOu digite "pular" para fazer depois.`,
+    es: (prefix: string) => `${prefix}Para mantener tu cuenta segura y habilitar compras, necesito algunos datos.\n\n🌍 ¿En qué país estás?\n\n1️⃣ US (Estados Unidos)\n2️⃣ BR (Brasil)\n\nO escribe "saltar" para hacerlo después.`,
+  },
+  kycDobPrompt: {
+    en: (country: string) => `Got it — ${country}! 🗓️ Now, what's your date of birth?\n\nFormat: MM/DD/YYYY (e.g., 03/15/1990)\n\nOr type "skip".`,
+    pt: (country: string) => `Entendi — ${country}! 🗓️ Agora, qual a sua data de nascimento?\n\nFormato: DD/MM/AAAA (ex.: 15/03/1990)\n\nOu digite "pular".`,
+    es: (country: string) => `¡Entendido — ${country}! 🗓️ Ahora, ¿cuál es tu fecha de nacimiento?\n\nFormato: DD/MM/AAAA (ej.: 15/03/1990)\n\nO escribe "saltar".`,
+  },
+  kycDocPrompt: {
+    en: "Last one — what's your ID or document number?\n\nThis helps verify your identity for purchases.\n\nOr type \"skip\".",
+    pt: "Ultimo — qual o numero do seu CPF?\n\nIsso ajuda a verificar sua identidade para compras.\n\nOu digite \"pular\".",
+    es: "Ultimo — ¿cuál es tu número de documento de identidad?\n\nEsto ayuda a verificar tu identidad para compras.\n\nO escribe \"saltar\".",
+  },
+  kycDobInvalid: {
+    en: "Invalid date. Please use MM/DD/YYYY format (e.g., 03/15/1990).\n\nOr type \"skip\".",
+    pt: "Data invalida. Use o formato DD/MM/AAAA (ex.: 15/03/1990).\n\nOu digite \"pular\".",
+    es: "Fecha invalida. Usa el formato DD/MM/AAAA (ej.: 15/03/1990).\n\nO escribe \"saltar\".",
+  },
+  kycTooYoung: {
+    en: "You must be at least 18 years old to use PayJarvis.",
+    pt: "Voce precisa ter pelo menos 18 anos para usar o PayJarvis.",
+    es: "Debes tener al menos 18 años para usar PayJarvis.",
+  },
+  kycDocInvalid: {
+    en: "That doesn't look right. Please enter a valid document number.\n\nOr type \"skip\".",
+    pt: "Isso nao parece correto. CPF deve ter 11 digitos.\n\nOu digite \"pular\".",
+    es: "Eso no parece correcto. Ingresa un número de documento válido.\n\nO escribe \"saltar\".",
+  },
+  kycComplete: {
+    en: "Profile updated! ✅\n\n",
+    pt: "Perfil atualizado! ✅\n\n",
+    es: "¡Perfil actualizado! ✅\n\n",
+  },
+  resumeKyc: {
+    en: "Let's finish your profile. What country are you in?\n\n1️⃣ US (United States)\n2️⃣ BR (Brazil)\n\nOr type \"skip\".",
+    pt: "Vamos terminar seu perfil. Em qual pais voce esta?\n\n1️⃣ US (Estados Unidos)\n2️⃣ BR (Brasil)\n\nOu digite \"pular\".",
+    es: "Terminemos tu perfil. ¿En qué país estás?\n\n1️⃣ US (Estados Unidos)\n2️⃣ BR (Brasil)\n\nO escribe \"saltar\".",
+  },
   shippingPrompt: {
     en: (prefix: string) => `${prefix}Where should I deliver your purchases? Send me your shipping address:\n\n📍 Street, City, State, ZIP code\n\n(Example: 1234 Main St, Miami, FL 33101)\n\nOr type "skip" to add later.`,
-    pt: (prefix: string) => `${prefix}Onde devo entregar suas compras? Me manda seu endereço de entrega:\n\n📍 Rua, Cidade, Estado, CEP\n\n(Exemplo: Rua das Flores 123, São Paulo, SP 01000-000)\n\nOu digite "pular" para adicionar depois.`,
+    pt: (prefix: string) => `${prefix}Onde devo entregar suas compras? Me manda seu endereço de entrega:\n\n📍 Rua, Bairro, Cidade, Estado, CEP\n\n(Exemplo: Rua das Flores 123, Centro, Sao Paulo, SP, 01000000)\n\nOu digite "pular" para adicionar depois.`,
     es: (prefix: string) => `${prefix}¿Dónde debo entregar tus compras? Envíame tu dirección de envío:\n\n📍 Calle, Ciudad, Estado, Código Postal\n\n(Ejemplo: Calle Principal 123, Ciudad de México, CDMX 06000)\n\nO escribe "saltar" para agregar después.`,
   },
   shippingTooShort: {
@@ -333,6 +373,7 @@ export async function startOnboarding(
   platform: "telegram" | "whatsapp",
   shareCode?: string,
   firstMessage?: string,
+  botNumber?: string,
 ): Promise<{ sessionId: string; message: string }> {
   const existing = platform === "telegram"
     ? await prisma.onboardingSession.findUnique({ where: { telegramChatId: chatId } })
@@ -348,9 +389,10 @@ export async function startOnboarding(
     await prisma.onboardingSession.delete({ where: { id: existing.id } });
   }
 
-  // Detect language from phone number and first message
+  // Detect language: BR bot number → always PT, otherwise from user phone/message
+  const isBrBot = botNumber?.includes("+5511") ?? false;
   const phone = platform === "whatsapp" ? chatId : null;
-  const lang = detectLanguage(phone, firstMessage ?? "");
+  const lang = isBrBot ? "pt" as Lang : detectLanguage(phone, firstMessage ?? "");
 
   let sharedByName: string | null = null;
   if (shareCode) {
@@ -414,6 +456,12 @@ export async function processStep(
       return handleLimitsStep(session.id, userInput, lang);
     case "stores":
       return handleStoresStep(session.id, userInput, lang);
+    case "kyc_info":
+      return handleKycCountryStep(session.id, userInput, lang);
+    case "kyc_dob":
+      return handleKycDobStep(session.id, userInput, lang);
+    case "kyc_doc":
+      return handleKycDocStep(session.id, userInput, lang);
     case "shipping_address":
       return handleShippingAddressStep(session.id, userInput, lang);
     case "payment":
@@ -687,7 +735,7 @@ async function handleStoresStep(sessionId: string, input: string, lang: Lang): P
 
   // "Later" / Skip / 2
   if (lower === "2" || lower === "later" || lower === "skip" || lower === "done" || lower === "pular" || lower === "pronto" || lower === "depois" || lower === "saltar" || lower === "después") {
-    return moveToShippingStep(sessionId, t("storesSkip", lang) as string, lang);
+    return moveToKycStep(sessionId, t("storesSkip", lang) as string, lang);
   }
 
   // "Yes" / 1 / Amazon
@@ -699,7 +747,7 @@ async function handleStoresStep(sessionId: string, input: string, lang: Lang): P
       data: { storesConfigured: true },
     });
 
-    return moveToShippingStep(sessionId, t("storesConnected", lang) as string, lang);
+    return moveToKycStep(sessionId, t("storesConnected", lang) as string, lang);
   }
 
   // Coming soon stores
@@ -806,6 +854,25 @@ async function connectStore(
   });
 }
 
+async function moveToKycStep(
+  sessionId: string,
+  prefix: string,
+  lang?: Lang,
+): Promise<BotResponse> {
+  const effectiveLang = lang ?? await getSessionLang(sessionId);
+
+  await prisma.onboardingSession.update({
+    where: { id: sessionId },
+    data: { step: "kyc_info" },
+  });
+
+  return {
+    message: (t("kycPrompt", effectiveLang) as (p: string) => string)(prefix),
+    step: "kyc_info",
+    complete: false,
+  };
+}
+
 async function moveToShippingStep(
   sessionId: string,
   prefix: string,
@@ -823,6 +890,198 @@ async function moveToShippingStep(
     step: "shipping_address",
     complete: false,
   };
+}
+
+// ─── Step: kyc_info (country) ──────────────────────────────
+
+async function handleKycCountryStep(sessionId: string, input: string, lang: Lang): Promise<BotResponse> {
+  const lower = input.trim().toLowerCase();
+  const session = await prisma.onboardingSession.findUnique({ where: { id: sessionId } });
+  if (!session?.userId) return { message: "Internal error.", step: "error", complete: false };
+
+  if (lower === "skip" || lower === "pular" || lower === "saltar") {
+    return moveToShippingStep(sessionId, "", lang);
+  }
+
+  let country: string | null = null;
+  if (lower === "1" || lower === "us" || lower.includes("united") || lower.includes("estados unidos") || lower.includes("eua")) {
+    country = "US";
+  } else if (lower === "2" || lower === "br" || lower.includes("brazil") || lower.includes("brasil")) {
+    country = "BR";
+  }
+
+  if (!country) {
+    return {
+      message: (t("kycPrompt", lang) as (p: string) => string)("I didn't understand. "),
+      step: "kyc_info",
+      complete: false,
+    };
+  }
+
+  await prisma.user.update({
+    where: { id: session.userId },
+    data: { country },
+  });
+
+  await prisma.onboardingSession.update({
+    where: { id: sessionId },
+    data: { step: "kyc_dob" },
+  });
+
+  return {
+    message: (t("kycDobPrompt", lang) as (c: string) => string)(country === "US" ? "United States" : "Brasil"),
+    step: "kyc_dob",
+    complete: false,
+  };
+}
+
+// ─── Step: kyc_dob ──────────────────────────────────────────
+
+function parseDateOfBirth(input: string, lang: Lang): Date | null {
+  const cleaned = input.trim().replace(/[\/\-\.]/g, "/");
+  const parts = cleaned.split("/");
+  if (parts.length !== 3) return null;
+
+  let day: number, month: number, year: number;
+
+  if (lang === "en") {
+    // MM/DD/YYYY
+    month = parseInt(parts[0]);
+    day = parseInt(parts[1]);
+    year = parseInt(parts[2]);
+  } else {
+    // DD/MM/YYYY for PT and ES
+    day = parseInt(parts[0]);
+    month = parseInt(parts[1]);
+    year = parseInt(parts[2]);
+  }
+
+  if (isNaN(day) || isNaN(month) || isNaN(year)) return null;
+  if (year < 100) year += 1900;
+  if (year < 1900 || year > 2010) return null;
+  if (month < 1 || month > 12) return null;
+  if (day < 1 || day > 31) return null;
+
+  const date = new Date(year, month - 1, day);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null;
+  return date;
+}
+
+async function handleKycDobStep(sessionId: string, input: string, lang: Lang): Promise<BotResponse> {
+  const lower = input.trim().toLowerCase();
+  const session = await prisma.onboardingSession.findUnique({ where: { id: sessionId } });
+  if (!session?.userId) return { message: "Internal error.", step: "error", complete: false };
+
+  if (lower === "skip" || lower === "pular" || lower === "saltar") {
+    return moveToKycDocOrShipping(sessionId, session.userId, lang);
+  }
+
+  const dob = parseDateOfBirth(input, lang);
+  if (!dob) {
+    return { message: t("kycDobInvalid", lang) as string, step: "kyc_dob", complete: false };
+  }
+
+  const age = (Date.now() - dob.getTime()) / (365.25 * 24 * 60 * 60 * 1000);
+  if (age < 18) {
+    return { message: t("kycTooYoung", lang) as string, step: "kyc_dob", complete: false };
+  }
+
+  await prisma.user.update({
+    where: { id: session.userId },
+    data: { dateOfBirth: dob },
+  });
+
+  return moveToKycDocOrShipping(sessionId, session.userId, lang);
+}
+
+async function moveToKycDocOrShipping(sessionId: string, userId: string, lang: Lang): Promise<BotResponse> {
+  // Check if country is BR — if so, ask for CPF. Otherwise skip doc step.
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { country: true } });
+
+  if (user?.country === "BR") {
+    await prisma.onboardingSession.update({
+      where: { id: sessionId },
+      data: { step: "kyc_doc" },
+    });
+    return {
+      message: t("kycDocPrompt", lang) as string,
+      step: "kyc_doc",
+      complete: false,
+    };
+  }
+
+  // For US or unknown, skip doc and go to shipping
+  // Auto-upgrade to BASIC if we have enough data
+  await autoUpgradeKyc(userId);
+  const prefix = t("kycComplete", lang) as string;
+  return moveToShippingStep(sessionId, prefix, lang);
+}
+
+// ─── Step: kyc_doc (CPF / document) ─────────────────────────
+
+function validateCpfOnboarding(cpf: string): boolean {
+  const digits = cpf.replace(/\D/g, "");
+  if (digits.length !== 11) return false;
+  if (/^(\d)\1+$/.test(digits)) return false;
+  let sum = 0;
+  for (let i = 0; i < 9; i++) sum += parseInt(digits[i]) * (10 - i);
+  let check = 11 - (sum % 11);
+  if (check >= 10) check = 0;
+  if (parseInt(digits[9]) !== check) return false;
+  sum = 0;
+  for (let i = 0; i < 10; i++) sum += parseInt(digits[i]) * (11 - i);
+  check = 11 - (sum % 11);
+  if (check >= 10) check = 0;
+  return parseInt(digits[10]) === check;
+}
+
+async function handleKycDocStep(sessionId: string, input: string, lang: Lang): Promise<BotResponse> {
+  const lower = input.trim().toLowerCase();
+  const session = await prisma.onboardingSession.findUnique({ where: { id: sessionId } });
+  if (!session?.userId) return { message: "Internal error.", step: "error", complete: false };
+
+  if (lower === "skip" || lower === "pular" || lower === "saltar") {
+    await autoUpgradeKyc(session.userId);
+    const prefix = t("kycComplete", lang) as string;
+    return moveToShippingStep(sessionId, prefix, lang);
+  }
+
+  const user = await prisma.user.findUnique({ where: { id: session.userId }, select: { country: true } });
+
+  if (user?.country === "BR") {
+    if (!validateCpfOnboarding(input.trim())) {
+      return { message: t("kycDocInvalid", lang) as string, step: "kyc_doc", complete: false };
+    }
+  }
+
+  const docNumber = input.trim().replace(/\D/g, "");
+  await prisma.user.update({
+    where: { id: session.userId },
+    data: { documentNumber: docNumber },
+  });
+
+  await autoUpgradeKyc(session.userId);
+  const prefix = t("kycComplete", lang) as string;
+  return moveToShippingStep(sessionId, prefix, lang);
+}
+
+async function autoUpgradeKyc(userId: string): Promise<void> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { fullName: true, dateOfBirth: true, country: true, kycLevel: true },
+  });
+  if (!user || user.kycLevel !== "NONE") return;
+
+  const hasName = user.fullName && user.fullName !== "PayJarvis User";
+  const hasDob = !!user.dateOfBirth;
+  const hasCountry = !!user.country;
+
+  if (hasName && hasDob && hasCountry) {
+    await prisma.user.update({
+      where: { id: userId },
+      data: { kycLevel: "BASIC", kycSubmittedAt: new Date(), status: "ACTIVE" },
+    });
+  }
 }
 
 // ─── Step: shipping_address ─────────────────────────────
@@ -845,13 +1104,86 @@ async function handleShippingAddressStep(sessionId: string, input: string, lang:
     };
   }
 
+  // Save as legacy text
   await prisma.user.update({
     where: { id: session.userId },
     data: { shippingAddress: address },
   });
 
+  // Try to parse and create structured UserAddress
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: session.userId },
+      select: { fullName: true, country: true, phone: true },
+    });
+    const parsed = parseAddressText(address, (user?.country as "US" | "BR") || "US");
+    if (parsed) {
+      // Remove any existing default shipping address
+      await prisma.userAddress.updateMany({
+        where: { userId: session.userId, isDefault: true },
+        data: { isDefault: false },
+      });
+      await prisma.userAddress.create({
+        data: {
+          userId: session.userId,
+          label: "Home",
+          type: "SHIPPING",
+          country: parsed.country,
+          isDefault: true,
+          fullName: user?.fullName || "User",
+          phone: user?.phone,
+          street: parsed.street,
+          complement: parsed.complement,
+          city: parsed.city,
+          state: parsed.state,
+          postalCode: parsed.postalCode,
+          neighborhood: parsed.neighborhood,
+        },
+      });
+    }
+  } catch (err) {
+    // Non-blocking — legacy text is already saved
+    console.warn("[Onboarding] Could not parse structured address:", (err as Error).message);
+  }
+
   const prefix = (t("shippingConfirm", lang) as (addr: string) => string)(address);
   return moveToPaymentStep(sessionId, session.userId, lang, prefix);
+}
+
+/**
+ * Best-effort parser for free-text addresses into structured fields.
+ * Handles common US and BR formats.
+ */
+function parseAddressText(text: string, defaultCountry: "US" | "BR"): {
+  street: string; complement?: string; city: string; state: string;
+  postalCode: string; neighborhood?: string; country: "US" | "BR";
+} | null {
+  // Try US format: "123 Main St, Miami, FL 33101"
+  const usMatch = text.match(/^(.+?),\s*(.+?),\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)$/i);
+  if (usMatch) {
+    return {
+      street: usMatch[1].trim(),
+      city: usMatch[2].trim(),
+      state: usMatch[3].toUpperCase(),
+      postalCode: usMatch[4],
+      country: "US",
+    };
+  }
+
+  // Try BR format: "Rua X 123, Bairro, Cidade, SP, 01000000" or "Rua X 123, Bairro, Cidade, SP 01000-000"
+  const brMatch = text.match(/^(.+?),\s*(.+?),\s*(.+?),\s*([A-Z]{2}),?\s*(\d{5}-?\d{3}|\d{8})$/i);
+  if (brMatch) {
+    return {
+      street: brMatch[1].trim(),
+      neighborhood: brMatch[2].trim(),
+      city: brMatch[3].trim(),
+      state: brMatch[4].toUpperCase(),
+      postalCode: brMatch[5].replace("-", ""),
+      country: "BR",
+    };
+  }
+
+  return null;
 }
 
 async function moveToPaymentStep(
@@ -1253,6 +1585,10 @@ async function getStepMessage(step: string, session: { email?: string | null; fu
       return t("resumeLimits", lang) as string;
     case "stores":
       return t("resumeStores", lang) as string;
+    case "kyc_info":
+    case "kyc_dob":
+    case "kyc_doc":
+      return t("resumeKyc", lang) as string;
     case "shipping_address":
       return t("resumeShipping", lang) as string;
     case "payment":
