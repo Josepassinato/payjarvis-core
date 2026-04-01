@@ -39,19 +39,23 @@ export default function Home() {
 
             <div className="flex flex-col items-center justify-center gap-4 sm:flex-row opacity-0 animate-fade-in-delay-3">
               <a
-                href="/sign-up"
+                href="https://t.me/Jarvis12Brain_bot"
+                target="_blank"
+                rel="noopener noreferrer"
                 className="group relative inline-flex items-center gap-2 rounded-xl bg-brand-600 px-8 py-4 font-semibold text-white shadow-lg shadow-brand-600/25 transition-all duration-300 hover:bg-brand-500 hover:shadow-brand-500/30 hover:scale-[1.03] animate-glow"
               >
-                {t("landing.ctaPrimary")}
+                {t("landing.ctaTelegram") || t("landing.ctaPrimary")}
                 <svg className="h-4 w-4 transition-transform group-hover:translate-x-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
                 </svg>
               </a>
               <a
-                href="#how-it-works"
-                className="inline-flex items-center gap-2 rounded-xl border border-gray-200 px-8 py-4 font-semibold text-gray-700 transition-all duration-300 hover:border-gray-500 hover:bg-gray-100"
+                href="https://wa.me/17547145921?text=Hi%20Jarvis!"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 rounded-xl border border-gray-200 px-8 py-4 font-semibold text-gray-700 transition-all duration-300 hover:border-green-500 hover:bg-green-50"
               >
-                {t("landing.ctaSecondary")}
+                {t("landing.ctaTrial") || "Try 7 days free on WhatsApp"}
               </a>
             </div>
           </div>

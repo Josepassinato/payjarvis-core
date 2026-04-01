@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
 import { I18nProvider } from "@/components/i18n-provider";
 import { ServiceWorkerRegister } from "@/components/sw-register";
+import { PwaInstallBanner } from "@/components/pwa-install-banner";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -50,6 +51,7 @@ export default function RootLayout({
             {children}
           </I18nProvider>
           <ServiceWorkerRegister />
+          <PwaInstallBanner />
         </body>
       </html>
     </ClerkProvider>

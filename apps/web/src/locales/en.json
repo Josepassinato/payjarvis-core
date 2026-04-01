@@ -48,11 +48,13 @@
     "pending": "Pending"
   },
   "landing": {
-    "badge": "The AI commerce platform",
-    "heroLine1": "Your AI Agent.",
-    "heroLine2": "Ready to act.",
-    "heroSub": "The only platform where AI bots can search, book, and buy — with a human always in control.",
-    "ctaPrimary": "Get Started",
+    "badge": "Free AI shopping agent",
+    "heroLine1": "Jarvis finds it.",
+    "heroLine2": "Jarvis buys it.",
+    "heroSub": "The first AI agent that actually completes purchases for you. Free on Telegram — try on WhatsApp for 7 days.",
+    "ctaPrimary": "Start Free on Telegram",
+    "ctaTelegram": "Start Free on Telegram",
+    "ctaTrial": "Try 7 days free on WhatsApp",
     "ctaSecondary": "See how it works",
     "flowUser": "You",
     "flowCommand": "command",

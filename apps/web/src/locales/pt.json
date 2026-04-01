@@ -48,11 +48,13 @@
     "pending": "Pendente"
   },
   "landing": {
-    "badge": "A plataforma de comercio IA",
-    "heroLine1": "Seu Agente IA.",
-    "heroLine2": "Pronto para agir.",
-    "heroSub": "A unica plataforma onde bots de IA podem buscar, reservar e comprar — com um humano sempre no controle.",
-    "ctaPrimary": "Comece Agora",
+    "badge": "Agente de compras IA gratis",
+    "heroLine1": "Jarvis acha.",
+    "heroLine2": "Jarvis compra.",
+    "heroSub": "O primeiro agente de IA que realmente compra pra voce. Gratis no Telegram — teste 7 dias no WhatsApp.",
+    "ctaPrimary": "Comece Gratis no Telegram",
+    "ctaTelegram": "Comece Gratis no Telegram",
+    "ctaTrial": "Teste 7 dias gratis no WhatsApp",
     "ctaSecondary": "Veja como funciona",
     "flowUser": "Voce",
     "flowCommand": "comando",

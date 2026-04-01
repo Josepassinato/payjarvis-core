@@ -199,7 +199,13 @@ export default function BillingPage() {
                   <svg className="w-4 h-4 text-brand-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                   </svg>
-                  Unlimited messages
+                  WhatsApp unlimited
+                </li>
+                <li className="flex items-center gap-2">
+                  <svg className="w-4 h-4 text-brand-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                  Phone calls with Jarvis
                 </li>
                 <li className="flex items-center gap-2">
                   <svg className="w-4 h-4 text-brand-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -211,12 +217,12 @@ export default function BillingPage() {
                   <svg className="w-4 h-4 text-brand-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                   </svg>
-                  Weekly market intelligence
+                  Priority support
                 </li>
               </ul>
             </div>
             <div className="text-right">
-              <p className="text-3xl font-bold text-gray-900">$20</p>
+              <p className="text-3xl font-bold text-gray-900">R$30</p>
               <p className="text-sm text-gray-500">/month</p>
             </div>
           </div>
@@ -227,6 +233,38 @@ export default function BillingPage() {
           >
             {actionLoading ? "Processing..." : "Upgrade to Premium"}
           </button>
+        </div>
+      )}
+
+      {/* Free Channels — always shown for non-premium */}
+      {!isPremium && (
+        <div className="rounded-xl border border-green-200 bg-green-50/50 p-6 mb-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-1">Free Forever</h2>
+          <p className="text-sm text-gray-600 mb-4">Use Jarvis for free on these channels — no limits, no credit card</p>
+          <div className="grid grid-cols-2 gap-3">
+            <a
+              href="https://t.me/Jarvis12Brain_bot"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-3 border border-green-200 rounded-lg p-4 hover:border-green-400 transition-colors bg-white"
+            >
+              <span className="text-2xl">&#x1F4AC;</span>
+              <div>
+                <p className="font-semibold text-gray-900">Telegram</p>
+                <p className="text-xs text-gray-500">Unlimited, all features</p>
+              </div>
+            </a>
+            <a
+              href="/chat"
+              className="flex items-center gap-3 border border-green-200 rounded-lg p-4 hover:border-green-400 transition-colors bg-white"
+            >
+              <span className="text-2xl">&#x1F4F1;</span>
+              <div>
+                <p className="font-semibold text-gray-900">App (PWA)</p>
+                <p className="text-xs text-gray-500">Voice chat, install as app</p>
+              </div>
+            </a>
+          </div>
         </div>
       )}
 

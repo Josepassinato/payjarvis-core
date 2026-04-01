@@ -1,7 +1,8 @@
 /**
- * Subscription Service — Jarvis Premium $20/month recurring billing.
+ * Subscription Service — Jarvis Premium R$30/month recurring billing.
  *
- * Premium subscribers get unlimited messages.
+ * Premium: WhatsApp + voice calls + unlimited messages.
+ * Free channels (Telegram, PWA) are always unlimited.
  * Uses Stripe Subscriptions + Customer Portal.
  */
 
