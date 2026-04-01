@@ -10,6 +10,7 @@ import {
   startOnboarding,
   processStep,
   hasActiveSession,
+  quickStart,
 } from "../services/onboarding-bot.service.js";
 
 const INTERNAL_SECRET = process.env.INTERNAL_SECRET || "dev-internal-secret";
@@ -67,6 +68,38 @@ export async function onboardingBotRoutes(app: FastifyInstance) {
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
       console.error("[Onboarding Bot] Step error:", msg);
+      return reply.status(500).send({ success: false, error: msg });
+    }
+  });
+
+  // POST /api/onboarding/quick-start — friction-free onboarding (name only)
+  app.post("/api/onboarding/quick-start", { preHandler: [requireInternal] }, async (request, reply) => {
+    const body = request.body as {
+      name?: string;
+      telegramChatId?: string;
+      whatsappPhone?: string;
+      language?: string;
+      shareCode?: string;
+      referrerUserId?: string;
+    };
+
+    if (!body.name || (!body.telegramChatId && !body.whatsappPhone)) {
+      return reply.status(400).send({ success: false, error: "name and telegramChatId or whatsappPhone required" });
+    }
+
+    try {
+      const result = await quickStart({
+        name: body.name,
+        telegramChatId: body.telegramChatId,
+        whatsappPhone: body.whatsappPhone,
+        language: body.language,
+        shareCode: body.shareCode,
+        referrerUserId: body.referrerUserId,
+      });
+      return { success: true, data: result };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      console.error("[Onboarding Bot] QuickStart error:", msg);
       return reply.status(500).send({ success: false, error: msg });
     }
   });

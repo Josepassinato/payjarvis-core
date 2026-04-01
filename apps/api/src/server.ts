@@ -75,6 +75,7 @@ import { adminSentinelRoutes } from "./routes/admin/admin-sentinel.js";
 import { adminCfoRoutes } from "./routes/admin/admin-cfo.js";
 import { adminResilienceRoutes } from "./routes/admin/admin-resilience.js";
 import { adminInnerCircleRoutes } from "./routes/admin/admin-inner-circle.js";
+import { adminGrowthRoutes } from "./routes/admin/admin-growth.js";
 import { mastercardRoutes } from "./routes/mastercard.routes.js";
 import { visaRoutes } from "./routes/visa.routes.js";
 import { shoppingConfigRoutes } from "./routes/shopping-config.js";
@@ -344,6 +345,7 @@ await app.register(adminSentinelRoutes);
 await app.register(adminCfoRoutes);
 await app.register(adminResilienceRoutes);
 await app.register(adminInnerCircleRoutes);
+await app.register(adminGrowthRoutes);
 
 // Static files — banners, public assets
 const publicDir = join(process.cwd(), "public");

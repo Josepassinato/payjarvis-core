@@ -1652,3 +1652,107 @@ async function notifyReferrer(shareCode: string, newUserName: string): Promise<v
     }
   }
 }
+
+// ─── Quick Start — friction-free onboarding (name only) ──
+
+/**
+ * Create a user account instantly with just a name + chatId.
+ * No email, no KYC, no password required.
+ * User can start chatting immediately.
+ * Email/KYC/payment collected later via drip sequence.
+ */
+export async function quickStart(opts: {
+  name: string;
+  telegramChatId?: string;
+  whatsappPhone?: string;
+  language?: string;
+  shareCode?: string;
+  referrerUserId?: string;
+}): Promise<{ userId: string; botId: string; isNew: boolean }> {
+  // Check if user already exists
+  if (opts.telegramChatId) {
+    const existing = await prisma.user.findFirst({ where: { telegramChatId: opts.telegramChatId } });
+    if (existing) {
+      const bot = await prisma.bot.findFirst({ where: { ownerId: existing.id } });
+      return { userId: existing.id, botId: bot?.id ?? "", isNew: false };
+    }
+  }
+  if (opts.whatsappPhone) {
+    const cleaned = opts.whatsappPhone.replace("whatsapp:", "");
+    const existing = await prisma.user.findFirst({ where: { phone: cleaned } });
+    if (existing) {
+      const bot = await prisma.bot.findFirst({ where: { ownerId: existing.id } });
+      return { userId: existing.id, botId: bot?.id ?? "", isNew: false };
+    }
+  }
+
+  // Generate synthetic email (user can update later)
+  const slug = opts.name.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 12) || "user";
+  const rand = randomBytes(3).toString("hex");
+  const syntheticEmail = `${slug}.${rand}@bot.payjarvis.io`;
+  const clerkId = `quick_${randomBytes(12).toString("hex")}`;
+
+  const user = await prisma.user.create({
+    data: {
+      clerkId,
+      email: syntheticEmail,
+      fullName: opts.name,
+      kycLevel: "NONE",
+      status: "ACTIVE",
+      onboardingStep: 5,
+      onboardingCompleted: true,
+      telegramChatId: opts.telegramChatId ?? undefined,
+      phone: opts.whatsappPhone?.replace("whatsapp:", "") ?? undefined,
+      notificationChannel: opts.telegramChatId ? "telegram" : opts.whatsappPhone ? "whatsapp" : "none",
+      botNickname: "Jarvis",
+      referredByUserId: opts.referrerUserId ?? undefined,
+    },
+  });
+
+  // Create default bot + policy + agent
+  const botId = await createDefaultBot(user.id, "Jarvis");
+
+  // Init credits (5000 free messages)
+  await initCredits(user.id, opts.referrerUserId).catch((err) => {
+    console.error(`[QuickStart] initCredits error: ${(err as Error).message}`);
+  });
+
+  // Init drip sequence (async, non-blocking)
+  const platform = opts.telegramChatId ? "telegram" : "whatsapp";
+  const chatId = opts.telegramChatId ?? opts.whatsappPhone ?? "";
+  if (chatId) {
+    initSequence(user.id, platform, chatId).catch((err) => {
+      console.error(`[QuickStart] initSequence error: ${(err as Error).message}`);
+    });
+  }
+
+  // Seed basic facts
+  if (chatId) {
+    const factId = opts.telegramChatId ?? opts.whatsappPhone ?? "";
+    try {
+      await prisma.$executeRaw`
+        INSERT INTO openclaw_user_facts (user_id, fact_key, fact_value, category, source, confidence)
+        VALUES (${factId}, 'name', ${opts.name}, 'personal', 'quick_start', 0.95)
+        ON CONFLICT (user_id, fact_key) DO UPDATE SET fact_value = ${opts.name}
+      `;
+      if (opts.language) {
+        await prisma.$executeRaw`
+          INSERT INTO openclaw_user_facts (user_id, fact_key, fact_value, category, source, confidence)
+          VALUES (${factId}, 'language', ${opts.language}, 'personal', 'quick_start', 0.9)
+          ON CONFLICT (user_id, fact_key) DO UPDATE SET fact_value = ${opts.language}
+        `;
+      }
+    } catch { /* non-critical */ }
+  }
+
+  // Process referral if applicable
+  if (opts.referrerUserId) {
+    try {
+      const { processReferral } = await import("./trial.service.js");
+      await processReferral(opts.referrerUserId, user.id);
+    } catch { /* non-critical */ }
+  }
+
+  console.log(`[QuickStart] Created user ${user.id} (${opts.name}) via ${platform}`);
+  return { userId: user.id, botId, isNew: true };
+}
