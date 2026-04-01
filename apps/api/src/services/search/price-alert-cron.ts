@@ -26,6 +26,19 @@ export function startPriceAlertCron() {
 }
 
 export async function checkPriceAlerts() {
+  // Auto-expire Deal Radar shadow alerts older than 7 days
+  try {
+    const expired = await prisma.priceAlert.updateMany({
+      where: {
+        store: { startsWith: "radar:" },
+        active: true,
+        createdAt: { lt: new Date(Date.now() - 7 * 86_400_000) },
+      },
+      data: { active: false },
+    });
+    if (expired.count > 0) console.log(`[DEAL-RADAR] Expired ${expired.count} shadow alerts (>7 days)`);
+  } catch { /* non-critical */ }
+
   const sixHoursAgo = new Date(Date.now() - CHECK_INTERVAL);
 
   const alerts = await prisma.priceAlert.findMany({
@@ -109,10 +122,21 @@ async function sendPriceAlertNotification(
 ) {
   const isWhatsApp = userId.startsWith("whatsapp:");
   const curr = data.currency === "BRL" ? "R$" : "$";
+  const isRadar = data.store.startsWith("radar:");
 
-  const message = isWhatsApp
-    ? `Alerta de preco! ${data.query}\n${curr}${data.currentPrice.toFixed(2)} na ${data.store} (meta: ${curr}${data.targetPrice.toFixed(2)})\n${data.url}`
-    : `Price alert! ${data.query}\n${curr}${data.currentPrice.toFixed(2)} at ${data.store} (target: ${curr}${data.targetPrice.toFixed(2)})\n${data.url}`;
+  let message: string;
+  if (isRadar) {
+    // Deal Radar — proactive, unsolicited alert with personality
+    const saved = Math.round(data.targetPrice / 0.9 - data.currentPrice);
+    const store = data.store.replace("radar:", "");
+    message = isWhatsApp
+      ? `🦀 Ei! Lembra do ${data.query} que voce pesquisou? Caiu pra ${curr}${data.currentPrice.toFixed(2)}${store !== "multi" ? ` na ${store}` : ""}! Economia de ${curr}${saved}!\n${data.url ? data.url + "\n" : ""}Quer comprar agora?`
+      : `🦀 Hey! Remember the ${data.query} you searched? Price dropped to ${curr}${data.currentPrice.toFixed(2)}${store !== "multi" ? ` at ${store}` : ""}! Save ${curr}${saved}!\n${data.url ? data.url + "\n" : ""}Want to buy now?`;
+  } else {
+    message = isWhatsApp
+      ? `Alerta de preco! ${data.query}\n${curr}${data.currentPrice.toFixed(2)} na ${data.store} (meta: ${curr}${data.targetPrice.toFixed(2)})\n${data.url}`
+      : `Price alert! ${data.query}\n${curr}${data.currentPrice.toFixed(2)} at ${data.store} (target: ${curr}${data.targetPrice.toFixed(2)})\n${data.url}`;
+  }
 
   if (isWhatsApp) {
     try {

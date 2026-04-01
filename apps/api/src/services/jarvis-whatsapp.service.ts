@@ -41,7 +41,7 @@ const GROK_MODEL = "grok-3-mini";
 
 const TOOL_PATTERNS = [
   /\b(buy|compra[r]?|purchase|order|checkout|carrinho|add\s+to\s+cart)\b/i,
-  /\b(search|busca[r]?|find|procura[r]?|look\s+for|recomend[ae]\w*|suggest|achei?|achar)\b/i,
+  /\b(search|busca[r]?|find|procura[r]?|look\s+for|recomend[ae]\w*|suggest|achei?|achar|checa[r]?|verifica[r]?|check)\b/i,
   /\b(track|rastre\w*|tracking|onde\s+tá|where\s+is\s+my)\b/i,
   /\b(compare|compara[r]?|comparação|mais\s+barato|cheaper|best\s+deal)\b/i,
   /\b(price|preço|preco|quanto\s+custa|how\s+much|custo|cost)\b/i,
@@ -50,7 +50,7 @@ const TOOL_PATTERNS = [
   /\b(price\s*alert|alerta\s*de\s*preço|monitor\w*\s*preço|avisa\w*\s*quando)\b/i,
   /\b(flight|voo|hotel|hostel|airbnb|restaurant|restaurante|evento|event|show|concert)\b/i,
   /\b(book|reserva[r]?|reserve|agendar|schedule|appointment|consulta)\b/i,
-  /\b(trem|train|ônibus|onibus|bus|passagem|ticket|amtrak|greyhound|flixbus)\b/i,
+  /\b(trem|train|ônibus|onibus|bus|passagem|ticket|ingresso\w*|amtrak|greyhound|flixbus)\b/i,
   /\b(rental\s+car|alugar\s+carro|uber|lyft|99|táxi|taxi)\b/i,
   /\b(direction|direção|rota|route|how\s+(do\s+i\s+)?get\s+to|como\s+chego|maps|mapa)\b/i,
   /\b(pay|pagar|pagamento|payment|cobrar|charge|stripe|paypal)\b/i,
@@ -178,11 +178,18 @@ YOUR ROLE IN THE SYSTEM
 You handle CONVERSATION — shopping advice, deal opinions, product recommendations, emotional support.
 You have a partner system (Gemini) that handles ACTIONS — searches, payments, tracking, 47+ tools.
 
-CRITICAL RULE — NEVER FABRICATE ACTIONS
-You CANNOT execute tools or searches yourself.
-When user asks for a product, deal, or action:
-→ Say "Buscando! 🦀" or "On it! 🦀" and the system routes to the action engine.
-→ NEVER pretend you searched or found results.
+CRITICAL RULE — NEVER PROMISE WHAT YOU CAN'T DELIVER
+You CANNOT execute tools, searches, or check anything yourself.
+If a user asks you to search, check, find, or buy something:
+→ NEVER say "vou buscar", "estou checando", "deixa comigo", or "Buscando!"
+→ NEVER promise a result you cannot deliver.
+→ Instead, IMMEDIATELY give useful alternatives based on your knowledge:
+  "Não consigo buscar em tempo real, mas tenta nesses sites:
+  1. [relevant site]
+  2. [relevant site]
+  3. [relevant site]
+  Quer que eu te ajude com mais alguma coisa? 🦀"
+→ If you know approximate prices or facts from training data, share them marked as "info aproximada".
 
 WHAT YOU CAN DO:
 - Shopping advice, deal opinions, product recommendations
@@ -194,11 +201,12 @@ WHAT THE SYSTEM CAN DO (offer when relevant):
 
 PROACTIVE: When conversation leads to a purchase opportunity, suggest searching.
 
-RESPONSE FORMAT RULE (TEXT vs AUDIO)
+RESPONSE FORMAT RULE (TEXT vs AUDIO) — CRITICAL
 When the message starts with [voice], you MUST add a format tag at the VERY START of your response:
-[FORMAT:TEXT] — for responses with prices, links, lists, comparisons, reports, step-by-step instructions, data tables, or anything the user needs to consult later.
-[FORMAT:AUDIO] — ONLY for casual chat ("oi", "tudo bem?", "obrigado"), short confirmations ("Pronto!", "Feito!", "Anotado!"), or when the response is 1-2 short sentences.
-If in doubt, use [FORMAT:TEXT]. Text is always safer — the user can read it again. Audio disappears.
+[FORMAT:TEXT] — for responses with prices, links, lists, site names, comparisons, reports, step-by-step instructions, data tables, tickets/ingressos, events, fallback suggestions, or anything the user needs to consult later.
+[FORMAT:AUDIO] — ONLY for casual chat ("oi", "tudo bem?", "obrigado"), short confirmations ("Pronto!", "Feito!", "Anotado!"), or when the response is 1-2 short sentences with NO data, NO prices, NO links.
+NEVER use AUDIO when the response mentions prices, links, dates, site names, or numbers. The user CANNOT click links from audio.
+If in doubt, ALWAYS use [FORMAT:TEXT]. Text is always safer — the user can read it again. Audio disappears.
 For non-voice messages (no [voice] prefix), do NOT add format tags.
 ${userProfile}
 ${longTermMemory}
@@ -679,25 +687,31 @@ You receive the transcription (prefixed with [voice]) and should respond normall
 You fully understand voice messages. Never say you can't process audio, that you only work with text, or that you can't listen.
 The user spoke to you — respond naturally as if they typed the message.
 
-RESPONSE FORMAT RULE (TEXT vs AUDIO)
+RESPONSE FORMAT RULE (TEXT vs AUDIO) — CRITICAL
 You MUST add a format tag at the VERY START of your response to voice messages:
-[FORMAT:TEXT] — ALWAYS use for: prices, links, lists (3+ items), comparisons, reports, morning briefing, step-by-step instructions, data, or anything the user needs to consult later.
-[FORMAT:AUDIO] — ONLY for: casual greetings ("oi", "tudo bem?", "obrigado"), short confirmations ("Pronto!", "Feito!", "Anotado!"), or responses of 1-2 short sentences with no data.
-NEVER use AUDIO when the response has prices, links, numbers, or technical data. Text is consultable; audio disappears.
-If in doubt, use [FORMAT:TEXT].
+[FORMAT:TEXT] — ALWAYS use for: prices, links, lists (3+ items), comparisons, reports, morning briefing, step-by-step instructions, data, tickets/ingressos, events, search results, fallback suggestions, or anything the user needs to consult later.
+[FORMAT:AUDIO] — ONLY for: casual greetings ("oi", "tudo bem?", "obrigado"), short confirmations ("Pronto!", "Feito!", "Anotado!"), or responses of 1-2 short sentences with NO data, NO prices, NO links.
+NEVER use AUDIO when the response has: prices, links, numbers, dates, site names, technical data, or search results.
+Text is consultable; audio disappears. The user CANNOT click links or copy prices from audio.
+If in doubt, ALWAYS use [FORMAT:TEXT].
 
 OTHER CAPABILITIES (dont advertise — let user discover)
 Besides shopping, you can also help with: travel, restaurants, events, home services, documents, health, finance, transport, and more. Use your tools and knowledge. When user asks something outside shopping, help naturally but bring it back to saving money when relevant. NEVER say "I cant do that" — always help using your training knowledge.
 
-FALLBACK RULE
-If ANY search tool returns an error, times out, or returns no results:
+FALLBACK RULE — NEVER PROMISE WITHOUT DELIVERING
+ABSOLUTE RULE: If you said you would search/check/find something, you MUST deliver a result.
+
+If a search tool returns results → send the results immediately.
+If a search tool returns an error, times out, or returns no results → send a USEFUL FALLBACK IMMEDIATELY:
 - NEVER just say "não foi possível", "ocorreu um erro", or "I couldn't find that"
+- NEVER say "ainda checando", "deixa comigo", or "vou verificar" without delivering something concrete
+- NEVER send 2 messages in a row promising without a result
 - ALWAYS use your training knowledge to provide the best answer you can
 - Include approximate prices marked as "preço aproximado" or "approximate price"
 - Include known retailers and direct URLs (amazon.com, bestbuy.com, mercadolivre.com.br, etc.)
 - Mark knowledge-based info as "baseado em informações recentes" or "based on recent information"
-- Example: "Os óculos Meta Ray-Ban custam aproximadamente $299. Disponível em: amazon.com, bestbuy.com, ray-ban.com/meta"
-- The user must ALWAYS get a useful answer, even if tools fail
+- Example fallback: "Não achei ingressos online agora, mas tenta nesses sites:\\n1. ticketmaster.com\\n2. stubhub.com\\n3. fifa.com/tickets\\nQuer que eu continue monitorando? 🦀"
+- The user must ALWAYS get a useful answer, even if tools fail — EVERY message must contain actionable info
 
 IMMEDIATE FEEDBACK — ACKNOWLEDGE BEFORE LONG TASKS
 When the user asks you to do something that takes more than 2 seconds (search products, make a call, generate a document, search restaurants, etc.), ALWAYS acknowledge immediately BEFORE starting the task.
@@ -1254,6 +1268,151 @@ const tools: any[] = [
           required: [],
         },
       },
+      // ─── Opção B: 12 tools migrated from OpenClaw for WhatsApp parity ───
+      {
+        name: "search_events",
+        description: "Search events, shows, concerts, sports, theater. Use for tickets/ingressos/shows/jogos/eventos.",
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            city: { type: SchemaType.STRING, description: "City (e.g. Miami, São Paulo, Orlando)" },
+            category: { type: SchemaType.STRING, description: "Category: music, sports, arts, film" },
+            keyword: { type: SchemaType.STRING, description: "Artist, team, event name" },
+            startDate: { type: SchemaType.STRING, description: "From YYYY-MM-DD" },
+            endDate: { type: SchemaType.STRING, description: "Until YYYY-MM-DD" },
+            latitude: { type: SchemaType.NUMBER, description: "User latitude (auto-injected)" },
+            longitude: { type: SchemaType.NUMBER, description: "User longitude (auto-injected)" },
+          },
+          required: [],
+        },
+      },
+      {
+        name: "compare_prices",
+        description: "Compare prices for a product across all retail platforms. Returns sorted by price with best deal highlighted.",
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            query: { type: SchemaType.STRING, description: "Product name to compare" },
+            zipCode: { type: SchemaType.STRING, description: "ZIP code for local pricing" },
+          },
+          required: ["query"],
+        },
+      },
+      {
+        name: "find_coupons",
+        description: "Find coupon codes for a store BEFORE checkout. Use when user is about to buy or asks about discounts/coupons. MANDATORY after every product search.",
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            store: { type: SchemaType.STRING, description: "Store name (amazon, walmart, target, bestbuy)" },
+            purchaseAmount: { type: SchemaType.NUMBER, description: "Purchase amount to estimate savings" },
+          },
+          required: ["store"],
+        },
+      },
+      {
+        name: "check_price_history",
+        description: "Check if a product's current price is good, normal, or high vs history. Returns 🟢 great / 🟡 normal / 🔴 high. MANDATORY after every product search.",
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            productName: { type: SchemaType.STRING, description: "Product name" },
+            currentPrice: { type: SchemaType.NUMBER, description: "Current price found" },
+            store: { type: SchemaType.STRING, description: "Store where price was found" },
+            asin: { type: SchemaType.STRING, description: "Amazon ASIN if available" },
+          },
+          required: ["productName", "currentPrice"],
+        },
+      },
+      {
+        name: "complete_reminder",
+        description: "Mark a reminder as completed by its ID. Use when user says 'done', 'feito', 'concluí', 'já fiz'.",
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            reminderId: { type: SchemaType.NUMBER, description: "The reminder ID to mark as done" },
+          },
+          required: ["reminderId"],
+        },
+      },
+      {
+        name: "find_stores",
+        description: "Find nearby retail stores and pharmacies (Walmart, Target, CVS, Walgreens, Publix, Macy's). Returns addresses, hours, phone numbers.",
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            zipCode: { type: SchemaType.STRING, description: "ZIP code to search around" },
+            platform: { type: SchemaType.STRING, description: "Specific store: walmart, target, cvs, walgreens, publix, macys. Default: all" },
+            radius: { type: SchemaType.NUMBER, description: "Search radius in miles (default 10)" },
+          },
+          required: ["zipCode"],
+        },
+      },
+      {
+        name: "request_handoff",
+        description: "Request human help when the browser encounters an obstacle (CAPTCHA, login, 2FA).",
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            sessionUrl: { type: SchemaType.STRING, description: "URL where the obstacle was found" },
+            obstacleType: { type: SchemaType.STRING, description: "Type: CAPTCHA, AUTH, NAVIGATION, OTHER" },
+            description: { type: SchemaType.STRING, description: "Description of the obstacle" },
+          },
+          required: ["sessionUrl", "obstacleType", "description"],
+        },
+      },
+      {
+        name: "search_transit",
+        description: "Search trains (Amtrak) and buses (Greyhound, FlixBus) between cities.",
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            origin: { type: SchemaType.STRING, description: "Origin city or station code" },
+            destination: { type: SchemaType.STRING, description: "Destination city or station code" },
+            date: { type: SchemaType.STRING, description: "Travel date YYYY-MM-DD" },
+            passengers: { type: SchemaType.NUMBER, description: "Number of passengers (default 1)" },
+          },
+          required: ["origin", "destination", "date"],
+        },
+      },
+      {
+        name: "search_rental_cars",
+        description: "Search for rental cars. Queries Enterprise, Turo, and Discover Cars.",
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            location: { type: SchemaType.STRING, description: "City or airport code (e.g. miami, LAX)" },
+            pickupDate: { type: SchemaType.STRING, description: "Pickup date YYYY-MM-DD" },
+            returnDate: { type: SchemaType.STRING, description: "Return date YYYY-MM-DD" },
+            carType: { type: SchemaType.STRING, description: "Car type: economy, compact, midsize, suv, luxury" },
+          },
+          required: ["location", "pickupDate", "returnDate"],
+        },
+      },
+      {
+        name: "check_prescription",
+        description: "Check prescription status at CVS or Walgreens pharmacy.",
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            rxNumber: { type: SchemaType.STRING, description: "Prescription/Rx number" },
+            platform: { type: SchemaType.STRING, description: "cvs or walgreens" },
+            lastName: { type: SchemaType.STRING, description: "Patient last name (Walgreens)" },
+            dateOfBirth: { type: SchemaType.STRING, description: "Date of birth YYYY-MM-DD (CVS)" },
+          },
+          required: ["rxNumber", "platform"],
+        },
+      },
+      {
+        name: "scan_my_subscriptions",
+        description: "Scan and list all recurring subscriptions detected from PayPal and Mercado Pago. Use when user asks about subscriptions or recurring charges.",
+        parameters: { type: SchemaType.OBJECT, properties: {}, required: [] },
+      },
+      {
+        name: "subscription_report",
+        description: "Detailed subscription spending report with total monthly/annual, most expensive, and waste detection.",
+        parameters: { type: SchemaType.OBJECT, properties: {}, required: [] },
+      },
     ],
   },
 ];
@@ -1282,6 +1441,10 @@ const TOOL_ACKNOWLEDGE: Record<string, { pt: string; en: string; es: string }> =
   web_search:            { pt: "Pesquisando na web! 🌐", en: "Searching the web! 🌐", es: "Buscando en la web! 🌐" },
   track_package:         { pt: "Rastreando seu pacote! 📦", en: "Tracking your package! 📦", es: "Rastreando tu paquete! 📦" },
   skyfire_checkout:      { pt: "Processando sua compra! 🎩💳", en: "Processing your purchase! 🎩💳", es: "Procesando tu compra! 🎩💳" },
+  search_transit:        { pt: "Buscando trens e ônibus! 🚆", en: "Searching trains and buses! 🚆", es: "Buscando trenes y buses! 🚆" },
+  search_rental_cars:    { pt: "Buscando carros pra alugar! 🚗", en: "Searching rental cars! 🚗", es: "Buscando autos de alquiler! 🚗" },
+  check_prescription:    { pt: "Verificando receita na farmácia! 💊", en: "Checking prescription status! 💊", es: "Verificando receta en farmacia! 💊" },
+  scan_my_subscriptions: { pt: "Escaneando suas assinaturas! 📋", en: "Scanning your subscriptions! 📋", es: "Escaneando tus suscripciones! 📋" },
 };
 
 async function sendToolAcknowledge(userId: string, toolName: string, userFacts: { fact_key: string; fact_value: string }[]) {
@@ -1469,6 +1632,31 @@ async function handleTool(userId: string, name: string, args: Record<string, unk
           url: p.url,
           asin: p.asin,
         }));
+
+        // ─── Deal Radar: auto-create shadow price alert for top result ───
+        const topProduct = result.products[0];
+        if (topProduct?.price && topProduct.price > 0) {
+          try {
+            // Only create if no existing alert for similar query
+            const existing = await prisma.priceAlert.findFirst({
+              where: { userId, query: { contains: (args.query as string).substring(0, 20) }, active: true },
+            });
+            if (!existing) {
+              await prisma.priceAlert.create({
+                data: {
+                  userId,
+                  query: args.query as string,
+                  store: `radar:${topProduct.store || "multi"}`,
+                  targetPrice: Math.round(topProduct.price * 0.9 * 100) / 100, // 10% below current
+                  currentPrice: topProduct.price,
+                  currency: topProduct.currency || "USD",
+                  country: (await prisma.user.findFirst({ where: { OR: [{ telegramChatId: userId }, { phone: userId.replace("whatsapp:", "") }] }, select: { country: true } }))?.country || "US",
+                },
+              });
+              console.log(`[DEAL-RADAR] Auto-alert: "${args.query}" at $${topProduct.price}, target $${(topProduct.price * 0.9).toFixed(2)} for ${userId}`);
+            }
+          } catch { /* silent — radar is best-effort */ }
+        }
 
         return {
           totalProducts: result.totalResults,
@@ -1788,6 +1976,30 @@ async function handleTool(userId: string, name: string, args: Record<string, unk
           maxResults: (args.max_results as number) ?? 3,
           userId,
         });
+
+        // ─── Deal Radar: auto-create shadow price alert for top Amazon result ───
+        const topAmz = result.products[0];
+        if (topAmz?.price && topAmz.price > 0) {
+          try {
+            const existing = await prisma.priceAlert.findFirst({
+              where: { userId, query: { contains: (args.query as string).substring(0, 20) }, active: true },
+            });
+            if (!existing) {
+              await prisma.priceAlert.create({
+                data: {
+                  userId,
+                  query: args.query as string,
+                  store: `radar:amazon`,
+                  targetPrice: Math.round(topAmz.price * 0.9 * 100) / 100,
+                  currentPrice: topAmz.price,
+                  currency: "USD",
+                  country: (await prisma.user.findFirst({ where: { OR: [{ telegramChatId: userId }, { phone: userId.replace("whatsapp:", "") }] }, select: { country: true } }))?.country || "US",
+                },
+              });
+              console.log(`[DEAL-RADAR] Auto-alert (Amazon): "${args.query}" at $${topAmz.price} for ${userId}`);
+            }
+          } catch { /* silent */ }
+        }
 
         return {
           results: result.products.map(p => ({
@@ -2802,6 +3014,229 @@ async function handleTool(userId: string, name: string, args: Record<string, unk
         };
       } catch (err) {
         return { error: `Failed to fetch recordings: ${(err as Error).message}` };
+      }
+    }
+
+    // ─── Opção B: 11 new handlers for WhatsApp parity ───
+
+    case "compare_prices": {
+      try {
+        const res = await fetch(`${PAYJARVIS_URL}/api/retail/compare`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Bot-Api-Key": BOT_API_KEY },
+          body: JSON.stringify({ query: args.query, zipCode: args.zipCode }),
+          signal: AbortSignal.timeout(30000),
+        });
+        const data = await res.json() as Record<string, unknown>;
+        return data.success ? (data.data as Record<string, unknown>) : { error: data.error || "Compare failed" };
+      } catch (err) {
+        return { error: `Retail API unavailable: ${(err as Error).message}` };
+      }
+    }
+
+    case "find_coupons": {
+      try {
+        const res = await fetch(`${PAYJARVIS_URL}/api/shopping/coupons`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ store: args.store, purchaseAmount: args.purchaseAmount || undefined }),
+          signal: AbortSignal.timeout(15000),
+        });
+        const data = await res.json() as Record<string, unknown>;
+        if (data.success && data.data) {
+          const { coupons, bestDeal } = data.data as { coupons: any[]; bestDeal: any };
+          if (!coupons || coupons.length === 0) return { found: false };
+          return {
+            found: true,
+            coupons: coupons.slice(0, 5).map((c: any) => ({
+              code: c.code, description: c.description,
+              discountType: c.discountType, discountValue: c.discountValue, verified: c.verified,
+            })),
+            bestDeal: bestDeal ? {
+              code: bestDeal.bestCoupon?.code, description: bestDeal.bestCoupon?.description,
+              estimatedSavings: bestDeal.savings,
+            } : null,
+          };
+        }
+        return { found: false };
+      } catch (err) {
+        console.error("[TOOL] find_coupons error:", (err as Error).message);
+        return { found: false };
+      }
+    }
+
+    case "check_price_history": {
+      try {
+        const res = await fetch(`${PAYJARVIS_URL}/api/shopping/price-history`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            productName: args.productName, currentPrice: args.currentPrice,
+            store: args.store || undefined, asin: args.asin || undefined,
+          }),
+          signal: AbortSignal.timeout(10000),
+        });
+        const data = await res.json() as Record<string, unknown>;
+        if (data.success && data.data) return data.data as Record<string, unknown>;
+        return { indicator: "normal", emoji: "🟡", recommendation: "Could not check price history." };
+      } catch (err) {
+        console.error("[TOOL] check_price_history error:", (err as Error).message);
+        return { indicator: "normal", emoji: "🟡", recommendation: "Price history unavailable." };
+      }
+    }
+
+    case "complete_reminder": {
+      try {
+        await prisma.$executeRaw`UPDATE openclaw_reminders SET completed = true WHERE id = ${Number(args.reminderId)}`;
+        return { success: true, reminderId: args.reminderId };
+      } catch (err) {
+        return { error: `Failed to complete reminder: ${(err as Error).message}` };
+      }
+    }
+
+    case "find_stores": {
+      try {
+        const url = args.platform
+          ? `${PAYJARVIS_URL}/api/retail/${args.platform}/stores/${args.zipCode}`
+          : `${PAYJARVIS_URL}/api/retail/stores/${args.zipCode}`;
+        const res = await fetch(url, {
+          headers: { "X-Bot-Api-Key": BOT_API_KEY },
+          signal: AbortSignal.timeout(20000),
+        });
+        const data = await res.json() as Record<string, unknown>;
+        return data.success ? (data.data as Record<string, unknown>) : { error: data.error || "Store search failed" };
+      } catch (err) {
+        return { error: `Retail API unavailable: ${(err as Error).message}` };
+      }
+    }
+
+    case "request_handoff": {
+      try {
+        const res = await fetch(`${PAYJARVIS_URL}/api/handoffs`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Bot-Api-Key": BOT_API_KEY },
+          body: JSON.stringify({
+            sessionUrl: args.sessionUrl, obstacleType: args.obstacleType, description: args.description,
+          }),
+          signal: AbortSignal.timeout(10000),
+        });
+        const data = await res.json() as Record<string, unknown>;
+        return data.success ? (data.data as Record<string, unknown>) : { error: data.error || "Handoff failed" };
+      } catch (err) {
+        return { error: `Handoff API unavailable: ${(err as Error).message}` };
+      }
+    }
+
+    case "search_transit": {
+      try {
+        const res = await fetch(`${PAYJARVIS_URL}/api/transit/search`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Bot-Api-Key": BOT_API_KEY },
+          body: JSON.stringify({
+            origin: args.origin, destination: args.destination,
+            date: args.date, passengers: args.passengers || 1,
+          }),
+          signal: AbortSignal.timeout(30000),
+        });
+        const data = await res.json() as Record<string, unknown>;
+        return data.success ? (data.data as Record<string, unknown>) : { error: data.error || "Transit search failed" };
+      } catch (err) {
+        return { error: `Transit API unavailable: ${(err as Error).message}` };
+      }
+    }
+
+    case "search_rental_cars": {
+      try {
+        const res = await fetch(`${BROWSER_AGENT_URL}/api/scrape`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            site: "enterprise", action: "searchCars",
+            params: { location: args.location, pickupDate: args.pickupDate, returnDate: args.returnDate, carType: args.carType },
+          }),
+          signal: AbortSignal.timeout(45000),
+        });
+        const data = await res.json() as Record<string, unknown>;
+        return data.success ? (data.data as Record<string, unknown>) : { error: data.error || "Rental search failed" };
+      } catch (err) {
+        return { error: `Rental car API unavailable: ${(err as Error).message}` };
+      }
+    }
+
+    case "check_prescription": {
+      try {
+        const res = await fetch(`${PAYJARVIS_URL}/api/retail/rx/status`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Bot-Api-Key": BOT_API_KEY },
+          body: JSON.stringify({
+            rxNumber: args.rxNumber, platform: args.platform,
+            lastName: args.lastName, dob: args.dateOfBirth,
+          }),
+          signal: AbortSignal.timeout(20000),
+        });
+        const data = await res.json() as Record<string, unknown>;
+        return data.success ? (data.data as Record<string, unknown>) : { error: data.error || "Rx check failed" };
+      } catch (err) {
+        return { error: `Pharmacy API unavailable: ${(err as Error).message}` };
+      }
+    }
+
+    case "scan_my_subscriptions": {
+      try {
+        const userRecord = await prisma.user.findFirst({
+          where: { OR: [{ telegramChatId: userId }, { phone: userId.replace("whatsapp:", "") }] },
+        });
+        if (!userRecord) return { error: "User not found" };
+        const res = await fetch(`${PAYJARVIS_URL}/api/subscriptions/scan`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: userRecord.id }),
+          signal: AbortSignal.timeout(30000),
+        });
+        const data = await res.json() as Record<string, unknown>;
+        if (data.success && data.data) {
+          const subs = data.data as any[];
+          if (subs.length === 0) return { subscriptions: [], message: "No subscriptions found. Connect PayPal or Mercado Pago to scan." };
+          const sumRes = await fetch(`${PAYJARVIS_URL}/api/subscriptions/${encodeURIComponent(userRecord.id)}/summary`, {
+            signal: AbortSignal.timeout(10000),
+          });
+          const sumData = await sumRes.json() as Record<string, unknown>;
+          return {
+            subscriptions: subs.map((s: any) => ({
+              id: s.id, name: s.serviceName, amount: s.amount, currency: s.currency,
+              cycle: s.billingCycle, nextBilling: s.nextBillingDate,
+              paymentMethod: s.paymentMethod, canCancel: s.canCancelViaApi, status: s.status,
+            })),
+            summary: sumData.success ? sumData.data : null,
+          };
+        }
+        return { error: "Scan failed. PayPal or Mercado Pago may not be connected." };
+      } catch (err) {
+        return { error: `Subscription scan failed: ${(err as Error).message}` };
+      }
+    }
+
+    case "subscription_report": {
+      try {
+        const userRecord = await prisma.user.findFirst({
+          where: { OR: [{ telegramChatId: userId }, { phone: userId.replace("whatsapp:", "") }] },
+        });
+        if (!userRecord) return { error: "User not found" };
+        const [sumRes, wasteRes] = await Promise.all([
+          fetch(`${PAYJARVIS_URL}/api/subscriptions/${encodeURIComponent(userRecord.id)}/summary`, { signal: AbortSignal.timeout(10000) }),
+          fetch(`${PAYJARVIS_URL}/api/subscriptions/${encodeURIComponent(userRecord.id)}/waste`, { signal: AbortSignal.timeout(10000) }),
+        ]);
+        const sumData = await sumRes.json() as Record<string, unknown>;
+        const wasteData = await wasteRes.json() as Record<string, unknown>;
+        return {
+          summary: sumData.success ? sumData.data : null,
+          waste: wasteData.success ? wasteData.data : [],
+          message: sumData.success
+            ? `Found subscriptions. Present total monthly, annual estimate, waste detected.`
+            : "Could not generate report. Try scanning first with scan_my_subscriptions.",
+        };
+      } catch (err) {
+        return { error: `Report failed: ${(err as Error).message}` };
       }
     }
 

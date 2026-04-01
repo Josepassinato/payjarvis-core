@@ -311,11 +311,20 @@ async function getTodayReminders(userId: string): Promise<ReminderInfo> {
 
 interface PriceAlertDrop { query: string; currentPrice: number; targetPrice: number; currency: string }
 
-async function getActivePriceDrops(userId: string): Promise<PriceAlertDrop[]> {
+async function getActivePriceDrops(userId: string, user?: UserWithChannel): Promise<PriceAlertDrop[]> {
   try {
+    // Search by both Prisma userId AND WhatsApp/Telegram ID (alerts stored with channel prefix)
+    const userIds = [userId];
+    if (user?.phone) {
+      const cleaned = user.phone.replace(/[^+\d]/g, "");
+      userIds.push(`whatsapp:${cleaned}`);
+      if (!cleaned.startsWith("+")) userIds.push(`whatsapp:+${cleaned}`);
+    }
+    if (user?.telegramChatId) userIds.push(user.telegramChatId);
+
     const alerts = await prisma.priceAlert.findMany({
       where: {
-        userId,
+        userId: { in: userIds },
         active: true,
         currentPrice: { not: null },
       },
@@ -426,8 +435,8 @@ async function buildWeatherSection(user: UserWithChannel, facts: Record<string, 
 async function buildAlertsSection(user: UserWithChannel, facts: Record<string, string>, lang: "pt" | "es" | "en"): Promise<string> {
   const lines: string[] = [];
 
-  // Price alert drops
-  const drops = await getActivePriceDrops(user.id);
+  // Price alert drops (search by Prisma userId + channel IDs)
+  const drops = await getActivePriceDrops(user.id, user);
   for (const d of drops) {
     const curr = d.currency === "BRL" ? "R$" : "$";
     const saved = Math.round(d.targetPrice - d.currentPrice);
@@ -437,6 +446,25 @@ async function buildAlertsSection(user: UserWithChannel, facts: Record<string, s
       lines.push(`🔥 ${d.query} dropped $${saved}! Now ${curr}${d.currentPrice.toFixed(0)}`);
     }
   }
+
+  // Deal Radar — items being monitored
+  try {
+    const radarUserIds = [user.id];
+    if (user.phone) {
+      const cl = user.phone.replace(/[^+\d]/g, "");
+      radarUserIds.push(`whatsapp:${cl}`);
+      if (!cl.startsWith("+")) radarUserIds.push(`whatsapp:+${cl}`);
+    }
+    if (user.telegramChatId) radarUserIds.push(user.telegramChatId);
+    const radarCount = await prisma.priceAlert.count({
+      where: { userId: { in: radarUserIds }, active: true, store: { startsWith: "radar:" } },
+    });
+    if (radarCount > 0 && drops.length === 0) {
+      lines.push(lang === "pt"
+        ? `🔍 Monitorando ${radarCount} produto${radarCount > 1 ? "s" : ""} pra voce`
+        : `🔍 Watching ${radarCount} product${radarCount > 1 ? "s" : ""} for price drops`);
+    }
+  } catch { /* non-critical */ }
 
   // Today's reminders (show up to 2 with text)
   const reminders = await getTodayReminders(user.id);
