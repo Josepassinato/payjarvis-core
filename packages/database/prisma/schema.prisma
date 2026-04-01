@@ -152,7 +152,13 @@ model User {
   stripeSubscriptionId   String?
   subscriptionStatus     String?    // active | past_due | canceled | trialing
   subscriptionEndsAt     DateTime?
-  planType               String     @default("free") // free | premium
+  planType               String     @default("free") // free | trial | premium
+  whatsappTrialStartsAt  DateTime?  @map("whatsapp_trial_starts_at")
+  whatsappTrialEndsAt    DateTime?  @map("whatsapp_trial_ends_at")
+  whatsappTrialExpired   Boolean    @default(false) @map("whatsapp_trial_expired")
+  referralBonusDays      Int        @default(0) @map("referral_bonus_days") // extra trial days from referrals
+  referredByUserId       String?    @map("referred_by_user_id")
+  referralCount          Int        @default(0) @map("referral_count") // how many friends signed up
   verifiedCallerId       String?    // user's verified phone for outbound caller ID
   callerIdDisclaimerAt   DateTime?  // when user accepted caller ID disclaimer
   callerIdVerifiedAt     DateTime?  // when caller ID was verified via Twilio

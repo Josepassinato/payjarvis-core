@@ -262,6 +262,28 @@ export async function whatsappWebhookRoutes(app: FastifyInstance) {
       // Respond 200 immediately to Twilio (prevents 15s timeout retry)
       reply.status(200).send({ status: "processing" });
 
+      // ─── WhatsApp Trial Paywall ───
+      try {
+        const { checkWhatsAppAccess, sendTrialExpiredMessage } = await import("../services/trial.service.js");
+        // Resolve user by phone
+        const cleanPhone = from.replace("whatsapp:", "");
+        const trialUser = await prisma.user.findFirst({
+          where: { OR: [{ phone: cleanPhone }, { phone: cleanPhone.replace("+", "") }] },
+          select: { id: true },
+        });
+        if (trialUser) {
+          const { allowed, status } = await checkWhatsAppAccess(trialUser.id, cleanPhone);
+          if (!allowed && status.trialExpired) {
+            await sendTrialExpiredMessage(cleanPhone);
+            return;
+          }
+        }
+        // No user found = new user, let through (onboarding will create trial)
+      } catch (err) {
+        request.log.error({ err: (err as Error).message }, "[WhatsApp] Trial check error — allowing through");
+        // Fail open — don't block messages on trial service errors
+      }
+
       // ─── Location message handling ───
       if (isLocation) {
         try {
