@@ -8,17 +8,14 @@ AI spending firewall and agentic commerce platform. Autonomous AI agents search,
 
 The user tells Jarvis what they want, and Jarvis finds, compares, and buys it — safely, autonomously, with full spending control.
 
-## Current Milestone: v1.0 Shopping Agent V2
+## Current Milestone: v1.1 Premium Travel
 
-**Goal:** Transform Jarvis from a price search tool into a fully autonomous shopping agent that buys, plans, and acts on behalf of the user.
+**Goal:** Combine RateHawk hotel scraping (B2B prices via Playwright) with enhanced Amadeus flight search into a unified premium travel feature for SnifferShop.
 
 **Target features:**
-- Butler Protocol — Profile Vault with AES-256 encryption for site credentials, autonomous actions via Playwright
-- Shopping Planner — Complex purchase plans with multi-store grouping, pre-orders, and user approval
-- Audio vs Text Rule — Text for data/prices/links, audio only for casual conversation or on demand
-- Ray-Ban Meta Guide — Detect smart glasses users, save user_fact, optimize responses for voice readout
-- Supabase → VPS Migration — Migrate 9 projects to local PostgreSQL, delete 14 dead projects, cancel account (-$150/month)
-- VPS Disk Optimization — Clean sandboxes, duplicate node_modules, Docker, logs (83% → <60%)
+- RateHawk hotel scraper in browser-agent (login, search, B2B price extraction via Playwright)
+- Amadeus flight search improvements (flexible dates +-3 days, price analysis)
+- Combined premium travel route /api/travel/search-premium (hotels + flights, gated by planType=premium)
 
 ## Requirements
 

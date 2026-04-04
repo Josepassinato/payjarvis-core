@@ -2,17 +2,17 @@
 
 ## Current Position
 
-Phase: 6 — Post-Migration Validation & Milestone Close
+Phase: Not started (defining requirements)
 Plan: —
-Status: MILESTONE COMPLETE — all 6 phases delivered
-Last activity: 2026-03-30 — All phases executed, smoke 17/17, build 12/12, disk 43%
+Status: Defining requirements
+Last activity: 2026-04-04 — Milestone v1.1 started
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-30)
+See: .planning/PROJECT.md (updated 2026-04-04)
 
-**Core value:** The user tells Jarvis what they want, and Jarvis finds, compares, and buys it — safely, autonomously, with full spending control.
-**Current focus:** Milestone v1.0 — Shopping Agent V2 — COMPLETE
+**Core value:** The user tells Sniffer what they want, and Sniffer finds, compares, and buys it — safely, autonomously, with full spending control.
+**Current focus:** Milestone v1.1 — Premium Travel
 
 ## Milestone Progress: 100%
 
