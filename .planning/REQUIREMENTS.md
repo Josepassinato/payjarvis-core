@@ -51,22 +51,22 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| HOTEL-01 | Pending | Pending |
-| HOTEL-02 | Pending | Pending |
-| HOTEL-03 | Pending | Pending |
-| HOTEL-04 | Pending | Pending |
-| FLIGHT-01 | Pending | Pending |
-| FLIGHT-02 | Pending | Pending |
-| FLIGHT-03 | Pending | Pending |
-| PREM-01 | Pending | Pending |
-| PREM-02 | Pending | Pending |
-| PREM-03 | Pending | Pending |
+| HOTEL-01 | Phase 7 | Pending |
+| HOTEL-02 | Phase 7 | Pending |
+| HOTEL-03 | Phase 7 | Pending |
+| HOTEL-04 | Phase 7 | Pending |
+| FLIGHT-01 | Phase 8 | Pending |
+| FLIGHT-02 | Phase 8 | Pending |
+| FLIGHT-03 | Phase 8 | Pending |
+| PREM-01 | Phase 9 | Pending |
+| PREM-02 | Phase 9 | Pending |
+| PREM-03 | Phase 9 | Pending |
 
 **Coverage:**
 - v1.1 requirements: 10 total
-- Mapped to phases: 0
-- Unmapped: 10
+- Mapped to phases: 10
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-04-04*
-*Last updated: 2026-04-04 after milestone v1.1 initialization*
+*Last updated: 2026-04-04 after roadmap creation (phases assigned)*
