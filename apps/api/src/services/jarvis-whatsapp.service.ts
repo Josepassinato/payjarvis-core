@@ -10,7 +10,7 @@
  * Also checks for active onboarding sessions before processing.
  */
 
-import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
+import { GoogleGenerativeAI, SchemaType, FunctionCallingMode } from "@google/generative-ai";
 import { prisma, Prisma } from "@payjarvis/database";
 
 const prismaDbNull = Prisma.DbNull;
@@ -25,6 +25,8 @@ import {
 import { consumeMessage } from "./credit.service.js";
 import { markActive as markSequenceActive } from "./sequence.service.js";
 import { trackInteraction, checkAndGrantAchievements } from "./engagement/gamification.service.js";
+import { validateToolResult } from "./watchdog/tool-result-validator.js";
+import { getAutoHealingPrompt } from "./watchdog/promise-tracker.js";
 
 // ─── Config ────────────────────────────────────────────
 const PAYJARVIS_URL = process.env.PAYJARVIS_URL || "http://localhost:3001";
@@ -151,70 +153,44 @@ function buildGrokSystemPrompt(
   const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
   const dayOfWeek = dayNames[new Date().getDay()];
 
-  return `You are Jarvis, the smartest shopping agent in the world. You work for ${userName}. Today: ${today} (${dayOfWeek}).
+  return `You are Sniffer 🐕, o agente de compras mais esperto e amigo do ${userName}. Hoje é ${today} (${dayOfWeek}).
 
 IDENTITY
-You are a SHOPPING AGENT — not a generic assistant. You find the best deals, compare prices, monitor products, and save ${userName} money.
+Você é Sniffer 🐕, um amigo brasileiro inteligente que adora ajudar o ${userName} a encontrar os melhores deals e economizar dinheiro.
 
-PERSONALITY — VOICE CONSISTENCY (CRITICAL)
-You MUST maintain the EXACT same voice across every message. Never change tone, style, or personality mid-conversation.
-Your voice is: Direct, confident, opinionated about deals. You LOVE saving money.
-Signature: 🦀. Catchphrases: "Achei! 🦀", "Deal found! 🦀", "Economia de $X! 🦀"
-Celebrates savings, honest about bad prices, remembers preferences.
-NEVER be generic, robotic, overly formal, or switch between different speaking styles.
-Example of GOOD voice: "Nike Air Max por $89 na Amazon 🟢 Bom preço! Manda ver? 🦀"
-Example of BAD voice: "Olá! Eu encontrei algumas opções interessantes para você. Gostaria que eu apresentasse as alternativas disponíveis?"
-You are the SAME Jarvis in every message — warm, direct, deal-obsessed, concise.
+PERSONALITY & VOICE
+- Fale como um amigo próximo: casual, direto, rápido, com contrações ("tô", "vou", "beleza", "pera aí", "tá bom", "deixa comigo", "rapidinho").
+- Seja animado quando acha um bom deal e sincero quando não vale a pena.
+- Use "..." para pausas naturais.
+- Emojis leves (🐕, 🟢, 🔥).
+- Mantenha o tom consistente: amigável, confiante e útil.
 
-${langInstruction}
-Portuguese BR, English, or Spanish — never mix languages.
+REGRA DE FEEDBACK IMEDIATO
+Sempre que o usuário pedir busca, preço, voo, comparação ou qualquer coisa que precise de ferramenta:
+→ Dê um feedback curto e natural imediatamente.
+Exemplos:
+"Ah, pera aí, vou dar uma olhada nisso pra você..."
+"Tá bom, segura aí que eu busco os melhores deals..."
+"Boa! Deixa comigo rapidinho que eu vou farejar isso..."
+"Hmm, pera um segundinho que eu verifico os preços pra você..."
 
-FORMAT: Maximum 3 lines per message. Be concise. WhatsApp truncates long messages.
-Use numbers for options, never bullets. Never explain what you're going to do — just do it.
+Depois do feedback, continue a conversa normalmente. Você não executa ferramentas — só conversa.
 
-CHANNEL: You are talking on WhatsApp.
+RESPONSE FORMAT RULE (TEXT vs AUDIO)
+When the message starts with [voice], you MUST add a format tag at the VERY START:
+[FORMAT:TEXT] — for responses with prices, links, lists, comparisons, or anything the user needs to consult later.
+[FORMAT:AUDIO] — ONLY for casual chat or short confirmations with NO data, NO prices, NO links.
+If in doubt, ALWAYS use [FORMAT:TEXT].
 
-YOUR ROLE IN THE SYSTEM
-You handle CONVERSATION — shopping advice, deal opinions, product recommendations, emotional support.
-You have a partner system (Gemini) that handles ACTIONS — searches, payments, tracking, 47+ tools.
+CRITICAL RULE
+Never reveal internal failures, technical terms, or system details to the user. Never say "erro", "tilt", "sistema", "Gemini" or similar.
 
-CRITICAL RULE — NEVER PROMISE WHAT YOU CAN'T DELIVER
-You CANNOT execute tools, searches, or check anything yourself.
-If a user asks you to search, check, find, or buy something:
-→ NEVER say "vou buscar", "estou checando", "deixa comigo", or "Buscando!"
-→ NEVER promise a result you cannot deliver.
-→ Instead, IMMEDIATELY give useful alternatives based on your knowledge:
-  "Não consigo buscar em tempo real, mas tenta nesses sites:
-  1. [relevant site]
-  2. [relevant site]
-  3. [relevant site]
-  Quer que eu te ajude com mais alguma coisa? 🦀"
-→ If you know approximate prices or facts from training data, share them marked as "info aproximada".
+Lembre sempre: você é o Sniffer 🐕 — o amigo que conversa de boa, fica animado com economias e ajuda o ${userName} a tomar boas decisões.
 
-WHAT YOU CAN DO:
-- Shopping advice, deal opinions, product recommendations
-- Budget tips, spending analysis
-- Conversation, humor, celebrating savings
-
-WHAT THE SYSTEM CAN DO (offer when relevant):
-🔍 Search 100+ stores, 📊 Price history, 🎟️ Coupons, 📦 Track packages, 💰 Manage subscriptions, 📸 Photo → price search
-
-PROACTIVE: When conversation leads to a purchase opportunity, suggest searching.
-
-RESPONSE FORMAT RULE (TEXT vs AUDIO) — CRITICAL
-When the message starts with [voice], you MUST add a format tag at the VERY START of your response:
-[FORMAT:TEXT] — for responses with prices, links, lists, site names, comparisons, reports, step-by-step instructions, data tables, tickets/ingressos, events, fallback suggestions, or anything the user needs to consult later.
-[FORMAT:AUDIO] — ONLY for casual chat ("oi", "tudo bem?", "obrigado"), short confirmations ("Pronto!", "Feito!", "Anotado!"), or when the response is 1-2 short sentences with NO data, NO prices, NO links.
-NEVER use AUDIO when the response mentions prices, links, dates, site names, or numbers. The user CANNOT click links from audio.
-If in doubt, ALWAYS use [FORMAT:TEXT]. Text is always safer — the user can read it again. Audio disappears.
-For non-voice messages (no [voice] prefix), do NOT add format tags.
 ${userProfile}
 ${longTermMemory}
-
-RAY-BAN META GLASSES
-${userFacts.some((f) => f.fact_key === "has_meta_glasses" && f.fact_value === "true") ? `The user has Ray-Ban Meta smart glasses. Shopping responses MUST be ULTRA-SHORT (max 2 lines) so the glasses can read them aloud. Send details and links in a SEPARATE follow-up message.` : ""}
-
-Remember: you're Jarvis — the shopping agent that saves money. Not a generic chatbot. 🦀`;
+${langInstruction}
+${userFacts.some((f) => f.fact_key === "has_meta_glasses" && f.fact_value === "true") ? `\nRAY-BAN META GLASSES\nThe user has Ray-Ban Meta smart glasses. Shopping responses MUST be ULTRA-SHORT (max 2 lines) so the glasses can read them aloud. Send details and links in a SEPARATE follow-up message.` : ""}`;
 }
 
 async function chatWithGrokApi(
@@ -343,7 +319,7 @@ function buildSystemPrompt(userFacts: { fact_key: string; fact_value: string }[]
   const dayOfWeek = dayNames[today.getDay()];
   const tomorrowStr = new Date(today.getTime() + 86400000).toISOString().split("T")[0];
 
-  return `You are Jarvis, the smartest shopping agent in the world. You work for ${userName}.
+  return `You are Sniffer, the smartest shopping agent in the world. You work for ${userName}.
 
 IDENTITY
 You are a SHOPPING AGENT. Your mission: help ${userName} never overpay for anything.
@@ -384,12 +360,12 @@ NEVER give up. If one tool fails, try another.
 PERSONALITY — VOICE CONSISTENCY (CRITICAL)
 You MUST maintain the EXACT same voice across every message. Never change tone, style, or personality mid-conversation.
 Your voice is: Direct, confident, opinionated about deals. You LOVE saving money.
-Signature: 🦀. Catchphrases: "Achei! 🦀", "Deal found! 🦀", "Economia de $X! 🦀"
+Signature: 🐕. Catchphrases: "Achei! 🐕", "Deal bom demais! 🐕", "Economia de $X! 🐕"
 Celebrates savings, honest about bad prices, remembers preferences.
 NEVER be generic, robotic, overly formal, or switch between different speaking styles.
-Example of GOOD voice: "Nike Air Max 90 — $89 na Amazon 🟢 Bom preco! $30 abaixo da media. 🎟️ Cupom SAVE10 = $80 final. Manda ver? 🦀"
+Example of GOOD voice: "Nike Air Max 90 — $89 na Amazon 🟢 Tá bom esse preço! $30 abaixo da média. 🎟️ Cupom SAVE10 = $80 final. Manda ver? 🐕"
 Example of BAD voice: "Olá! Eu encontrei algumas opções interessantes para você. Gostaria que eu apresentasse as alternativas disponíveis?"
-You are the SAME Jarvis in every message — warm, direct, deal-obsessed, concise.
+You are the SAME Sniffer in every message — warm, direct, deal-obsessed, concise.
 
 Priorities:
 1. Best price — always find cheapest
@@ -518,7 +494,7 @@ CONTEXTUAL PERSONALITY TRIGGERS:
 - If user searched same product 3+ times: "Compra logo! 😂 Tô vendo você olhar isso toda hora!"
 - If user mentions birthday/anniversary: celebrate enthusiastically "🎂🎉 Parabéns! Quer que eu busque algo especial pra comemorar?"
 - If it's a holiday (Christmas, New Year, Valentine's, Mother's/Father's Day): add festive context
-- Use 🦀 naturally as your signature emoji — you're Jarvis, the crab is your thing!
+- Use 🐕 naturally as your signature emoji — you're Sniffer, the dog is your thing!
 
 IMAGE ANALYSIS
 When the user sends an image (photo), ALWAYS analyze it thoroughly.
@@ -676,7 +652,7 @@ If the user hasn't set up their vault yet, guide them to create a PIN first usin
 
 SHARING
 When the user wants to share, invite, refer friends, or asks for a QR code or link:
-→ ASK which channel FIRST: "Pra onde mando o convite? 🦀\\n1️⃣ WhatsApp Brasil\\n2️⃣ WhatsApp EUA\\n3️⃣ Telegram"
+→ ASK which channel FIRST: "Pra onde mando o convite? 🐕\\n1️⃣ WhatsApp Brasil\\n2️⃣ WhatsApp EUA\\n3️⃣ Telegram"
 → Then call share_jarvis with the correct channel: whatsapp_br, whatsapp_us, or telegram.
 → SHORTCUT: If you already know the user is BR (from phone prefix +55 or country fact), skip question and use whatsapp_br. If US (+1), use whatsapp_us. But ALWAYS offer: "Quer mandar pra outro canal? Me diz!"
 → The link and QR Code are sent automatically. Their friend gets free Beta access.
@@ -703,14 +679,16 @@ ABSOLUTE RULE: If you said you would search/check/find something, you MUST deliv
 
 If a search tool returns results → send the results immediately.
 If a search tool returns an error, times out, or returns no results → send a USEFUL FALLBACK IMMEDIATELY:
-- NEVER just say "não foi possível", "ocorreu um erro", or "I couldn't find that"
+- NEVER just say "não foi possível", "ocorreu um erro", "I couldn't find that", "deu tilt", "problema técnico", "não consegui", "sistema deu erro", "houve um problema", "deu um pequeno tilt"
 - NEVER say "ainda checando", "deixa comigo", or "vou verificar" without delivering something concrete
 - NEVER send 2 messages in a row promising without a result
+- NEVER reveal internal failures to the user — the user must NEVER know something failed internally
 - ALWAYS use your training knowledge to provide the best answer you can
 - Include approximate prices marked as "preço aproximado" or "approximate price"
 - Include known retailers and direct URLs (amazon.com, bestbuy.com, mercadolivre.com.br, etc.)
 - Mark knowledge-based info as "baseado em informações recentes" or "based on recent information"
-- Example fallback: "Não achei ingressos online agora, mas tenta nesses sites:\\n1. ticketmaster.com\\n2. stubhub.com\\n3. fifa.com/tickets\\nQuer que eu continue monitorando? 🦀"
+- When you don't have exact real-time data, frame it positively: "Aqui vão as melhores opções:" and give useful results from your knowledge
+- Example fallback: "Não achei preços exatos agora, mas aqui vão as melhores opções:\\n1. amazon.com — geralmente o menor preço\\n2. bestbuy.com — frequentes promoções\\n3. mercadolivre.com.br — opções com frete grátis\\nQuer que eu monitore preços? 🐕"
 - The user must ALWAYS get a useful answer, even if tools fail — EVERY message must contain actionable info
 
 IMMEDIATE FEEDBACK — ACKNOWLEDGE BEFORE LONG TASKS
@@ -768,18 +746,18 @@ const tools: any[] = [
       },
       {
         name: "search_hotels",
-        description: "Search for hotels (Amadeus).",
+        description: "Search for hotels with REAL prices and booking links. Use when user asks for hotel, hospedagem, pousada, resort, or accommodation. Pass the city name in plain text (e.g. 'Balneário Camboriú', 'Miami Beach').",
         parameters: {
           type: SchemaType.OBJECT,
           properties: {
-            city: { type: SchemaType.STRING, description: "City IATA code (optional if using coordinates)" },
+            city: { type: SchemaType.STRING, description: "City name in plain text (e.g. 'Balneário Camboriú', 'Miami Beach', 'Paris')" },
             checkIn: { type: SchemaType.STRING, description: "YYYY-MM-DD" },
             checkOut: { type: SchemaType.STRING, description: "YYYY-MM-DD" },
             adults: { type: SchemaType.NUMBER, description: "Number of adults" },
             latitude: { type: SchemaType.NUMBER, description: "User latitude (auto-injected)" },
             longitude: { type: SchemaType.NUMBER, description: "User longitude (auto-injected)" },
           },
-          required: ["checkIn", "checkOut"],
+          required: ["city", "checkIn", "checkOut"],
         },
       },
       {
@@ -920,18 +898,18 @@ const tools: any[] = [
       },
       {
         name: "share_jarvis",
-        description: "Generate a referral link so the user can invite friends to Jarvis. IMPORTANT: ASK which channel first (WhatsApp Brasil, WhatsApp EUA, or Telegram) unless you already know their country from phone prefix or facts. Use whatsapp_br for BR users, whatsapp_us for US users.",
+        description: "Generate referral links so the user can invite friends to Sniffer. Sends ALL channels (WhatsApp BR, WhatsApp US, Telegram, Web) in one message. Do NOT ask which channel — send all at once.",
         parameters: {
           type: SchemaType.OBJECT,
           properties: {
-            channel: { type: SchemaType.STRING, description: "Channel: 'whatsapp_br' (Brazil +55), 'whatsapp_us' (USA +1), or 'telegram'. ASK user if not clear." },
+            channel: { type: SchemaType.STRING, description: "Optional. Auto-detected from phone. Leave empty to send all channels." },
           },
-          required: ["channel"],
+          required: [],
         },
       },
       {
         name: "set_price_alert",
-        description: "Set a price alert. Jarvis checks every 6 hours and notifies when price drops below target. Use when user says 'alert me', 'avisa quando', 'notify me when price drops'.",
+        description: "Set a price alert. Sniffer checks every 6 hours and notifies when price drops below target. Use when user says 'alert me', 'avisa quando', 'notify me when price drops'.",
         parameters: {
           type: SchemaType.OBJECT,
           properties: {
@@ -1080,7 +1058,7 @@ const tools: any[] = [
       },
       {
         name: "verify_caller_id",
-        description: "Verify the user's phone number so it appears as caller ID when Jarvis makes calls on their behalf. Twilio will call the user with a 6-digit verification code. Use when the user wants their number to show up on outgoing calls.",
+        description: "Verify the user's phone number so it appears as caller ID when Sniffer makes calls on their behalf. Twilio will call the user with a 6-digit verification code. Use when the user wants their number to show up on outgoing calls.",
         parameters: {
           type: SchemaType.OBJECT,
           properties: {
@@ -2441,7 +2419,7 @@ async function handleTool(userId: string, name: string, args: Record<string, unk
           body: JSON.stringify({
             userId,
             to: userPhone.startsWith("+") ? userPhone : `+${userPhone}`,
-            businessName: "Jarvis Live Call",
+            businessName: "Sniffer Live Call",
             objective: "live_conversation",
             details: `Live voice call with user. Reason: ${args.reason || "user requested"}. Use ALL tools available. Keep responses SHORT (1-2 sentences). When user says bye/tchau/obrigado, end the call gracefully.`,
             language: "en",
@@ -3385,9 +3363,9 @@ async function generateShareForWhatsApp(userId: string, channel: string | null):
   const hasCard = existsSync(cardFilePath);
   const mediaUrl = hasCard ? cardPublicUrl : `${PUBLIC_BASE}/public/qr/${qrFileName}`;
 
-  // Always include both WA links so the invitee picks the right one for their country
-  const bodyPt = `📲 *Seu link de convite:*\n\n🇧🇷 Brasil: ${whatsappBrLink}\n🇺🇸 EUA: ${whatsappUsLink}\n\nSeu amigo(a) ganha acesso Beta grátis ao Jarvis!\nQuer mandar via Telegram? Me diz!`;
-  const bodyEn = `📲 *Your referral link:*\n\n🇧🇷 Brazil: ${whatsappBrLink}\n🇺🇸 USA: ${whatsappUsLink}\n\nYour friend gets free Beta access!\nWant to send via Telegram? Let me know!`;
+  // Send ALL links in one message — user picks which to share
+  const bodyPt = `📲 *Links de indicação:*\n\n🇧🇷 WhatsApp Brasil: ${whatsappBrLink}\n🇺🇸 WhatsApp EUA: ${whatsappUsLink}\n💬 Telegram: ${telegramLink}\n🌐 Web: ${webLink}\n\nSeu amigo(a) ganha acesso Beta grátis ao Sniffer! 🐕`;
+  const bodyEn = `📲 *Referral links:*\n\n🇧🇷 WhatsApp Brazil: ${whatsappBrLink}\n🇺🇸 WhatsApp USA: ${whatsappUsLink}\n💬 Telegram: ${telegramLink}\n🌐 Web: ${webLink}\n\nYour friend gets free Beta access to Sniffer! 🐕`;
 
   await client.messages.create({
     from: fromNumber,
@@ -3396,13 +3374,13 @@ async function generateShareForWhatsApp(userId: string, channel: string | null):
     mediaUrl: [mediaUrl],
   });
 
-  console.log(`[WA SHARE] Generated referral for ${userId}: ${code} → ${primaryLink} (channel: ${resolvedChannel}, card: ${hasCard}, lang: ${lang})`);
+  console.log(`[WA SHARE] Generated referral for ${userId}: ${code} → all channels (card: ${hasCard}, lang: ${lang})`);
 
   return {
     success: true,
     code,
     link: primaryLink,
-    channel: resolvedChannel,
+    channel: "all",
     whatsappBrLink,
     whatsappUsLink,
     telegramLink,
@@ -3410,8 +3388,8 @@ async function generateShareForWhatsApp(userId: string, channel: string | null):
     cardSent: hasCard,
     qrCodeSent: !hasCard,
     message: isPt
-      ? `Link de convite gerado e enviado via ${channelLabel}! Seu amigo(a) ganha acesso Beta grátis ao Jarvis. Quer mandar pra outro canal? Me diz!`
-      : `Referral link generated and sent via ${channelLabel}! Your friend gets free Beta access to Jarvis. Want to send via another channel? Let me know!`,
+      ? `Links de indicação enviados! Todos os canais numa mensagem só. Seu amigo(a) ganha acesso Beta grátis ao Sniffer! 🐕`
+      : `Referral links sent! All channels in one message. Your friend gets free Beta access to Sniffer! 🐕`,
   };
 }
 
@@ -3437,7 +3415,7 @@ export async function chatWithGemini(
   options: { glassesMode?: boolean } = {}
 ): Promise<string> {
   if (!GEMINI_API_KEY) {
-    return "Jarvis is temporarily unavailable. Please try again in a moment.";
+    return "Sniffer is temporarily unavailable. Please try again in a moment.";
   }
 
   // ─── LLM Router: Grok for conversation, Gemini for tools ───
@@ -3455,7 +3433,15 @@ export async function chatWithGemini(
   _currentUserFacts = userFacts;
 
   const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-  const systemPrompt = buildSystemPrompt(userFacts, options);
+  let systemPrompt = buildSystemPrompt(userFacts, options);
+
+  // Watchdog auto-healing: inject warning when recent failures detected
+  try {
+    const healingPrompt = await getAutoHealingPrompt();
+    if (healingPrompt) {
+      systemPrompt += `\n\n${healingPrompt}`;
+    }
+  } catch { /* non-blocking */ }
 
   const model = genAI.getGenerativeModel({
     model: "gemini-2.5-flash",
@@ -3508,6 +3494,8 @@ export async function chatWithGemini(
       }
       // Sanitize
       toolResult = JSON.parse(JSON.stringify(toolResult));
+      // Watchdog: validate tool result — inject fallback for empty/failed results
+      toolResult = validateToolResult(call.name, toolResult, userMessage);
       console.log(`[WA TOOL] ${call.name} =>`, JSON.stringify(toolResult).substring(0, 150));
 
       // Inject strong fallback directive when search tools fail
@@ -3568,7 +3556,7 @@ export async function chatWithGeminiMultimodal(
   userFacts: { fact_key: string; fact_value: string }[]
 ): Promise<string> {
   if (!GEMINI_API_KEY) {
-    return "Jarvis is temporarily unavailable. Please try again in a moment.";
+    return "Sniffer is temporarily unavailable. Please try again in a moment.";
   }
 
   // Store user facts for tool acknowledge messages (BUG 2 fix)
@@ -3581,11 +3569,26 @@ export async function chatWithGeminiMultimodal(
   const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
   const systemPrompt = buildSystemPrompt(userFacts);
 
+  // Detect product/buy intent in caption to force tool calling
+  const PRODUCT_INTENT_RE = /\b(compra|buy|purchase|price|preço|preco|quanto custa|how much|busca|search|procur|find|quero|want|achar|onde|where|cheapest|barato|melhor preço|best price|deal|oferta|desconto|discount)\b/i;
+  const hasProductIntent = PRODUCT_INTENT_RE.test(userMessage || "");
+
   const model = genAI.getGenerativeModel({
     model: "gemini-2.5-flash",
     systemInstruction: systemPrompt,
     tools,
+    ...(hasProductIntent ? {
+      toolConfig: {
+        functionCallingConfig: {
+          mode: FunctionCallingMode.ANY,
+        },
+      },
+    } : {}),
   });
+
+  if (hasProductIntent) {
+    console.log(`[WA IMAGE] Product intent detected in caption, forcing tool calling mode`);
+  }
 
   const parts: ({ inlineData: { mimeType: string; data: string } } | { text: string })[] = [
     { inlineData: { mimeType: imageMimeType, data: imageBase64 } },
@@ -3627,7 +3630,7 @@ export async function chatWithGeminiMultimodal(
     const elapsed = Date.now() - startTime;
     if (elapsed > MULTIMODAL_TIMEOUT_MS) {
       console.warn(`[WA IMAGE] Total timeout exceeded (${elapsed}ms, ${iterations} iters). Returning partial.`);
-      return lastGoodText || "Identifiquei o produto na imagem mas a busca demorou demais. Me diz o nome do produto que eu busco rapidinho! 🦀";
+      return lastGoodText || "Identifiquei o produto na imagem mas a busca demorou demais. Me diz o nome do produto que eu busco rapidinho! 🐕";
     }
 
     const functionCalls = response.functionCalls()!;
@@ -3672,14 +3675,69 @@ export async function chatWithGeminiMultimodal(
       } catch { /* only function calls, no text — ignore */ }
     } catch (err) {
       console.error(`[WA IMAGE] Error sending function response: ${(err as Error).message}`);
-      return lastGoodText || "Erro ao processar os resultados da busca. Tenta de novo! 🦀";
+      return lastGoodText || "Erro ao processar os resultados da busca. Tenta de novo! 🐕";
+    }
+  }
+
+  // ─── Post-hoc product search fallback ─────────────────────
+  // When the model analyzes an image but doesn't call search_products,
+  // detect if a product was identified and force a search
+  if (iterations === 0) {
+    const textSoFar = response.text() || lastGoodText || "";
+    const combinedText = `${userMessage || ""} ${textSoFar}`.toLowerCase();
+
+    // Broad product signals: caption has buy intent OR model response mentions product-like terms
+    const PRODUCT_SIGNALS_RE = /\b(compra|buy|purchase|price|preço|preco|quanto|how much|busca|search|procur|find|quero|want|product|produto|perfume|cologne|fragrance|phone|laptop|shoe|tênis|sneaker|headphone|watch|relógio|câmera|camera|tablet|tv|monitor|speaker|earbuds|cosmetic|makeup|skincare|creme|loção|shampoo|supplement|vitamin)\b/i;
+
+    if (PRODUCT_SIGNALS_RE.test(combinedText) && textSoFar.length > 10) {
+      console.log(`[WA IMAGE] 0 tool iterations but product signals detected. Running post-hoc search...`);
+
+      try {
+        const elapsed = Date.now() - startTime;
+        if (elapsed < MULTIMODAL_TIMEOUT_MS - 15_000) { // Need at least 15s remaining
+          // Extract product name from model's visual analysis
+          const extractModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+          const extractResult = await extractModel.generateContent(
+            `Extract ONLY the product name from this text for an e-commerce search query. Return ONLY the product name (brand + model), nothing else. No quotes, no explanation.\n\nUser said: "${userMessage}"\nImage analysis: "${textSoFar.substring(0, 500)}"`
+          );
+          const productQuery = extractResult.response.text().trim().replace(/^["']|["']$/g, "");
+
+          if (productQuery && productQuery.length > 2 && productQuery.length < 150) {
+            console.log(`[WA IMAGE] Post-hoc search query: "${productQuery}"`);
+
+            // Run the actual product search
+            const searchResult = await Promise.race([
+              handleTool(userId, "search_products", { query: productQuery, max_results: 5 }),
+              new Promise<Record<string, unknown>>((_, reject) =>
+                setTimeout(() => reject(new Error("Post-hoc search timeout")), TOOL_TIMEOUT_MS)
+              ),
+            ]);
+
+            // Send search results back to the model for a combined response
+            const searchJson = JSON.stringify(searchResult).substring(0, 4000);
+            const finalResult = await chatSession.sendMessage(
+              `I searched for "${productQuery}" and found these results:\n${searchJson}\n\nPresent these search results to the user alongside your image analysis. Include prices and links. Be concise — the user is on WhatsApp.`
+            );
+
+            const finalText = finalResult.response.text();
+            if (finalText) {
+              const duration = Date.now() - startTime;
+              console.log(`[WA IMAGE] Completed with post-hoc search in ${duration}ms`);
+              return finalText;
+            }
+          }
+        }
+      } catch (err) {
+        console.error(`[WA IMAGE] Post-hoc search failed: ${(err as Error).message}`);
+        // Fall through to return the original text response
+      }
     }
   }
 
   const text = response.text();
   const duration = Date.now() - startTime;
   console.log(`[WA IMAGE] Completed in ${duration}ms (${iterations} tool iterations)`);
-  return text || lastGoodText || "Analisei a imagem mas não consegui gerar uma resposta. Tenta de novo! 🦀";
+  return text || lastGoodText || "Analisei a imagem mas não consegui gerar uma resposta. Tenta de novo! 🐕";
 }
 
 // ─── Fact Extraction (background) ──────────────────────
@@ -3939,32 +3997,32 @@ export async function processWhatsAppMessage(from: string, text: string, botNumb
         const guide = lang === "pt"
           ? `Voce tem Ray-Ban Meta? Perfeito! 😎
 
-Pode usar o Jarvis direto pelo oculos:
+Pode usar o Sniffer direto pelo oculos:
 
-🎙️ "Hey Meta, send message to Jarvis: busca tenis Nike"
-📸 Tire foto de um produto → "Hey Meta, send that to Jarvis"
-🛒 "Hey Meta, tell Jarvis: compra o perfume"
+🎙️ "Hey Meta, send message to Sniffer: busca tenis Nike"
+📸 Tire foto de um produto → "Hey Meta, send that to Sniffer"
+🛒 "Hey Meta, tell Sniffer: compra o perfume"
 
-Salva meu numero como "Jarvis" nos contatos e pronto! 🦀`
+Salva meu numero como "Sniffer" nos contatos e pronto! 🐕`
           : lang === "es"
           ? `Tienes Ray-Ban Meta? Perfecto! 😎
 
-Puedes usar Jarvis directo desde los lentes:
+Puedes usar Sniffer directo desde los lentes:
 
-🎙️ "Hey Meta, send message to Jarvis: busca tenis Nike"
-📸 Toma foto de un producto → "Hey Meta, send that to Jarvis"
-🛒 "Hey Meta, tell Jarvis: compra el perfume"
+🎙️ "Hey Meta, send message to Sniffer: busca tenis Nike"
+📸 Toma foto de un producto → "Hey Meta, send that to Sniffer"
+🛒 "Hey Meta, tell Sniffer: compra el perfume"
 
-Guarda mi numero como "Jarvis" en contactos y listo! 🦀`
+Guarda mi numero como "Sniffer" en contactos y listo! 🐕`
           : `You have Ray-Ban Meta? Perfect! 😎
 
-You can use Jarvis directly from your glasses:
+You can use Sniffer directly from your glasses:
 
-🎙️ "Hey Meta, send message to Jarvis: find Nike shoes"
-📸 Take a photo of a product → "Hey Meta, send that to Jarvis"
-🛒 "Hey Meta, tell Jarvis: buy the perfume"
+🎙️ "Hey Meta, send message to Sniffer: find Nike shoes"
+📸 Take a photo of a product → "Hey Meta, send that to Sniffer"
+🛒 "Hey Meta, tell Sniffer: buy the perfume"
 
-Save my number as "Jarvis" in your contacts and you're set! 🦀`;
+Save my number as "Sniffer" in your contacts and you're set! 🐕`;
 
         await saveMessage(userId, "user", text);
         await saveMessage(userId, "model", guide);
@@ -4159,9 +4217,9 @@ Save my number as "Jarvis" in your contacts and you're set! 🦀`;
         console.error("[WA AUTO-ONBOARD] Error:", (err as Error).message);
         // Fallback welcome if onboarding service fails
         if (isBrBot) {
-          return "Oi! Eu sou o Jarvis, seu assistente de compras inteligente 🦀\n\nAcho o melhor preço em centenas de lojas, monitoro promoções e aviso quando cair. Tudo pelo WhatsApp!\n\nPra começar:\n🔍 Me diz um produto que você quer\n📸 Manda uma foto de algo que viu\n🛒 Me pede uma lista de supermercado\n\nQual é o seu nome? 🦀";
+          return "Oi! Eu sou o Sniffer, seu farejador de ofertas 🐕\n\nFarejo o melhor preço em centenas de lojas, monitoro promoções e aviso quando cair. Tudo pelo WhatsApp!\n\nPra começar:\n🔍 Me diz um produto que você quer\n📸 Manda uma foto de algo que viu\n🛒 Me pede uma lista de supermercado\n\nQual é o seu nome? 🐕";
         }
-        return "Hi! I'm Jarvis, your smart shopping assistant 🦀\n\nI find the best prices across hundreds of stores, monitor deals, and alert you when prices drop. All via WhatsApp!\n\nTo get started:\n🔍 Tell me a product you want\n📸 Send a photo of something you saw\n🛒 Ask me for a grocery list\n\nWhat's your name? 🦀";
+        return "Hi! I'm Sniffer, your deal-hunting agent 🐕\n\nI sniff out the best prices across hundreds of stores, monitor deals, and alert you when prices drop. All via WhatsApp!\n\nTo get started:\n🔍 Tell me a product you want\n📸 Send a photo of something you saw\n🛒 Ask me for a grocery list\n\nWhat's your name? 🐕";
       }
     }
   }
