@@ -278,6 +278,63 @@ export async function voiceRoutes(app: FastifyInstance) {
     return reply.send({ success: true, call });
   });
 
+  // ─── GET /api/voice/history — List calls for a user ───
+
+  app.get("/api/voice/history", async (request: FastifyRequest, reply: FastifyReply) => {
+    const secret = request.headers["x-internal-secret"] as string;
+    if (secret !== INTERNAL_SECRET) {
+      return reply.status(401).send({ error: "unauthorized" });
+    }
+
+    const { userId, hours } = request.query as { userId: string; hours?: string };
+    if (!userId) {
+      return reply.status(400).send({ error: "Missing userId query param" });
+    }
+
+    const hoursBack = Math.min(parseInt(hours || "24", 10) || 24, 720); // max 30 days
+
+    try {
+      const calls = await prisma.$queryRaw<{
+        id: string;
+        to: string;
+        from: string;
+        business_name: string;
+        objective: string;
+        status: string;
+        result: string | null;
+        duration: number | null;
+        created_at: Date;
+      }[]>`
+        SELECT id, "to", "from", business_name, objective, status, result, duration, created_at
+        FROM voice_calls
+        WHERE user_id = ${userId}
+          AND created_at > now() - make_interval(hours => ${hoursBack}::int)
+        ORDER BY created_at DESC
+        LIMIT 50
+      `;
+
+      return reply.send({
+        success: true,
+        count: calls.length,
+        hours: hoursBack,
+        calls: calls.map(c => ({
+          id: c.id,
+          to: c.to,
+          from: c.from,
+          business: c.business_name,
+          objective: c.objective,
+          status: c.status,
+          result: c.result,
+          duration: c.duration ? `${Math.floor(c.duration / 60)}m${c.duration % 60}s` : null,
+          durationSec: c.duration,
+          date: c.created_at,
+        })),
+      });
+    } catch (err) {
+      return reply.status(500).send({ success: false, error: (err as Error).message });
+    }
+  });
+
   // ─── Contact Management Endpoints ──────────────────
 
   // POST /api/voice/contacts — Save a contact

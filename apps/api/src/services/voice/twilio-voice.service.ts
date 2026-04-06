@@ -820,6 +820,7 @@ export async function makeCall(params: {
   const lang = language || "en";
   const targetName = params.targetName || businessName || "the recipient";
 
+
   // Build briefing if caller identity provided
   let briefing: CallBriefing | undefined;
   if (params.callerIdentity || params.keyMessages) {
@@ -1288,34 +1289,43 @@ export async function handleStatusCallback(callId: string, status: string, durat
   if (status === "completed" || status === "busy" || status === "no-answer" || status === "failed" || status === "canceled") {
     if (call) {
       // ── In-memory path (normal flow) ──
-      // Generate summary if not done yet
-      if (!call.completed) {
-        call.completed = true;
-        if (call.transcript.length > 0 && !call.result) {
-          call.result = await generateCallSummary(call);
-        }
-        // Analyze call and learn (async, don't block notification)
-        if (call.transcript.length > 0) {
-          analyzeCallAndLearn(call).catch(err =>
-            console.error(`[VOICE-INTEL] Post-call analysis error:`, (err as Error).message)
-          );
-        }
-      }
+      call.completed = true;
 
-      // Always save final state to DB
-      await prisma.$executeRaw`
-        UPDATE voice_calls
-        SET result = ${call.result || `Call ${status}`},
-            transcript = ${JSON.stringify(call.transcript)}::jsonb,
-            duration = COALESCE(${durationSec}, duration),
-            updated_at = now()
-        WHERE id = ${callId}
-      `;
-
-      // Notify user ONCE — even if call was already marked completed by endCallWithSummary
+      // IMMEDIATE NOTIFICATION — don't wait for Grok summary
       if (!call.notified) {
         await notifyUser(call, status);
       }
+
+      // THEN generate detailed summary async (non-blocking)
+      (async () => {
+        try {
+          if (call.transcript.length > 0 && !call.result) {
+            call.result = await generateCallSummary(call);
+
+            // Send follow-up with detailed summary
+            await sendFollowUpSummary(call);
+          }
+
+          // Save final state to DB
+          await prisma.$executeRaw`
+            UPDATE voice_calls
+            SET result = ${call.result || `Call ${status}`},
+                transcript = ${JSON.stringify(call.transcript)}::jsonb,
+                duration = COALESCE(${durationSec}, duration),
+                updated_at = now()
+            WHERE id = ${callId}
+          `;
+
+          // Analyze call and learn
+          if (call.transcript.length > 0) {
+            analyzeCallAndLearn(call).catch(err =>
+              console.error(`[VOICE-INTEL] Post-call analysis error:`, (err as Error).message)
+            );
+          }
+        } catch (err) {
+          console.error(`[VOICE] Post-call async processing error for ${callId}:`, (err as Error).message);
+        }
+      })();
 
       setTimeout(() => activeCalls.delete(callId), 300_000);
     } else {
@@ -1536,7 +1546,7 @@ async function getNextResponse(call: ActiveCall, calleeResponse: string): Promis
   let prompt: string;
 
   if (isLive) {
-    prompt = `You are Jarvis, a personal AI assistant in a LIVE PHONE CALL with your user.
+    prompt = `You are Sniffer 🐕, a personal AI assistant in a LIVE PHONE CALL with your user.
 
 LANGUAGE: ${langName}
 TURN: ${call.turnCount}
@@ -1765,7 +1775,6 @@ Resumo (seja específico — inclua nomes, horários, confirmações mencionadas
 
 async function notifyUser(call: ActiveCall, status: string): Promise<void> {
   call.notified = true; // Prevent duplicate notifications
-  console.log(`[VOICE] Sending post-call report for ${call.callId} to ${call.channel}:${call.userId}`);
 
   const statusEmojis: Record<string, string> = {
     completed: "✅",
@@ -1778,37 +1787,19 @@ async function notifyUser(call: ActiveCall, status: string): Promise<void> {
   const emoji = statusEmojis[status] || "📞";
   let message: string;
 
-  if (status === "completed" && call.result) {
-    // Enhanced post-call report — get real duration from DB
-    const dbRows = await prisma.$queryRaw<{ duration: number | null }[]>`
-      SELECT duration FROM voice_calls WHERE id = ${call.callId}
-    `;
-    const realDuration = dbRows[0]?.duration;
-    const duration = realDuration
-      ? (realDuration >= 60 ? `${Math.floor(realDuration / 60)}min ${realDuration % 60}s` : `${realDuration}s`)
-      : (call.transcript.length > 0 ? `~${Math.ceil(call.turnCount / 2 * 15)}s` : "unknown");
+  if (status === "completed") {
+    // IMMEDIATE notification — basic info, no Grok wait
+    const turns = call.turnCount;
+    const hadConversation = call.transcript.length > 1;
+    const wasVoicemail = call.result?.includes("Voicemail");
 
-    // Extract key points from transcript
-    const calleeMessages = call.transcript
-      .filter((t) => t.speaker === "callee")
-      .map((t) => t.text);
-
-    let report = `📞 *Ligação concluída com ${call.businessName}* (${duration})\n\n`;
-    report += `${emoji} ${call.result}\n`;
-
-    // If there were notable callee messages, include them
-    if (calleeMessages.length > 0) {
-      const notable = calleeMessages.filter((m) => m.length > 10).slice(-3);
-      if (notable.length > 0) {
-        report += `\n💬 *O que ${call.businessName} disse:*\n`;
-        notable.forEach((m) => {
-          report += `  • "${m}"\n`;
-        });
-      }
+    if (wasVoicemail) {
+      message = `📞 *Ligação para ${call.businessName}* — Caixa postal. Deixei recado.\n\nResumo detalhado em instantes...`;
+    } else if (hadConversation) {
+      message = `📞 *Ligação com ${call.businessName} concluída!* (${turns} turnos)\n\nGerando resumo detalhado...`;
+    } else {
+      message = `📞 *Ligação para ${call.businessName} concluída.* Ninguém falou ou chamada muito curta.`;
     }
-
-    report += `\nPrecisa de mais alguma coisa?`;
-    message = report;
   } else if (status === "busy") {
     message = `${emoji} *${call.businessName}* — Linha ocupada. Quer que eu tente novamente?`;
   } else if (status === "no-answer") {
@@ -1821,9 +1812,8 @@ async function notifyUser(call: ActiveCall, status: string): Promise<void> {
 
   try {
     if (call.channel === "whatsapp") {
-      const { sendWhatsAppMessage } = await import("../twilio-whatsapp.service.js");
-      // userId may be "whatsapp:+1234" — strip prefix to get clean phone for sendWhatsAppMessage
       const cleanPhone = call.userId.replace(/^whatsapp:/, "");
+      const { sendWhatsAppMessage } = await import("../twilio-whatsapp.service.js");
       await sendWhatsAppMessage(cleanPhone, message);
     } else if (call.channel === "telegram") {
       const res = await fetch(`http://localhost:4000/api/premium/process`, {
@@ -1831,10 +1821,33 @@ async function notifyUser(call: ActiveCall, status: string): Promise<void> {
         headers: { "Content-Type": "application/json", "x-internal-secret": INTERNAL_SECRET },
         body: JSON.stringify({ userId: call.userId, text: `[SYSTEM] Call result: ${message}`, platform: "telegram" }),
       });
-      if (!res.ok) console.error(`[VOICE] Failed to notify via Telegram: ${res.status}`);
     }
   } catch (err) {
     console.error(`[VOICE] Failed to notify user ${call.userId}:`, (err as Error).message);
+  }
+}
+
+// ─── Follow-Up Summary (sent after Grok generates detailed result) ───
+
+async function sendFollowUpSummary(call: ActiveCall): Promise<void> {
+  if (!call.result) return;
+
+  const summary = `📋 *Resumo detalhado da ligação com ${call.businessName}:*\n\n${call.result}`;
+
+  try {
+    if (call.channel === "whatsapp") {
+      const cleanPhone = call.userId.replace(/^whatsapp:/, "");
+      const { sendWhatsAppMessage } = await import("../twilio-whatsapp.service.js");
+      await sendWhatsAppMessage(cleanPhone, summary);
+    } else if (call.channel === "telegram") {
+      await fetch(`http://localhost:4000/api/premium/process`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-internal-secret": INTERNAL_SECRET },
+        body: JSON.stringify({ userId: call.userId, text: `[SYSTEM] ${summary}`, platform: "telegram" }),
+      });
+    }
+  } catch (err) {
+    console.error(`[VOICE] Failed to send follow-up summary for ${call.callId}:`, (err as Error).message);
   }
 }
 
