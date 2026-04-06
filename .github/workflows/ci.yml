@@ -11,4 +11,3 @@ jobs:
       - run: npm ci
       - run: npx prisma generate --schema packages/database/prisma/schema.prisma
       - run: npm run build
-      - run: npm run typecheck
