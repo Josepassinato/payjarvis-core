@@ -205,7 +205,7 @@ export async function getSubscriptions(userId: string): Promise<SubscriptionInfo
     orderBy: { amount: "desc" },
   });
 
-  return subs.map(s => ({
+  return subs.map((s: typeof subs[number]) => ({
     id: s.id,
     serviceName: s.serviceName,
     planName: s.planName,
@@ -357,7 +357,7 @@ export async function getUpcomingRenewals(userId: string, withinDays: number = 3
     orderBy: { nextBillingDate: "asc" },
   });
 
-  return subs.map(s => ({
+  return subs.map((s: typeof subs[number]) => ({
     id: s.id,
     serviceName: s.serviceName,
     planName: s.planName,

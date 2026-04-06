@@ -117,8 +117,10 @@ export async function addPaymentMethod(params: {
       displayName,
       accountId: accountId ?? displayName,
       status: "CONNECTED",
-      credentials: (credentials ?? Prisma.JsonNull) as Prisma.InputJsonValue,
-      metadata: (metadata ?? Prisma.JsonNull) as Prisma.InputJsonValue,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      credentials: (credentials ?? undefined) as any,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      metadata: (metadata ?? undefined) as any,
       isDefault: isDefault ?? false,
     },
   });

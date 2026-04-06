@@ -60,7 +60,7 @@ export async function checkPriceAlerts() {
   for (let i = 0; i < alerts.length; i += BATCH_SIZE) {
     const batch = alerts.slice(i, i + BATCH_SIZE);
 
-    await Promise.allSettled(batch.map(async (alert) => {
+    await Promise.allSettled(batch.map(async (alert: typeof alerts[number]) => {
       try {
         const result = await unifiedProductSearch({
           query: alert.query,
