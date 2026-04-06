@@ -118,11 +118,15 @@ export async function unifiedProductSearch(opts: SearchOptions): Promise<Unified
   }
 
   // Apify — Amazon, paid but reliable
-  sources.push({ name: "apify", fn: () => withTimeout(searchApify(query, country, maxResults, userId), TIMEOUT.apify), priority: 3 });
+  // When user specifically asks for Amazon, Apify gets top priority (direct source, not Google middleman)
+  const isAmazon = store && store.toLowerCase().includes("amazon");
+  sources.push({ name: "apify", fn: () => withTimeout(searchApify(query, country, maxResults, userId), TIMEOUT.apify), priority: isAmazon ? 1 : 3 });
 
   // Google Search Grounding — free, works well for specific stores
+  // When user asks for a specific marketplace (amazon, walmart, etc.), deprioritize grounding
+  // because it returns google.com URLs instead of direct store links
   if (GEMINI_API_KEY) {
-    sources.push({ name: "grounding", fn: () => withTimeout(searchGeminiGrounding(storeQuery, maxResults), TIMEOUT.grounding), priority: 2 });
+    sources.push({ name: "grounding", fn: () => withTimeout(searchGeminiGrounding(storeQuery, maxResults), TIMEOUT.grounding), priority: store ? 4 : 2 });
   }
 
   // Browser Agent — last resort, slow
@@ -216,8 +220,18 @@ export async function unifiedProductSearch(opts: SearchOptions): Promise<Unified
       }
     }
 
+    // Filter by store if user specified a marketplace
+    const storeFiltered = store ? filterByStore(allProducts, store) : allProducts;
+    // Use filtered results if we got any; otherwise fall back to unfiltered
+    const productsToSort = storeFiltered.length > 0 ? storeFiltered : allProducts;
+
+    // Clean URLs: replace Google search/shopping URLs with direct store links
+    for (const p of productsToSort) {
+      p.url = cleanProductUrl(p.url, p.title, p.store);
+    }
+
     // Sort by price (nulls last), cap at maxResults
-    const finalProducts = allProducts
+    const finalProducts = productsToSort
       .sort((a, b) => {
         if (a.price === null) return 1;
         if (b.price === null) return -1;
@@ -232,7 +246,8 @@ export async function unifiedProductSearch(opts: SearchOptions): Promise<Unified
       query,
       store,
       totalResults: finalProducts.length,
-    };
+      ...(store && storeFiltered.length === 0 ? { storeNotFound: true } : {}),
+    } as UnifiedSearchResult & { storeNotFound?: boolean };
 
     // Cache successful results
     redisSet(cacheKey, JSON.stringify(searchResult), CACHE_TTL).catch(() => {});
@@ -243,23 +258,23 @@ export async function unifiedProductSearch(opts: SearchOptions): Promise<Unified
     return searchResult;
   }
 
-  // ─── ALL FAILED — return Google Shopping link ──────
-  console.log(`[UNIFIED-SEARCH] ALL methods failed for "${query}". Returning Google fallback.`);
-  methodsAttempted.push("google_fallback");
-  const googleQuery = store ? `${query} ${store} buy price` : `${query} buy best price`;
+  // ─── ALL FAILED — return direct store link (NEVER google.com) ──────
+  console.log(`[UNIFIED-SEARCH] ALL methods failed for "${query}". Returning direct store fallback.`);
+  methodsAttempted.push("store_fallback");
+  const fallbackUrl = buildDirectStoreUrl(query, store || "");
   return {
     products: [{
       title: query,
       price: null,
       currency: "USD",
-      url: `https://www.google.com/search?tbm=shop&q=${encodeURIComponent(googleQuery)}`,
+      url: fallbackUrl,
       imageUrl: null,
       rating: null,
       reviewCount: null,
-      store: "Google Shopping",
+      store: store || "Amazon",
       isApproximate: true,
     }],
-    method: "google_fallback",
+    method: "store_fallback",
     methodsAttempted,
     query,
     store,
@@ -292,7 +307,7 @@ async function searchSerpApi(query: string, country: string, maxResults: number)
     title: item.title || "",
     price: item.extracted_price || null,
     currency: "USD",
-    url: item.link || item.product_link || "",
+    url: (item.link && !item.link.includes("google.com/")) ? item.link : (item.product_link || item.link || ""),
     imageUrl: item.thumbnail || null,
     rating: item.rating || null,
     reviewCount: item.reviews || null,
@@ -380,8 +395,8 @@ async function searchMercadoLivre(query: string, maxResults: number): Promise<Un
     currency: p.currency || "BRL",
     url: p.permalink,
     imageUrl: p.thumbnail || null,
-    rating: null,
-    reviewCount: null,
+    rating: p.rating ?? null,
+    reviewCount: p.reviewCount ?? null,
     store: "Mercado Livre",
     condition: p.condition,
     freeShipping: p.freeShipping,
@@ -436,7 +451,7 @@ async function searchGeminiGrounding(query: string, maxResults: number): Promise
       title: p.title || query,
       price: typeof p.price === "number" ? p.price : null,
       currency: p.currency || "USD",
-      url: p.url || `https://www.google.com/search?q=${encodeURIComponent(query)}`,
+      url: cleanProductUrl(p.url || "", p.title || query, p.store || "Online"),
       imageUrl: null,
       rating: typeof p.rating === "number" ? p.rating : null,
       reviewCount: null,
@@ -452,7 +467,7 @@ async function searchGeminiGrounding(query: string, maxResults: number): Promise
       title: s.title || query,
       price: null,
       currency: "USD",
-      url: s.uri || "",
+      url: cleanProductUrl(s.uri || "", s.title || query, extractStoreName(s.uri || "")),
       imageUrl: null,
       rating: null,
       reviewCount: null,
@@ -475,7 +490,7 @@ async function searchBrowserAgent(query: string, store: string, maxResults: numb
   };
 
   const storeKey = store.toLowerCase().replace(/[^a-z]/g, "");
-  const url = storeUrls[storeKey] || `https://www.google.com/search?tbm=shop&q=${encodeURIComponent(query + " " + store)}`;
+  const url = storeUrls[storeKey] || buildDirectStoreUrl(query, store);
 
   const res = await fetch(`${BROWSER_AGENT_URL}/navigate`, {
     method: "POST",
@@ -549,14 +564,126 @@ function extractStoreName(url: string): string {
   }
 }
 
+// ─── Store filtering (Bug 3 fix) ───────────────────
+// When user specifies "na Amazon" or "on eBay", filter results to only that marketplace
+function filterByStore(products: UnifiedProduct[], requestedStore: string): UnifiedProduct[] {
+  const norm = requestedStore.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const storeAliases: Record<string, string[]> = {
+    amazon: ["amazon"],
+    walmart: ["walmart"],
+    ebay: ["ebay"],
+    target: ["target"],
+    bestbuy: ["bestbuy", "best buy"],
+    macys: ["macys", "macy's", "macy"],
+    mercadolivre: ["mercadolivre", "mercado livre", "mercadolibre", "mercado libre", "ml"],
+    jomashop: ["jomashop"],
+    fragrancenet: ["fragrancenet", "fragrance net"],
+  };
+
+  // Find which store group matches
+  let matchKeys: string[] = [];
+  for (const [, aliases] of Object.entries(storeAliases)) {
+    if (aliases.some(a => norm.includes(a.replace(/[^a-z0-9]/g, "")))) {
+      matchKeys = aliases;
+      break;
+    }
+  }
+  // Fallback: match by substring
+  if (matchKeys.length === 0) matchKeys = [norm];
+
+  return products.filter(p => {
+    const pStore = p.store.toLowerCase();
+    const pUrl = p.url.toLowerCase();
+    return matchKeys.some(k => pStore.includes(k) || pUrl.includes(k));
+  });
+}
+
+// ─── URL Cleanup (Bug 1 fix — v2 2026-04-06) ────────
+// ABSOLUTE RULE: NEVER return a google.com URL to the user.
+// Priority: extract embedded real URL → store search URL → Amazon search fallback.
+function cleanProductUrl(url: string, title: string, store: string): string {
+  // If URL is already a direct product link (not google.com), keep it
+  if (!url.includes("google.com")) return url;
+
+  // 1. Try to extract the REAL product URL from Google redirect parameters
+  try {
+    const parsed = new URL(url);
+    const embedded = parsed.searchParams.get("url")
+      || parsed.searchParams.get("adurl")
+      || parsed.searchParams.get("merchant_purl")
+      || parsed.searchParams.get("q");
+    if (embedded && embedded.startsWith("http") && !embedded.includes("google.com")) return embedded;
+
+    // Google Shopping product pages sometimes embed merchant URL in prds param
+    const prds = parsed.searchParams.get("prds") || "";
+    const merchantMatch = prds.match(/murl:([^,]+)/);
+    if (merchantMatch) {
+      const decoded = decodeURIComponent(merchantMatch[1]);
+      if (!decoded.includes("google.com")) return decoded;
+    }
+  } catch { /* malformed URL, fall through */ }
+
+  // 2. Build a direct store search URL — NEVER return google.com
+  return buildDirectStoreUrl(title, store);
+}
+
+// ─── Build direct store URL (NEVER returns google.com) ──
+function buildDirectStoreUrl(productName: string, storeName: string): string {
+  const q = encodeURIComponent((productName || "").substring(0, 100));
+  const storeKey = (storeName || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
+  const storeSearchUrls: Record<string, string> = {
+    amazon: `https://www.amazon.com/s?k=${q}`,
+    walmart: `https://www.walmart.com/search?q=${q}`,
+    target: `https://www.target.com/s?searchTerm=${q}`,
+    bestbuy: `https://www.bestbuy.com/site/searchpage.jsp?st=${q}`,
+    ebay: `https://www.ebay.com/sch/i.html?_nkw=${q}`,
+    macys: `https://www.macys.com/shop/featured/${q}`,
+    jomashop: `https://www.jomashop.com/search?q=${q}`,
+    fragrancenet: `https://www.fragrancenet.com/search?q=${q}`,
+    sephora: `https://www.sephora.com/search?keyword=${q}`,
+    scentsangel: `https://www.scentsangel.com/search?q=${q}`,
+    mercadolivre: `https://lista.mercadolivre.com.br/${q}`,
+    mercadolibre: `https://lista.mercadolivre.com.br/${q}`,
+    nordstrom: `https://www.nordstrom.com/sr?keyword=${q}`,
+    costco: `https://www.costco.com/CatalogSearch?keyword=${q}`,
+    homedepot: `https://www.homedepot.com/s/${q}`,
+    lowes: `https://www.lowes.com/search?searchTerm=${q}`,
+    newegg: `https://www.newegg.com/p/pl?d=${q}`,
+    nike: `https://www.nike.com/w?q=${q}`,
+    adidas: `https://www.adidas.com/us/search?q=${q}`,
+    ulta: `https://www.ulta.com/search?query=${q}`,
+    bathandbodyworks: `https://www.bathandbodyworks.com/search?q=${q}`,
+  };
+
+  // Exact match
+  if (storeSearchUrls[storeKey]) return storeSearchUrls[storeKey];
+
+  // Fuzzy match — check if store name contains a known key
+  for (const [key, url] of Object.entries(storeSearchUrls)) {
+    if (storeKey.includes(key) || key.includes(storeKey)) return url;
+  }
+
+  // Unknown store — default to Amazon search (NEVER google.com)
+  return `https://www.amazon.com/s?k=${q}`;
+}
+
 // ─── Format for WhatsApp/Telegram (concise) ──────────
 
 export function formatUnifiedResults(result: UnifiedSearchResult, lang: string = "en"): string {
   if (result.products.length === 0) return "";
 
+  // SAFETY NET: sanitize any google.com URLs that slipped through
+  for (const p of result.products) {
+    if (p.url.includes("google.com")) {
+      console.warn(`[CLEAN_URL] BLOCKED google.com URL in final output: ${p.url}`);
+      p.url = buildDirectStoreUrl(p.title, p.store);
+    }
+  }
+
   const isPt = lang.includes("pt") || lang.includes("portu");
 
-  if (result.method === "google_fallback") {
+  if (result.method === "store_fallback" || result.method === "google_fallback") {
     const p = result.products[0];
     return isPt
       ? `Busque aqui:\n${p.url}`
@@ -566,7 +693,7 @@ export function formatUnifiedResults(result: UnifiedSearchResult, lang: string =
   const lines = result.products.slice(0, 5).map((p, i) => {
     const priceStr = p.price
       ? `${p.currency === "BRL" ? "R$" : "$"}${p.price.toFixed(2)}${p.isApproximate ? " ~" : ""}`
-      : (isPt ? "Ver preco" : "See price");
+      : (isPt ? "Ver preço" : "See price");
     const ratingStr = p.rating ? ` | ${p.rating}/5` : "";
     return `${i + 1}. ${p.title}\n   ${priceStr}${ratingStr} — ${p.store}\n   ${p.url}`;
   });

@@ -42,8 +42,8 @@ export async function checkRenewalAlerts(): Promise<void> {
         else if (daysUntil !== null) urgency = isPt ? `em ${daysUntil} dias` : `in ${daysUntil} days`;
 
         const message = isPt
-          ? `📢 ${name}, sua assinatura do ${sub.serviceName} renova ${urgency} por ${curr}${sub.amount}.\n\nQuer manter ou cancelar? 🦀`
-          : `📢 ${name}, your ${sub.serviceName} subscription renews ${urgency} for ${curr}${sub.amount}.\n\nKeep or cancel? 🦀`;
+          ? `📢 ${name}, sua assinatura do ${sub.serviceName} renova ${urgency} por ${curr}${sub.amount}.\n\nQuer manter ou cancelar? 🐕`
+          : `📢 ${name}, your ${sub.serviceName} subscription renews ${urgency} for ${curr}${sub.amount}.\n\nKeep or cancel? 🐕`;
 
         await sendToUser(user, message);
         sent++;
@@ -87,8 +87,8 @@ export async function checkSubscriptionWaste(): Promise<void> {
       const totalSavings = waste.reduce((acc, w) => acc + w.potentialAnnualSavings, 0);
 
       const message = isPt
-        ? `💡 ${name}, resumo mensal de assinaturas:\n\n${wasteLines.join("\n")}\n\n💰 Economia potencial: $${totalSavings}/ano\nQuer cancelar alguma? 🦀`
-        : `💡 ${name}, monthly subscription review:\n\n${wasteLines.join("\n")}\n\n💰 Potential savings: $${totalSavings}/year\nWant to cancel any? 🦀`;
+        ? `💡 ${name}, resumo mensal de assinaturas:\n\n${wasteLines.join("\n")}\n\n💰 Economia potencial: $${totalSavings}/ano\nQuer cancelar alguma? 🐕`
+        : `💡 ${name}, monthly subscription review:\n\n${wasteLines.join("\n")}\n\n💰 Potential savings: $${totalSavings}/year\nWant to cancel any? 🐕`;
 
       await sendToUser(user, message);
       sent++;

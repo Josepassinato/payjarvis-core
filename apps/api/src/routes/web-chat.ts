@@ -297,9 +297,10 @@ export async function webChatRoutes(app: FastifyInstance) {
             response = await processWebMessage(clerkId, text);
           }
 
+          const cleanResponse = response.replace(/\[FORMAT:(TEXT|AUDIO)\]\s*/gi, '').trim();
           return reply.send({
             success: true,
-            data: { reply: response },
+            data: { reply: cleanResponse },
           });
         } catch (err) {
           console.error("[WebChat] Send error:", (err as Error).message);
@@ -411,10 +412,11 @@ export async function webChatRoutes(app: FastifyInstance) {
             console.error("[WebChat TTS] Error:", (ttsErr as Error).message);
           }
 
+          const cleanAudioResponse = response.replace(/\[FORMAT:(TEXT|AUDIO)\]\s*/gi, '').trim();
           return reply.send({
             success: true,
             data: {
-              response,
+              response: cleanAudioResponse,
               transcription,
               audioUrl,
             },
@@ -496,9 +498,10 @@ export async function webChatRoutes(app: FastifyInstance) {
             [] // no facts for live mode — speed priority
           );
 
+          const cleanVisionResponse = response.replace(/\[FORMAT:(TEXT|AUDIO)\]\s*/gi, '').trim();
           return reply.send({
             success: true,
-            data: { description: response },
+            data: { description: cleanVisionResponse },
           });
         } catch (err) {
           console.error("[WebChat Vision] Error:", (err as Error).message);

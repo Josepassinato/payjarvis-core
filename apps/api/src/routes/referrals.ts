@@ -13,6 +13,7 @@ import { readFileSync, unlinkSync } from "fs";
 const INTERNAL_SECRET = process.env.INTERNAL_SECRET || "";
 
 const REFERRAL_CARD_SCRIPT = "/root/Payjarvis/scripts/generate_referral_card.py";
+const RECEIPT_CARD_SCRIPT = "/root/Payjarvis/scripts/generate_receipt_card.py";
 
 export async function referralRoutes(app: FastifyInstance) {
   // GET /api/referrals/card — generate personalized referral invite card
@@ -35,6 +36,44 @@ export async function referralRoutes(app: FastifyInstance) {
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
       request.log.error({ err: msg }, "[Referral] Card generation failed");
+      return reply.status(500).send({ success: false, error: "Card generation failed" });
+    }
+  });
+
+  // GET /api/referrals/receipt-card — generate savings receipt card
+  app.get("/api/referrals/receipt-card", async (request: FastifyRequest, reply: FastifyReply) => {
+    const { product, price, avg, currency = "USD", referral = "sniffershop.com" } = request.query as {
+      product?: string; price?: string; avg?: string; currency?: string; referral?: string;
+    };
+
+    if (!product || !price || !avg) {
+      return reply.status(400).send({ success: false, error: "Missing required: product, price, avg" });
+    }
+
+    const safeProduct = product.replace(/[^a-zA-ZÀ-ÿ0-9\s\-\.\,\/\(\)]/g, "").slice(0, 60);
+    const safeCurrency = ["USD", "BRL", "EUR"].includes(currency) ? currency : "USD";
+    const tmpPath = `/tmp/receipt_card_${Date.now()}_${Math.random().toString(36).slice(2)}.png`;
+
+    try {
+      execFileSync("python3", [
+        RECEIPT_CARD_SCRIPT,
+        "--product", safeProduct,
+        "--price", String(parseFloat(price)),
+        "--avg", String(parseFloat(avg)),
+        "--currency", safeCurrency,
+        "--referral", referral.slice(0, 100),
+        "--output", tmpPath,
+      ], { timeout: 15000 });
+
+      const buf = readFileSync(tmpPath);
+      unlinkSync(tmpPath);
+      return reply
+        .header("Content-Type", "image/png")
+        .header("Cache-Control", "public, max-age=3600")
+        .send(buf);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      request.log.error({ err: msg }, "[Receipt] Card generation failed");
       return reply.status(500).send({ success: false, error: "Card generation failed" });
     }
   });
@@ -68,7 +107,7 @@ export async function referralRoutes(app: FastifyInstance) {
     });
 
     if (existingUser) {
-      return reply.send({ success: false, error: `${friendName} already has a Jarvis account!` });
+      return reply.send({ success: false, error: `${friendName} already has a Sniffer account!` });
     }
 
     // Check for existing pending referral

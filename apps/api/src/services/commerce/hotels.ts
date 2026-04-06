@@ -1,9 +1,12 @@
 /**
- * Commerce Service: Hotels (Amadeus API)
+ * Commerce Service: Hotels (SerpAPI primary, Amadeus fallback)
  *
- * Flow: Hotel List → Hotel Offers → Offer Details → (future) Booking
- * Auth: OAuth2 client_credentials with token caching and 401 retry
+ * Primary: SerpAPI Google Hotels — real prices, booking links, ratings
+ * Fallback: Amadeus Hotel List → Hotel Offers → Offer Details
+ * Auth: OAuth2 client_credentials with token caching and 401 retry (Amadeus)
  */
+
+import { searchHotelsSerpApi } from "../search/serpapi-travel.service.js";
 
 const BASE = process.env.AMADEUS_ENV === "production"
   ? "https://api.amadeus.com"
@@ -149,6 +152,9 @@ export interface HotelResult {
   cancellation: string;
   offerId: string;
   nights: number;
+  bookingLink?: string;
+  address?: string;
+  reviewCount?: number;
 }
 
 // ─── Search ──────────────────────────────────────────
@@ -163,17 +169,62 @@ export async function searchHotels(params: HotelSearchParams): Promise<{
   results: HotelResult[];
   error?: string;
 }> {
-  // Resolve city or use geocode
+  const location = params.city || "";
+  console.log(`[HOTELS] Searching ${location}, ${params.checkIn} to ${params.checkOut}`);
+
+  // ─── Try SerpAPI first (real prices + booking links) ───
+  try {
+    const serpResult = await searchHotelsSerpApi({
+      location,
+      checkIn: params.checkIn,
+      checkOut: params.checkOut,
+      guests: params.adults || 1,
+      maxResults: 5,
+    });
+
+    if (serpResult.hotels.length > 0) {
+      const nights = daysBetween(params.checkIn, params.checkOut);
+      const results: HotelResult[] = serpResult.hotels.map((h) => ({
+        name: h.name,
+        hotelId: "",
+        stars: h.rating ? String(Math.round(h.rating / 2)) : "N/A",
+        price: h.price ? `${h.currency} ${(h.price * nights).toFixed(2)}` : "N/A",
+        pricePerNight: h.price ? `${h.currency} ${h.price.toFixed(2)}` : "N/A",
+        priceNumeric: h.price || 0,
+        totalPrice: h.price ? h.price * nights : 0,
+        currency: h.currency,
+        rating: h.rating ? String(h.rating) : "N/A",
+        roomType: h.amenities.slice(0, 3).join(", ") || "Standard",
+        cancellation: "",
+        offerId: "",
+        nights,
+        bookingLink: h.link || "",
+        address: h.address || "",
+        reviewCount: h.reviews || 0,
+      }));
+
+      // Filter by maxPrice per night if specified
+      const filtered = params.maxPrice
+        ? results.filter((r) => r.priceNumeric > 0 && r.priceNumeric <= params.maxPrice!)
+        : results.filter((r) => r.priceNumeric > 0);
+
+      filtered.sort((a, b) => a.priceNumeric - b.priceNumeric);
+      console.log(`[HOTELS] SerpAPI returned ${filtered.length} results for ${location}`);
+      return { source: "serpapi", mock: false, results: filtered.slice(0, 5) };
+    }
+  } catch (err) {
+    console.warn("[HOTELS] SerpAPI failed, trying Amadeus:", err instanceof Error ? err.message : err);
+  }
+
+  // ─── Fallback: Amadeus API ───
   const useGeocode = params.latitude && params.longitude && !params.city;
   const cityCode = useGeocode ? "" : await resolveCityCode(params.city || "");
-  console.log(`[HOTELS] Searching ${useGeocode ? `geo(${params.latitude},${params.longitude})` : `${params.city} → ${cityCode}`}, ${params.checkIn} to ${params.checkOut}`);
 
   if (!isConfigured()) {
     return { source: "amadeus", mock: true, results: mockHotels(params) };
   }
 
   try {
-    // Step 1: Hotel List — find hotels by city or geocode
     let listData: any;
     if (useGeocode) {
       const listParams: Record<string, string> = {
@@ -198,7 +249,6 @@ export async function searchHotels(params: HotelSearchParams): Promise<{
     const hotelIds = (listData.data || []).slice(0, 30).map((h: any) => h.hotelId);
     if (hotelIds.length === 0) return { source: "amadeus", mock: false, results: [] };
 
-    // Step 2: Hotel Offers — get prices (max 50 hotelIds per request)
     const currency = params.currency || "USD";
     const offersData = await amadeusGet("/v3/shopping/hotel-offers", {
       hotelIds: hotelIds.join(","),
@@ -237,17 +287,15 @@ export async function searchHotels(params: HotelSearchParams): Promise<{
       };
     });
 
-    // Filter by maxPrice per night if specified
     const filtered = params.maxPrice
       ? results.filter((r) => r.priceNumeric <= params.maxPrice!)
       : results;
 
-    // Sort by price per night
     filtered.sort((a, b) => a.priceNumeric - b.priceNumeric);
 
     return { source: "amadeus", mock: false, results: filtered.slice(0, 5) };
   } catch (err) {
-    console.error("[HOTELS] Search error:", err instanceof Error ? err.message : err);
+    console.error("[HOTELS] Amadeus search error:", err instanceof Error ? err.message : err);
     return {
       source: "amadeus",
       mock: false,
@@ -287,25 +335,22 @@ export function formatHotelResults(results: HotelResult[], city: string): string
     return `Não encontrei hotéis disponíveis em ${city} para essas datas. Tente outras datas ou uma cidade próxima.`;
   }
 
-  const starsEmoji = (s: string) => {
-    const n = parseInt(s);
-    if (isNaN(n)) return "";
-    return "⭐".repeat(Math.min(n, 5));
-  };
-
   const nights = results[0]?.nights || 1;
   const header = `🏨 Hotéis em ${city} (${nights} noite${nights > 1 ? "s" : ""})\n`;
 
   const items = results.map((h, i) => {
-    return [
-      `${i + 1}. ${h.name} ${starsEmoji(h.stars)}`,
-      `   💰 $${h.priceNumeric.toFixed(0)}/noite (total: $${h.totalPrice.toFixed(0)})`,
-      `   📋 ${h.roomType}`,
-      `   🔄 ${h.cancellation}`,
-    ].join("\n");
+    const lines = [`${i + 1}. ${h.name} ⭐ ${h.rating}`];
+    if (h.priceNumeric > 0) {
+      lines.push(`   💰 ${h.currency} ${h.priceNumeric.toFixed(0)}/noite (total: ${h.currency} ${h.totalPrice.toFixed(0)})`);
+    }
+    if (h.address) lines.push(`   📍 ${h.address}`);
+    if (h.roomType && h.roomType !== "Standard") lines.push(`   📋 ${h.roomType}`);
+    if (h.cancellation) lines.push(`   🔄 ${h.cancellation}`);
+    if (h.bookingLink) lines.push(`   🔗 ${h.bookingLink}`);
+    return lines.join("\n");
   });
 
-  return header + "\n" + items.join("\n\n") + "\n\nQuer que eu reserve algum desses? Me diga o número.";
+  return header + "\n" + items.join("\n\n") + "\n\nQual quer reservar? 🐕";
 }
 
 // ─── Mock Data ───────────────────────────────────────

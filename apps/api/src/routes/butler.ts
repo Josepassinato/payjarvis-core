@@ -226,7 +226,7 @@ export async function butlerRoutes(app: FastifyInstance) {
         const user = await prisma.user.findUnique({ where: { id: userId }, select: { telegramChatId: true } });
         if (user?.telegramChatId) {
           await sendTelegramNotification(user.telegramChatId,
-            `✅ Gmail conectado! (${result.email})\n\nAgora eu consigo:\n📩 Ler emails de confirmação\n🔑 Pegar códigos de verificação\n📅 Ver sua agenda\n👥 Ver seus contatos\n\nPara desconectar: "Jarvis, desconecta meu Gmail" 🦀`
+            `✅ Gmail conectado! (${result.email})\n\nAgora eu consigo:\n📩 Ler emails de confirmação\n🔑 Pegar códigos de verificação\n📅 Ver sua agenda\n👥 Ver seus contatos\n\nPara desconectar: "Jarvis, desconecta meu Gmail" 🐕`
           );
         }
       } catch { /* non-blocking */ }

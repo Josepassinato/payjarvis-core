@@ -101,6 +101,7 @@ export async function retailRoutes(app: FastifyInstance) {
     }
 
     try {
+      const startMs = Date.now();
       const result = await unifiedProductSearch({
         query: body.query,
         store: body.store,
@@ -109,6 +110,30 @@ export async function retailRoutes(app: FastifyInstance) {
         maxResults: body.maxResults || 5,
         userId: body.userId,
       });
+
+      // ─── LOG SEARCH TO commerce_search_logs ───
+      const durationMs = Date.now() - startMs;
+      try {
+        const { prisma } = await import("@payjarvis/database");
+        await prisma.commerceSearchLog.create({
+          data: {
+            botId: (request.headers["x-bot-id"] as string) || "openclaw",
+            service: "products",
+            params: {
+              query: body.query,
+              store: body.store || null,
+              country: body.country || "US",
+              userId: body.userId || null,
+            },
+            resultCount: result?.products?.length ?? 0,
+            cached: (result as any)?.fromCache ?? false,
+            durationMs,
+          },
+        });
+      } catch (logErr) {
+        request.log.warn(logErr, "[COMMERCE-LOG] Failed to log search");
+      }
+
       return reply.send({ success: true, data: result });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Search failed";
