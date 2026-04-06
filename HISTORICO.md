@@ -1,5 +1,28 @@
 # HISTORICO.md — PayJarvis
 
+## 2026-04-05 — Fix P0/P1: Behavioral Signals Free Tier + Commerce Search Logging
+
+### Corrigido:
+- **Behavioral signals no free tier** — `classifyUserResponse()` e `captureSignal()` agora rodam para TODOS os usuarios, nao apenas premium. Sinais de aceitacao/rejeicao/correcao sao capturados e gravados em `agent_behavioral_signals` com `context: "free_tier"`.
+- **Commerce search logging** — `commerce_search_logs` estava com ZERO rows. Adicionado logging automatico no endpoint `/api/retail/unified-search` com: query, store, country, resultCount, durationMs, cached.
+
+### Verificado:
+- **Browser-agent CDP** — Testado e operacional. BrowserBase cria contextos e sessoes normalmente. As 9 falhas de Amazon eram de 2026-03-14/18 (cookies expirados).
+
+### Arquivos alterados:
+- `/root/openclaw/index.js` — Adicionado bloco classifyUserResponse + captureSignal no free tier path
+- `apps/api/src/routes/retail.routes.ts` — Adicionado prisma.commerceSearchLog.create() apos busca
+
+### Testes:
+- Smoke test: 16/16 passed, 0 failed
+- Busca "wireless earbuds" → 3 produtos, logado (2668ms)
+- Busca "Armaf Club de Nuit" → 3 produtos, logado (3041ms)
+- captureSignal free tier → gravado no banco OK
+- BrowserBase open-session → sucesso (liveUrl retornada)
+
+### Estado: Producao, deploy feito
+### Integracoes ativas: WhatsApp, Telegram, Gemini, Grok, BrowserBase, Stagehand
+
 ## 2026-03-28 — Indicador de Processamento + Treinamento LLM
 
 ### Implementado:

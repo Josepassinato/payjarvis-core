@@ -108,7 +108,7 @@ HTTP=$(curl -sf -o /dev/null -w "%{http_code}" "$WEB/terms" 2>/dev/null)
 check "Terms page ($HTTP)" "$?"
 
 # ─── 11. PWA manifest (served by Next.js on port 3000) ───
-curl -sf "http://localhost:3000/manifest.json" 2>/dev/null | grep -q "Jarvis"
+curl -sf "http://localhost:3000/manifest.json" 2>/dev/null | grep -q "Sniffer"
 check_warn "PWA Manifest" "$?"
 
 # ─── 12. Database connectivity (use API health as proxy — it connects on startup) ───

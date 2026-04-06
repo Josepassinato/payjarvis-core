@@ -1,5 +1,17 @@
-# Project: PayJarvis
+# Project: PayJarvis (B2B) / SnifferShop (B2C)
 AI spending firewall and agentic commerce platform. Autonomous AI agents search, compare, and purchase for users with governance layers.
+
+## Session Continuity
+- **SEMPRE LER PRIMEIRO**: `/root/Payjarvis/.planning/SESSION-NOTES.md`
+- Contém: última sessão, estado atual, pendências, contexto
+- **SEMPRE ATUALIZAR** ao final de cada sessão significativa
+
+## Rebranding (2026-04-02)
+- B2C user-facing: "Jarvis" → "Sniffer", "PayJarvis" → "SnifferShop"
+- B2B backend/code: mantém "PayJarvis" (variáveis, rotas, imports, URLs)
+- Emoji: 🦀 → 🐕 em mensagens user-facing
+- Cores Sniffer: laranja #ff6b2b + warm tones
+- System prompts Gemini/Grok: ainda usam "Jarvis" internamente (migração futura)
 
 ## Tech Stack
 - Turborepo monorepo at /root/Payjarvis/
