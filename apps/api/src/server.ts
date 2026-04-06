@@ -92,6 +92,7 @@ import { scheduledTaskRoutes } from "./routes/scheduled-tasks.js";
 import skyfireRoutes from "./routes/skyfire.js";
 import { glassesRoutes } from "./routes/glasses.js";
 import addressRoutes from "./routes/addresses.js";
+import { customServicesRoutes } from "./routes/custom-services.js";
 import { rateLimiter, webhookRateLimiter } from "./middleware/rate-limiter.js";
 
 // Cron jobs
@@ -341,6 +342,9 @@ await app.register(glassesRoutes);
 
 // Addresses & KYC — structured US/BR addresses + KYC profile
 await app.register(addressRoutes);
+
+// Custom Services — self-configuration engine (user-provided APIs + automations)
+await app.register(customServicesRoutes);
 
 // Admin Dashboard — separate auth, overview, users, broadcast, revenue
 await app.register(adminAuthRoutes);
