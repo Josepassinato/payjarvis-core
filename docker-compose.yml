@@ -109,6 +109,48 @@ services:
     labels:
       - "com.payjarvis.service=web"
 
+  # ─── Admin Dashboard ───
+  admin:
+    build:
+      context: .
+      dockerfile: apps/admin/Dockerfile
+    container_name: payjarvis-admin
+    restart: unless-stopped
+    ports:
+      - "3005:3005"
+    environment:
+      NODE_ENV: production
+      PORT: "3005"
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001}
+      ADMIN_JWT_SECRET: ${ADMIN_JWT_SECRET}
+    depends_on:
+      - api
+    labels:
+      - "com.payjarvis.service=admin"
+
+  # ─── Browser Agent ───
+  browser-agent:
+    build:
+      context: .
+      dockerfile: apps/browser-agent/Dockerfile
+    container_name: payjarvis-browser-agent
+    restart: unless-stopped
+    ports:
+      - "3003:3003"
+    environment:
+      NODE_ENV: production
+      BROWSER_AGENT_PORT: "3003"
+      BROWSERBASE_API_KEY: ${BROWSERBASE_API_KEY}
+      BROWSERBASE_PROJECT_ID: ${BROWSERBASE_PROJECT_ID}
+      VAULT_ENCRYPTION_KEY: ${VAULT_ENCRYPTION_KEY}
+      API_URL: "http://api:3001"
+      RULES_ENGINE_URL: "http://rules-engine:3002"
+    depends_on:
+      - api
+      - rules-engine
+    labels:
+      - "com.payjarvis.service=browser-agent"
+
   # ─── Nginx Reverse Proxy ───
   nginx:
     image: nginx:alpine
@@ -126,6 +168,8 @@ services:
       - api
       - web
       - rules-engine
+      - admin
+      - browser-agent
 
   # ─── Certbot (SSL) ───
   certbot:
