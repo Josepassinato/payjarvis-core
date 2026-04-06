@@ -114,8 +114,8 @@ def wrap_text(draw, text, fnt, max_width):
 CONTENT = {
     "en": {
         "badge": "You're Invited!",
-        "headline": "Your friend {name}\nis giving you a smart\nshopping agent \u2014 for FREE!",
-        "subtitle": "Finds the best price, monitors deals\nand buys for you",
+        "headline": "Your friend {name}\nis giving you a deal-hunting\nagent \u2014 for FREE!",
+        "subtitle": "Sniffs out the best price, monitors deals\nand buys for you",
         "icons": "SHOP  .  DEALS  .  COMPARE  .  TRACK  .  VOICE  .  SAVE",
         "cta": "Tap the link below to get started",
         "trust": "Zero-Knowledge Encryption",
@@ -123,24 +123,24 @@ CONTENT = {
         "filename": "referral_invite_en.png",
     },
     "pt": {
-        "badge": "Voce foi Convidado!",
-        "headline": "Seu amigo {name}\nesta te dando um agente\nde compras inteligente \u2014 DE GRACA!",
-        "subtitle": "Acha o melhor preco, monitora\npromocoes e compra pra voce",
+        "badge": "Você foi Convidado!",
+        "headline": "Seu amigo {name}\nestá te dando um farejador\nde ofertas \u2014 DE GRAÇA!",
+        "subtitle": "Fareja o melhor preço, monitora\npromoções e compra pra você",
         "icons": "COMPRAS  .  OFERTAS  .  COMPARA  .  RASTREIA  .  VOZ  .  ECONOMIA",
-        "cta": "Toque no link abaixo para comecar",
+        "cta": "Toque no link abaixo para começar",
         "trust": "Criptografia Zero-Knowledge",
         "domain": "payjarvis.com",
         "filename": "referral_invite_pt.png",
     },
 }
 
-# Colors — same family as onboarding banners (purple/violet)
-BG1 = (75, 20, 120)
-BG2 = (25, 5, 55)
-ACCENT = (180, 120, 255)
-GLOW = (150, 60, 255)
-BADGE_BG = (130, 60, 200)
-CTA_BG = (140, 60, 220)
+# Colors — Sniffer brand (orange + warm tones)
+BG1 = (120, 50, 10)
+BG2 = (55, 20, 5)
+ACCENT = (255, 150, 60)
+GLOW = (255, 107, 43)
+BADGE_BG = (200, 90, 20)
+CTA_BG = (255, 107, 43)
 
 
 def generate_card(name="[NAME]", lang="en"):
@@ -162,9 +162,9 @@ def generate_card(name="[NAME]", lang="en"):
 
     y = 60
 
-    # ─── JARVIS logo text ───
+    # ─── SNIFFER logo text ───
     fnt_logo = font(FONT_DISP, 48)
-    logo_text = "JARVIS"
+    logo_text = "SNIFFER \U0001F415"
     lx = text_cx(draw, logo_text, fnt_logo)
     draw.text((lx, y), logo_text, font=fnt_logo, fill=(255, 255, 255))
     y += 70

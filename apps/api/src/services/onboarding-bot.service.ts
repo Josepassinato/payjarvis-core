@@ -50,16 +50,16 @@ function detectLanguage(phone: string | null, firstMessage: string): Lang {
 const MSG = {
   greeting: {
     en: (referral: string) =>
-      `${referral}Hey! I'm Jarvis, your shopping agent 🦀\n\nTell me what you're looking for and I'll find the best price across 100+ stores. I also monitor deals and alert you when prices drop.\n\nTo get started:\n🔍 Tell me a product you want\n📸 Send a photo of something you saw\n🔗 Send a link for me to track the price\n\nWhat's your name?`,
+      `${referral}Hey! I'm Sniffer, your deal-hunting agent 🐕\n\nTell me what you're looking for and I'll find the best price across 100+ stores. I also monitor deals and alert you when prices drop.\n\nTo get started:\n🔍 Tell me a product you want\n📸 Send a photo of something you saw\n🔗 Send a link for me to track the price\n\nWhat's your name?`,
     pt: (referral: string) =>
-      `${referral}Oi! Eu sou o Jarvis, seu agente de compras 🦀\n\nMe diz o que voce ta procurando e eu acho o melhor preco em 100+ lojas. Tambem monitoro promocoes e aviso quando cair.\n\nPra comecar:\n🔍 Me diz um produto que voce quer\n📸 Manda uma foto de algo que viu\n🔗 Manda um link pra eu monitorar o preco\n\nQual e o seu nome?`,
+      `${referral}Oi! Eu sou o Sniffer, seu farejador de ofertas 🐕\n\nMe diz o que você tá procurando e eu acho o melhor preço em 100+ lojas. Também monitoro promoções e aviso quando cair.\n\nPra começar:\n🔍 Me diz um produto que você quer\n📸 Manda uma foto de algo que viu\n🔗 Manda um link pra eu monitorar o preço\n\nQual é o seu nome?`,
     es: (referral: string) =>
-      `${referral}Hola! Soy Jarvis, tu agente de compras 🦀\n\nDime lo que buscas y encuentro el mejor precio en 100+ tiendas. Tambien monitoreo ofertas y te aviso cuando bajan.\n\nPara empezar:\n🔍 Dime un producto que quieres\n📸 Manda una foto de algo que viste\n🔗 Manda un link para monitorear el precio\n\nCual es tu nombre?`,
+      `${referral}Hola! Soy Sniffer, tu agente rastreador de ofertas 🐕\n\nDime lo que buscas y encuentro el mejor precio en 100+ tiendas. Tambien monitoreo ofertas y te aviso cuando bajan.\n\nPara empezar:\n🔍 Dime un producto que quieres\n📸 Manda una foto de algo que viste\n🔗 Manda un link para monitorear el precio\n\nCual es tu nombre?`,
   },
   referralIntro: {
-    en: (name: string) => `Your friend ${name} invited you to try PayJarvis!\n\n`,
-    pt: (name: string) => `Seu amigo ${name} te convidou para experimentar o PayJarvis!\n\n`,
-    es: (name: string) => `¡Tu amigo ${name} te invitó a probar PayJarvis!\n\n`,
+    en: (name: string) => `Your friend ${name} invited you to try SnifferShop!\n\n`,
+    pt: (name: string) => `Seu amigo ${name} te convidou para experimentar o SnifferShop!\n\n`,
+    es: (name: string) => `¡Tu amigo ${name} te invitó a probar SnifferShop!\n\n`,
   },
   nameTooShort: {
     en: "Name too short. What's your name?",
@@ -72,14 +72,14 @@ const MSG = {
     es: "Nombre muy largo. ¿Cuál es tu nombre?",
   },
   niceToMeet: {
-    en: (name: string) => `Nice to meet you, ${name}! 😊\n\nWould you like to give me a special name or keep calling me Jarvis?`,
-    pt: (name: string) => `Prazer em te conhecer, ${name}! 😊\n\nVocê quer me dar um nome especial ou pode me chamar de Jarvis?`,
-    es: (name: string) => `¡Mucho gusto, ${name}! 😊\n\n¿Quieres darme un nombre especial o prefieres llamarme Jarvis?`,
+    en: (name: string) => `Nice to meet you, ${name}! 😊\n\nWould you like to give me a special name or keep calling me Sniffer?`,
+    pt: (name: string) => `Prazer em te conhecer, ${name}! 😊\n\nVocê quer me dar um nome especial ou pode me chamar de Sniffer?`,
+    es: (name: string) => `¡Mucho gusto, ${name}! 😊\n\n¿Quieres darme un nombre especial o prefieres llamarme Sniffer?`,
   },
   keepJarvis: {
-    en: "Alright, just call me Jarvis! 😄",
-    pt: "Beleza, pode me chamar de Jarvis! 😄",
-    es: "¡Perfecto, llámame Jarvis! 😄",
+    en: "Alright, just call me Sniffer! 😄",
+    pt: "Beleza, pode me chamar de Sniffer! 😄",
+    es: "¡Perfecto, llámame Sniffer! 😄",
   },
   loveNickname: {
     en: (name: string) => `Love it! From now on, call me ${name}! 🎉`,
@@ -87,37 +87,37 @@ const MSG = {
     es: (name: string) => `¡Me encanta! De ahora en adelante, llámame ${name}! 🎉`,
   },
   invalidNickname: {
-    en: "Just type a short name like Luna, Max, or say 'Jarvis is fine' 😊",
-    pt: "Digita um nome curto como Luna, Max, ou diz 'Jarvis tá bom' 😊",
-    es: "Escribe un nombre corto como Luna, Max, o di 'Jarvis está bien' 😊",
+    en: "Just type a short name like Luna, Max, or say 'Sniffer is fine' 😊",
+    pt: "Digita um nome curto como Luna, Max, ou diz 'Sniffer tá bom' 😊",
+    es: "Escribe un nombre corto como Luna, Max, o di 'Sniffer está bien' 😊",
   },
   emailPasswordPrompt: {
     en: (prefix: string) =>
-      `${prefix}\n\nNow let's create your PayJarvis account! 🔐\n\nI need two things:\n📧 Your email (to log into PayJarvis)\n🔑 Create a NEW password (this is NOT your email password — it's a new one just for PayJarvis)\n\nSend both together, like this:\nmyemail@gmail.com MyNewPassword123\n\n⚠️ Important: Do NOT send your email password. Create a new, unique password for your PayJarvis account.`,
+      `${prefix}\n\nNow let's create your SnifferShop account! 🔐\n\nI need two things:\n📧 Your email (to log into SnifferShop)\n🔑 Create a NEW password (this is NOT your email password — it's a new one just for SnifferShop)\n\nSend both together, like this:\nmyemail@gmail.com MyNewPassword123\n\n⚠️ Important: Do NOT send your email password. Create a new, unique password for your SnifferShop account.`,
     pt: (prefix: string) =>
-      `${prefix}\n\nAgora vamos criar sua conta no PayJarvis! 🔐\n\nPreciso de duas coisas:\n📧 Seu email (para entrar no PayJarvis)\n🔑 Crie uma senha NOVA (NÃO é a senha do seu email — é uma senha nova só para o PayJarvis)\n\nManda os dois juntos, assim:\nmeuemail@gmail.com MinhaSenha123\n\n⚠️ Importante: NÃO envie a senha do seu email. Crie uma senha nova e única para sua conta PayJarvis.`,
+      `${prefix}\n\nAgora vamos criar sua conta no SnifferShop! 🔐\n\nPreciso de duas coisas:\n📧 Seu email (para entrar no SnifferShop)\n🔑 Crie uma senha NOVA (NÃO é a senha do seu email — é uma senha nova só para o SnifferShop)\n\nManda os dois juntos, assim:\nmeuemail@gmail.com MinhaSenha123\n\n⚠️ Importante: NÃO envie a senha do seu email. Crie uma senha nova e única para sua conta SnifferShop.`,
     es: (prefix: string) =>
-      `${prefix}\n\n¡Ahora vamos a crear tu cuenta en PayJarvis! 🔐\n\nNecesito dos cosas:\n📧 Tu email (para entrar en PayJarvis)\n🔑 Crea una contraseña NUEVA (NO es la contraseña de tu email — es una nueva solo para PayJarvis)\n\nEnvía ambos juntos, así:\nmiemail@gmail.com MiContraseña123\n\n⚠️ Importante: NO envíes la contraseña de tu email. Crea una contraseña nueva y única para tu cuenta PayJarvis.`,
+      `${prefix}\n\n¡Ahora vamos a crear tu cuenta en SnifferShop! 🔐\n\nNecesito dos cosas:\n📧 Tu email (para entrar en SnifferShop)\n🔑 Crea una contraseña NUEVA (NO es la contraseña de tu email — es una nueva solo para SnifferShop)\n\nEnvía ambos juntos, así:\nmiemail@gmail.com MiContraseña123\n\n⚠️ Importante: NO envíes la contraseña de tu email. Crea una contraseña nueva y única para tu cuenta SnifferShop.`,
   },
   emailPasswordRetryNoAt: {
-    en: "No worries! When you're ready, send your email and create a NEW password for PayJarvis.\n\n⚠️ Don't use your email password — create a new one just for PayJarvis.\n\nExample: john@gmail.com MyNewPassword123",
-    pt: "Sem problema! Quando estiver pronto, manda seu email e cria uma senha NOVA para o PayJarvis.\n\n⚠️ Não use a senha do seu email — crie uma nova só para o PayJarvis.\n\nExemplo: joao@gmail.com MinhaSenha123",
-    es: "¡No te preocupes! Cuando estés listo, envía tu email y crea una contraseña NUEVA para PayJarvis.\n\n⚠️ No uses la contraseña de tu email — crea una nueva solo para PayJarvis.\n\nEjemplo: juan@gmail.com MiContraseña123",
+    en: "No worries! When you're ready, send your email and create a NEW password for SnifferShop.\n\n⚠️ Don't use your email password — create a new one just for SnifferShop.\n\nExample: john@gmail.com MyNewPassword123",
+    pt: "Sem problema! Quando estiver pronto, manda seu email e cria uma senha NOVA para o SnifferShop.\n\n⚠️ Não use a senha do seu email — crie uma nova só para o SnifferShop.\n\nExemplo: joao@gmail.com MinhaSenha123",
+    es: "¡No te preocupes! Cuando estés listo, envía tu email y crea una contraseña NUEVA para SnifferShop.\n\n⚠️ No uses la contraseña de tu email — crea una nueva solo para SnifferShop.\n\nEjemplo: juan@gmail.com MiContraseña123",
   },
   emailInvalid: {
-    en: "Hmm, that doesn't look like a valid email. Send your email and a NEW password for PayJarvis together:\n\n⚠️ Don't use your email password — create a new one.\n\nExample: john@gmail.com MyNewPassword123",
-    pt: "Hmm, isso não parece um email válido. Manda seu email e uma senha NOVA para o PayJarvis juntos:\n\n⚠️ Não use a senha do seu email — crie uma nova.\n\nExemplo: joao@gmail.com MinhaSenha123",
-    es: "Hmm, eso no parece un email válido. Envía tu email y una contraseña NUEVA para PayJarvis juntos:\n\n⚠️ No uses la contraseña de tu email — crea una nueva.\n\nEjemplo: juan@gmail.com MiContraseña123",
+    en: "Hmm, that doesn't look like a valid email. Send your email and a NEW password for SnifferShop together:\n\n⚠️ Don't use your email password — create a new one.\n\nExample: john@gmail.com MyNewPassword123",
+    pt: "Hmm, isso não parece um email válido. Manda seu email e uma senha NOVA para o SnifferShop juntos:\n\n⚠️ Não use a senha do seu email — crie uma nova.\n\nExemplo: joao@gmail.com MinhaSenha123",
+    es: "Hmm, eso no parece un email válido. Envía tu email y una contraseña NUEVA para SnifferShop juntos:\n\n⚠️ No uses la contraseña de tu email — crea una nueva.\n\nEjemplo: juan@gmail.com MiContraseña123",
   },
   passwordMissing: {
-    en: "I also need a NEW password for PayJarvis (minimum 6 characters).\n\n⚠️ Don't use your email password — create a new one just for PayJarvis.\n\nExample: john@gmail.com MyNewPassword123",
-    pt: "Também preciso de uma senha NOVA para o PayJarvis (mínimo 6 caracteres).\n\n⚠️ Não use a senha do seu email — crie uma nova só para o PayJarvis.\n\nExemplo: joao@gmail.com MinhaSenha123",
-    es: "También necesito una contraseña NUEVA para PayJarvis (mínimo 6 caracteres).\n\n⚠️ No uses la contraseña de tu email — crea una nueva solo para PayJarvis.\n\nEjemplo: juan@gmail.com MiContraseña123",
+    en: "I also need a NEW password for SnifferShop (minimum 6 characters).\n\n⚠️ Don't use your email password — create a new one just for SnifferShop.\n\nExample: john@gmail.com MyNewPassword123",
+    pt: "Também preciso de uma senha NOVA para o SnifferShop (mínimo 6 caracteres).\n\n⚠️ Não use a senha do seu email — crie uma nova só para o SnifferShop.\n\nExemplo: joao@gmail.com MinhaSenha123",
+    es: "También necesito una contraseña NUEVA para SnifferShop (mínimo 6 caracteres).\n\n⚠️ No uses la contraseña de tu email — crea una nueva solo para SnifferShop.\n\nEjemplo: juan@gmail.com MiContraseña123",
   },
   passwordTooShort: {
-    en: "Password must be at least 6 characters. Try again with a NEW password for PayJarvis:\n\n⚠️ Remember: this is NOT your email password.\n\nExample: john@gmail.com MyNewPassword123",
-    pt: "A senha precisa ter pelo menos 6 caracteres. Tenta de novo com uma senha NOVA para o PayJarvis:\n\n⚠️ Lembre: NÃO é a senha do seu email.\n\nExemplo: joao@gmail.com MinhaSenha123",
-    es: "La contraseña debe tener al menos 6 caracteres. Intenta de nuevo con una contraseña NUEVA para PayJarvis:\n\n⚠️ Recuerda: NO es la contraseña de tu email.\n\nEjemplo: juan@gmail.com MiContraseña123",
+    en: "Password must be at least 6 characters. Try again with a NEW password for SnifferShop:\n\n⚠️ Remember: this is NOT your email password.\n\nExample: john@gmail.com MyNewPassword123",
+    pt: "A senha precisa ter pelo menos 6 caracteres. Tenta de novo com uma senha NOVA para o SnifferShop:\n\n⚠️ Lembre: NÃO é a senha do seu email.\n\nExemplo: joao@gmail.com MinhaSenha123",
+    es: "La contraseña debe tener al menos 6 caracteres. Intenta de nuevo con una contraseña NUEVA para SnifferShop:\n\n⚠️ Recuerda: NO es la contraseña de tu email.\n\nEjemplo: juan@gmail.com MiContraseña123",
   },
   emailCodeSent: {
     en: "I sent a 6-digit code to your email. What is it?\n\n💡 If you can't find it in your inbox, check your Spam folder!",
@@ -176,7 +176,7 @@ const MSG = {
   },
   kycPrompt: {
     en: (prefix: string) => `${prefix}To keep your account secure and enable purchases, I need a few details.\n\n🌍 What country are you in?\n\n1️⃣ US (United States)\n2️⃣ BR (Brazil)\n\nOr type "skip" to do this later.`,
-    pt: (prefix: string) => `${prefix}Para manter sua conta segura e habilitar compras, preciso de alguns dados.\n\n🌍 Em qual pais voce esta?\n\n1️⃣ US (Estados Unidos)\n2️⃣ BR (Brasil)\n\nOu digite "pular" para fazer depois.`,
+    pt: (prefix: string) => `${prefix}Para manter sua conta segura e habilitar compras, preciso de alguns dados.\n\n🌍 Em qual país você está?\n\n1️⃣ US (Estados Unidos)\n2️⃣ BR (Brasil)\n\nOu digite "pular" para fazer depois.`,
     es: (prefix: string) => `${prefix}Para mantener tu cuenta segura y habilitar compras, necesito algunos datos.\n\n🌍 ¿En qué país estás?\n\n1️⃣ US (Estados Unidos)\n2️⃣ BR (Brasil)\n\nO escribe "saltar" para hacerlo después.`,
   },
   kycDobPrompt: {
@@ -195,9 +195,9 @@ const MSG = {
     es: "Fecha invalida. Usa el formato DD/MM/AAAA (ej.: 15/03/1990).\n\nO escribe \"saltar\".",
   },
   kycTooYoung: {
-    en: "You must be at least 18 years old to use PayJarvis.",
-    pt: "Voce precisa ter pelo menos 18 anos para usar o PayJarvis.",
-    es: "Debes tener al menos 18 años para usar PayJarvis.",
+    en: "You must be at least 18 years old to use SnifferShop.",
+    pt: "Você precisa ter pelo menos 18 anos para usar o SnifferShop.",
+    es: "Debes tener al menos 18 años para usar SnifferShop.",
   },
   kycDocInvalid: {
     en: "That doesn't look right. Please enter a valid document number.\n\nOr type \"skip\".",
@@ -211,7 +211,7 @@ const MSG = {
   },
   resumeKyc: {
     en: "Let's finish your profile. What country are you in?\n\n1️⃣ US (United States)\n2️⃣ BR (Brazil)\n\nOr type \"skip\".",
-    pt: "Vamos terminar seu perfil. Em qual pais voce esta?\n\n1️⃣ US (Estados Unidos)\n2️⃣ BR (Brasil)\n\nOu digite \"pular\".",
+    pt: "Vamos terminar seu perfil. Em qual país você está?\n\n1️⃣ US (Estados Unidos)\n2️⃣ BR (Brasil)\n\nOu digite \"pular\".",
     es: "Terminemos tu perfil. ¿En qué país estás?\n\n1️⃣ US (Estados Unidos)\n2️⃣ BR (Brasil)\n\nO escribe \"saltar\".",
   },
   shippingPrompt: {
@@ -271,14 +271,14 @@ const MSG = {
     es: "¡Parece que ya empezaste! ¿Cuál es tu nombre?",
   },
   resumeNickname: {
-    en: (name: string) => `${name}! Would you like to give me a special name or keep calling me Jarvis?`,
-    pt: (name: string) => `${name}! Quer me dar um nome especial ou pode me chamar de Jarvis?`,
-    es: (name: string) => `¡${name}! ¿Quieres darme un nombre especial o prefieres llamarme Jarvis?`,
+    en: (name: string) => `${name}! Would you like to give me a special name or keep calling me Sniffer?`,
+    pt: (name: string) => `${name}! Quer me dar um nome especial ou pode me chamar de Sniffer?`,
+    es: (name: string) => `¡${name}! ¿Quieres darme un nombre especial o prefieres llamarme Sniffer?`,
   },
   resumeEmailPassword: {
-    en: "Let's create your PayJarvis account! 🔐\n\nSend your email and a NEW password (not your email password — a new one just for PayJarvis):\n\nExample: myemail@gmail.com MyNewPassword123",
-    pt: "Vamos criar sua conta no PayJarvis! 🔐\n\nManda seu email e uma senha NOVA (não é a senha do seu email — é uma nova só para o PayJarvis):\n\nExemplo: meuemail@gmail.com MinhaSenha123",
-    es: "¡Vamos a crear tu cuenta en PayJarvis! 🔐\n\nEnvía tu email y una contraseña NUEVA (no es la contraseña de tu email — es una nueva solo para PayJarvis):\n\nEjemplo: miemail@gmail.com MiContraseña123",
+    en: "Let's create your SnifferShop account! 🔐\n\nSend your email and a NEW password (not your email password — a new one just for SnifferShop):\n\nExample: myemail@gmail.com MyNewPassword123",
+    pt: "Vamos criar sua conta no SnifferShop! 🔐\n\nManda seu email e uma senha NOVA (não é a senha do seu email — é uma nova só para o SnifferShop):\n\nExemplo: meuemail@gmail.com MinhaSenha123",
+    es: "¡Vamos a crear tu cuenta en SnifferShop! 🔐\n\nEnvía tu email y una contraseña NUEVA (no es la contraseña de tu email — es una nueva solo para SnifferShop):\n\nEjemplo: miemail@gmail.com MiContraseña123",
   },
   resumeEmailConfirm: {
     en: (email: string) => `I already sent the code to ${email}. Enter the 6-digit code:`,
@@ -507,14 +507,14 @@ async function handleNameStep(sessionId: string, input: string, lang: Lang): Pro
 
 async function handleBotNicknameStep(sessionId: string, input: string, lang: Lang): Promise<BotResponse> {
   const lower = input.trim().toLowerCase();
-  const keepDefault = ["no", "nah", "jarvis", "keep", "that's fine", "fine", "n", "não", "nao", "pode ser", "no", "está bien", "esta bien"];
+  const keepDefault = ["no", "nah", "jarvis", "sniffer", "keep", "that's fine", "fine", "n", "não", "nao", "pode ser", "no", "está bien", "esta bien"];
   const notAName = ["falar", "português", "portugues", "english", "spanish", "please", "can you", "speak", "language", "idioma", "sim", "yes", "como", "what", "help", "ajuda", "quero", "want", "could", "would", "hablar", "español"];
 
   let nickname: string;
   let response: string;
 
   if (keepDefault.some((k) => lower === k || lower.startsWith(k))) {
-    nickname = "Jarvis";
+    nickname = "Sniffer";
     response = t("keepJarvis", lang) as string;
   } else if (input.trim().length > 20 || notAName.some((w) => lower.includes(w))) {
     return {
@@ -1072,7 +1072,7 @@ async function autoUpgradeKyc(userId: string): Promise<void> {
   });
   if (!user || user.kycLevel !== "NONE") return;
 
-  const hasName = user.fullName && user.fullName !== "PayJarvis User";
+  const hasName = user.fullName && user.fullName !== "SnifferShop User";
   const hasDob = !!user.dateOfBirth;
   const hasCountry = !!user.country;
 
@@ -1266,7 +1266,7 @@ export async function completeOnboarding(sessionId: string, lang?: Lang): Promis
   if (!session) return { message: "Session not found.", step: "error", complete: false };
 
   const effectiveLang = lang ?? (session.language as Lang) ?? "en";
-  const nickname = session.botNickname || "Jarvis";
+  const nickname = session.botNickname || "Sniffer";
 
   if (session.userId) {
     await prisma.$transaction(async (tx) => {
@@ -1453,7 +1453,7 @@ async function createUserAndBot(session: {
         telegramChatId: session.telegramChatId ?? undefined,
         phone: session.whatsappPhone?.replace("whatsapp:", "") ?? undefined,
         notificationChannel: session.telegramChatId ? "telegram" : session.whatsappPhone ? "whatsapp" : "none",
-        botNickname: session.botNickname ?? "Jarvis",
+        botNickname: session.botNickname ?? "Sniffer",
       },
     });
   } else {
@@ -1470,7 +1470,7 @@ async function createUserAndBot(session: {
     }
   }
 
-  const botName = session.botNickname || "Jarvis";
+  const botName = session.botNickname || "Sniffer";
 
   let botId: string;
   if (session.shareCode) {
@@ -1534,7 +1534,7 @@ async function createUserAndBot(session: {
   return { userId: user.id, botId };
 }
 
-async function createDefaultBot(userId: string, botName = "Jarvis"): Promise<string> {
+async function createDefaultBot(userId: string, botName = "Sniffer"): Promise<string> {
   const rawKey = `pj_bot_${randomBytes(24).toString("hex")}`;
   const apiKeyHash = createHash("sha256").update(rawKey).digest("hex");
 
@@ -1704,13 +1704,13 @@ export async function quickStart(opts: {
       telegramChatId: opts.telegramChatId ?? undefined,
       phone: opts.whatsappPhone?.replace("whatsapp:", "") ?? undefined,
       notificationChannel: opts.telegramChatId ? "telegram" : opts.whatsappPhone ? "whatsapp" : "none",
-      botNickname: "Jarvis",
+      botNickname: "Sniffer",
       referredByUserId: opts.referrerUserId ?? undefined,
     },
   });
 
   // Create default bot + policy + agent
-  const botId = await createDefaultBot(user.id, "Jarvis");
+  const botId = await createDefaultBot(user.id, "Sniffer");
 
   // Init credits (5000 free messages)
   await initCredits(user.id, opts.referrerUserId).catch((err) => {

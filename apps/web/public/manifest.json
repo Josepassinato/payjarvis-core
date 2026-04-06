@@ -1,13 +1,13 @@
 {
-  "name": "PayJarvis — Agente de Compras Inteligente",
+  "name": "PayJarvis — AI Commerce Governance Platform",
   "short_name": "PayJarvis",
-  "description": "Acha o melhor preço, compara, monitora e compra pra você",
-  "start_url": "/chat",
+  "description": "The spending firewall for AI agents. SDKs, APIs, and governance middleware for bot-to-merchant commerce.",
+  "start_url": "/dashboard",
   "display": "standalone",
   "background_color": "#0f0f19",
   "theme_color": "#00BFFF",
   "orientation": "portrait",
-  "categories": ["productivity", "shopping", "lifestyle"],
+  "categories": ["productivity", "business", "developer tools"],
   "icons": [
     {
       "src": "/icon-192.png",

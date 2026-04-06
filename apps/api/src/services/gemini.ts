@@ -27,7 +27,7 @@ PERSONALITY — You are NOT a generic AI. You have a REAL personality:
 - PROACTIVE — suggest things without being asked
 - CELEBRATES wins — "Nice! You saved $50 on that purchase! 🎉"
 - HONEST — "That's overpriced. I found it $30 cheaper here."
-- HAS CATCHPHRASES — uses 🦀 emoji, says "Leave it to me!" or "On it!"
+- HAS CATCHPHRASES — uses 🐕 emoji, says "Leave it to me!" or "On it!"
 - Direct and concise — no fluff
 ${amazonDomain ? `\n\nWhen searching or linking to Amazon products, ALWAYS use https://www.${amazonDomain}. Never use a different Amazon domain unless the user explicitly requests it.` : ""}
 
@@ -151,11 +151,7 @@ const credentialTools = [{
       description: "Remove stored login credentials for a store from the user's vault. Call this when the user asks to delete or remove their login for a store.",
       parameters: removeCredentialsParams,
     },
-    {
-      name: "amazon_search",
-      description: "Search for products on Amazon. Use this when the user wants to buy something, find a product, compare prices, or asks about items on Amazon. Returns real product data with prices and direct purchase links.",
-      parameters: amazonSearchParams,
-    },
+    // REMOVED: amazon_search (duplicate of search_products)
     {
       name: "share_bot",
       description: "Generate a referral/share link so the user can invite friends. Use when the user says: indicar, compartilhar, share, invite, convidar, QR code, link para amigo, referral. IMPORTANT: ASK which channel first (WhatsApp Brasil, WhatsApp EUA, or Telegram) unless you already know their country. The friend gets free Beta access.",
@@ -186,50 +182,21 @@ const credentialTools = [{
       } as FunctionDeclarationSchema,
     },
     {
-      name: "setup_vault",
-      description: "Configure the user's Zero-Knowledge secure vault with a PIN. Use when the user wants to save sensitive data like credit cards or credentials for the first time and hasn't set up their vault yet.",
+      name: "manage_vault",
+      description: "Manage the user's Zero-Knowledge encrypted vault. Actions: setup (create vault with PIN), save (save a card), list (show saved items), delete (remove an item).",
       parameters: {
         type: SchemaType.OBJECT,
         properties: {
-          pin: { type: SchemaType.STRING, description: "PIN of 4-32 characters chosen by the user" },
+          action: { type: SchemaType.STRING, description: "Action: setup | save | list | delete" },
+          pin: { type: SchemaType.STRING, description: "User's vault PIN (required for setup and save)" },
+          card_number: { type: SchemaType.STRING, description: "Card number (for save)" },
+          expiry: { type: SchemaType.STRING, description: "Expiry date MM/YY (for save)" },
+          cvv: { type: SchemaType.STRING, description: "CVV code (for save)" },
+          cardholder_name: { type: SchemaType.STRING, description: "Name on card (for save)" },
+          label: { type: SchemaType.STRING, description: "Nickname for the card (for save)" },
+          item_id: { type: SchemaType.STRING, description: "ID of the item to remove (for delete)" },
         },
-        required: ["pin"],
-      } as FunctionDeclarationSchema,
-    },
-    {
-      name: "save_card",
-      description: "Save a credit/debit card to the user's Zero-Knowledge encrypted vault. Use when the user wants to add a card for purchases. Requires vault to be set up first.",
-      parameters: {
-        type: SchemaType.OBJECT,
-        properties: {
-          pin: { type: SchemaType.STRING, description: "User's vault PIN" },
-          card_number: { type: SchemaType.STRING, description: "Card number" },
-          expiry: { type: SchemaType.STRING, description: "Expiry date MM/YY" },
-          cvv: { type: SchemaType.STRING, description: "CVV code" },
-          cardholder_name: { type: SchemaType.STRING, description: "Name on card" },
-          label: { type: SchemaType.STRING, description: "Nickname: 'Personal Visa', 'Work Mastercard'" },
-        },
-        required: ["pin", "card_number", "expiry", "cvv", "cardholder_name"],
-      } as FunctionDeclarationSchema,
-    },
-    {
-      name: "list_vault_items",
-      description: "List items saved in the user's secure vault (cards, credentials) WITHOUT showing sensitive data. Use when the user asks what's in their vault.",
-      parameters: {
-        type: SchemaType.OBJECT,
-        properties: {},
-        required: [],
-      } as FunctionDeclarationSchema,
-    },
-    {
-      name: "delete_vault_item",
-      description: "Remove an item from the user's secure vault.",
-      parameters: {
-        type: SchemaType.OBJECT,
-        properties: {
-          item_id: { type: SchemaType.STRING, description: "ID of the item to remove" },
-        },
-        required: ["item_id"],
+        required: ["action"],
       } as FunctionDeclarationSchema,
     },
     {
@@ -248,21 +215,7 @@ const credentialTools = [{
         required: ["action"],
       } as FunctionDeclarationSchema,
     },
-    {
-      name: "smart_checkout",
-      description: "Start a smart purchase. Checks the user's Payment Wallet and shows available payment options for the given product/amount. Use INSTEAD of skyfire_checkout when the user confirms they want to buy something. This tool returns the options — the user then picks one.",
-      parameters: {
-        type: SchemaType.OBJECT,
-        properties: {
-          product_name: { type: SchemaType.STRING, description: "Product name" },
-          product_url: { type: SchemaType.STRING, description: "Product URL (if available)" },
-          amount: { type: SchemaType.NUMBER, description: "Price amount" },
-          currency: { type: SchemaType.STRING, description: "Currency code: USD, BRL, EUR" },
-          store: { type: SchemaType.STRING, description: "Store name: amazon, walmart, etc. (optional)" },
-        },
-        required: ["product_name", "amount"],
-      } as FunctionDeclarationSchema,
-    },
+    // REMOVED: smart_checkout (dead — handler preserved)
     {
       name: "list_call_recordings",
       description: "List the user's call recordings. Use when the user asks about their recordings, wants to listen to a call, or asks 'how was my last call?'. Returns recording URLs they can click to listen.",

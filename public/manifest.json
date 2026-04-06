@@ -1,7 +1,7 @@
 {
-  "name": "PayJarvis — AI Shopping Assistant",
-  "short_name": "PayJarvis",
-  "description": "Your AI-powered personal shopping assistant",
+  "name": "SnifferShop — Sniffs the Best Deals",
+  "short_name": "SnifferShop",
+  "description": "Your AI deal-hunting agent that sniffs out the best prices",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#2D2D2D",

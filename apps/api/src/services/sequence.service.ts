@@ -19,13 +19,13 @@ interface StepConfig {
 
 const STEPS: StepConfig[] = [
   { step: 0, day: 0, banner: "banner_day0_welcome.png",
-    en: "Your shopping agent is ready! 🦀\n\nI find the best price, compare stores, and monitor deals for you.\n\nSend a product name to get started!",
-    pt: "Seu agente de compras esta pronto! 🦀\n\nAcho o melhor preco, comparo lojas e monitoro ofertas pra voce.\n\nManda o nome de um produto pra comecar!",
-    es: "Tu agente de compras esta listo! 🦀\n\nEncuentro el mejor precio, comparo tiendas y monitoreo ofertas.\n\nEnvia el nombre de un producto para empezar!" },
+    en: "Your shopping agent is ready! 🐕\n\nI find the best price, compare stores, and monitor deals for you.\n\nSend a product name to get started!",
+    pt: "Seu agente de compras está pronto! 🐕\n\nAcho o melhor preço, comparo lojas e monitoro ofertas pra você.\n\nManda o nome de um produto pra começar!",
+    es: "Tu agente de compras esta listo! 🐕\n\nEncuentro el mejor precio, comparo tiendas y monitoreo ofertas.\n\nEnvia el nombre de un producto para empezar!" },
   { step: 1, day: 3, banner: "banner_day3_voice.png",
-    en: "Did you know you can talk to Jarvis by voice?\n\nSend an audio message and get a voice response — like talking to a friend.\n\nTry it now: record an audio!",
-    pt: "Sabia que você pode falar com o Jarvis por áudio?\n\nMande um áudio e receba a resposta em voz — como falar com um amigo.\n\nTesta agora: grave um áudio!",
-    es: "¿Sabías que puedes hablar con Jarvis por voz?\n\nEnvía un audio y recibe respuesta en voz — como hablar con un amigo.\n\n¡Pruébalo ahora: graba un audio!" },
+    en: "Did you know you can talk to Sniffer by voice? 🐕\n\nSend an audio message and get a voice response — like talking to a friend.\n\nTry it now: record an audio!",
+    pt: "Sabia que você pode falar com o Sniffer por áudio? 🐕\n\nMande um áudio e receba a resposta em voz — como falar com um amigo.\n\nTesta agora: grave um áudio!",
+    es: "¿Sabías que puedes hablar con Sniffer por voz? 🐕\n\nEnvía un audio y recibe respuesta en voz — como hablar con un amigo.\n\n¡Pruébalo ahora: graba un audio!" },
   { step: 2, day: 5, banner: "banner_day5_shopping.png",
     en: "Smart Shopping unlocked!\n\nI search products, compare prices, and find the best deals for you.\n\nTry: 'Find me an iPhone 15'",
     pt: "Compras Inteligentes desbloqueadas!\n\nBusco produtos, comparo preços e encontro as melhores ofertas pra você.\n\nTesta: 'Procura um iPhone 15 pra mim'",
@@ -35,9 +35,9 @@ const STEPS: StepConfig[] = [
     pt: "Compartilhe sua localização e desbloqueie resultados perto de você!\n\nRestaurantes, hotéis, eventos — tudo perto com avaliações reais e links do Google Maps.\n\nEnvia sua localização agora!",
     es: "¡Comparte tu ubicación y desbloquea resultados cercanos!\n\nRestaurantes, hoteles, eventos — todo cerca de ti con calificaciones reales y enlaces de Google Maps.\n\n¡Envía tu ubicación ahora!" },
   { step: 4, day: 10, banner: "banner_pwa_install.png", bannerPt: "banner_pwa_install_pt.png",
-    en: "Install Jarvis on your phone!\n\nOpen payjarvis.com/chat in your browser and add it to your Home Screen. One tap and I'm always here — like a real app!\n\niPhone: Safari → Share → Add to Home Screen\nAndroid: Chrome → Menu ⋮ → Add to Home Screen",
-    pt: "Instale o Jarvis no seu celular!\n\nAbra payjarvis.com/chat no navegador e adicione à Tela Inicial. Um toque e eu estou sempre aqui — como um app de verdade!\n\niPhone: Safari → Compartilhar → Adicionar à Tela de Início\nAndroid: Chrome → Menu ⋮ → Adicionar à tela inicial",
-    es: "¡Instala Jarvis en tu celular!\n\nAbre payjarvis.com/chat en tu navegador y agrégalo a la Pantalla de Inicio. ¡Un toque y siempre estoy aquí — como una app real!\n\niPhone: Safari → Compartir → Agregar a Inicio\nAndroid: Chrome → Menú ⋮ → Agregar a Inicio" },
+    en: "Install Sniffer on your phone! 🐕\n\nOpen payjarvis.com/chat in your browser and add it to your Home Screen. One tap and I'm always here — like a real app!\n\niPhone: Safari → Share → Add to Home Screen\nAndroid: Chrome → Menu ⋮ → Add to Home Screen",
+    pt: "Instale o Sniffer no seu celular! 🐕\n\nAbra payjarvis.com/chat no navegador e adicione à Tela Inicial. Um toque e eu estou sempre aqui — como um app de verdade!\n\niPhone: Safari → Compartilhar → Adicionar à Tela de Início\nAndroid: Chrome → Menu ⋮ → Adicionar à tela inicial",
+    es: "¡Instala Sniffer en tu celular! 🐕\n\nAbre payjarvis.com/chat en tu navegador y agrégalo a la Pantalla de Inicio. ¡Un toque y siempre estoy aquí — como una app real!\n\niPhone: Safari → Compartir → Agregar a Inicio\nAndroid: Chrome → Menú ⋮ → Agregar a Inicio" },
   { step: 5, day: 11, banner: "banner_day11_restaurants.png",
     en: "Your dining guide is ready!\n\nReal restaurants with ratings, phone numbers, reservations, and Google Maps links.\n\nTry: 'Japanese restaurant near me'",
     pt: "Seu guia gastronômico está pronto!\n\nRestaurantes reais com avaliações, telefone, reserva e link do Google Maps.\n\nTesta: 'Restaurante japonês perto de mim'",
@@ -47,30 +47,30 @@ const STEPS: StepConfig[] = [
     pt: "Planejamento de viagem completo!\n\nRoteiros dia-a-dia, voos, hotéis e dicas locais para qualquer destino.\n\nTesta: 'Faz um roteiro de 5 dias em Lisboa'",
     es: "¡Planificación de viajes completa!\n\nItinerarios día a día, vuelos, hoteles y tips locales para cualquier destino.\n\nPrueba: 'Planifica un viaje de 5 días a Lisboa'" },
   { step: 7, day: 15, banner: "banner_day15_smartglasses.png",
-    en: "Got Ray-Ban Meta? Use Jarvis hands-free! 😎\n\n🎙️ 'Hey Meta, send message to Jarvis: find Nike shoes'\n📸 Photo → 'Hey Meta, send that to Jarvis'\n🛒 'Hey Meta, tell Jarvis: buy the perfume'\n\nSave my number as 'Jarvis' in your contacts!",
-    pt: "Tem Ray-Ban Meta? Use o Jarvis sem as maos! 😎\n\n🎙️ 'Hey Meta, send message to Jarvis: busca tenis Nike'\n📸 Foto → 'Hey Meta, send that to Jarvis'\n🛒 'Hey Meta, tell Jarvis: compra o perfume'\n\nSalva meu numero como 'Jarvis' nos contatos!",
-    es: "Tienes Ray-Ban Meta? Usa Jarvis manos libres! 😎\n\n🎙️ 'Hey Meta, send message to Jarvis: busca tenis Nike'\n📸 Foto → 'Hey Meta, send that to Jarvis'\n🛒 'Hey Meta, tell Jarvis: compra el perfume'\n\nGuarda mi numero como 'Jarvis' en contactos!" },
+    en: "Got Ray-Ban Meta? Use Sniffer hands-free! 😎\n\n🎙️ 'Hey Meta, send message to Sniffer: find Nike shoes'\n📸 Photo → 'Hey Meta, send that to Sniffer'\n🛒 'Hey Meta, tell Sniffer: buy the perfume'\n\nSave my number as 'Sniffer' in your contacts!",
+    pt: "Tem Ray-Ban Meta? Use o Sniffer sem as mãos! 😎\n\n🎙️ 'Hey Meta, send message to Sniffer: busca tênis Nike'\n📸 Foto → 'Hey Meta, send that to Sniffer'\n🛒 'Hey Meta, tell Sniffer: compra o perfume'\n\nSalva meu número como 'Sniffer' nos contatos!",
+    es: "Tienes Ray-Ban Meta? Usa Sniffer manos libres! 😎\n\n🎙️ 'Hey Meta, send message to Sniffer: busca tenis Nike'\n📸 Foto → 'Hey Meta, send that to Sniffer'\n🛒 'Hey Meta, tell Sniffer: compra el perfume'\n\nGuarda mi numero como 'Sniffer' en contactos!" },
   { step: 8, day: 18, banner: "banner_day18_documents.png",
     en: "Document assistant activated!\n\nContracts, reports, letters — generated as PDF and sent directly to you.\n\nTry: 'Write a service contract'",
     pt: "Assistente de documentos ativo!\n\nContratos, relatórios, cartas — gerados em PDF e enviados direto pra você.\n\nTesta: 'Escreve um contrato de serviços'",
     es: "¡Asistente de documentos activado!\n\nContratos, reportes, cartas — generados en PDF y enviados directamente.\n\nPrueba: 'Escribe un contrato de servicios'" },
   { step: 9, day: 21, banner: "banner_day21_fullpower.png",
-    en: "Your shopping agent is fully loaded! 🦀\n\nPrice history, coupons, subscription management, and 100+ stores.\n\nWhat are you looking to buy today?",
-    pt: "Seu agente de compras esta completo! 🦀\n\nHistorico de precos, cupons, gestao de assinaturas e 100+ lojas.\n\nO que voce quer comprar hoje?",
-    es: "Tu agente de compras esta completo! 🦀\n\nHistorial de precios, cupones, gestion de suscripciones y 100+ tiendas.\n\nQue quieres comprar hoy?" },
+    en: "Your shopping agent is fully loaded! 🐕\n\nPrice history, coupons, subscription management, and 100+ stores.\n\nWhat are you looking to buy today?",
+    pt: "Seu agente de compras está completo! 🐕\n\nHistórico de preços, cupons, gestão de assinaturas e 100+ lojas.\n\nO que você quer comprar hoje?",
+    es: "Tu agente de compras esta completo! 🐕\n\nHistorial de precios, cupones, gestion de suscripciones y 100+ tiendas.\n\nQue quieres comprar hoy?" },
 ];
 
 // Welcome sequence messages for step 0
 const WELCOME_EN = [
-  { delay: 1000, text: "Hey! I'm Jarvis, your shopping agent 🦀\n\nI find the best price across 100+ stores and alert you when prices drop.\n\nSend me a product name to get started!" },
+  { delay: 1000, text: "Hey! I'm Sniffer, your deal-hunting agent 🐕\n\nI sniff out the best price across 100+ stores and alert you when prices drop.\n\nSend me a product name to get started!" },
 ];
 
 const WELCOME_PT = [
-  { delay: 1000, text: "Oi! Eu sou o Jarvis, seu agente de compras 🦀\n\nAcho o melhor preco em 100+ lojas e aviso quando o preco cair.\n\nManda o nome de um produto pra comecar!" },
+  { delay: 1000, text: "Oi! Eu sou o Sniffer, seu farejador de ofertas 🐕\n\nFarejo o melhor preço em 100+ lojas e aviso quando o preço cair.\n\nManda o nome de um produto pra começar!" },
 ];
 
 const WELCOME_ES = [
-  { delay: 1000, text: "¡Hola! Soy Jarvis — tu asistente personal de compras.\n\n🔒 Tus datos están protegidos con cifrado Zero-Knowledge. Ni nosotros podemos verlos.\n\n¡Pregúntame lo que sea. Estoy aquí 24/7!" },
+  { delay: 1000, text: "¡Hola! Soy Sniffer — tu cazador de ofertas personal 🐕\n\nHusmeo el mejor precio en 100+ tiendas y te aviso cuando bajan.\n\n¡Envíame el nombre de un producto para empezar!" },
 ];
 
 const BANNER_BASE_URL = process.env.BANNER_BASE_URL || "https://www.payjarvis.com/public/banners";
@@ -184,7 +184,7 @@ export async function initSequence(
 
   // 1. Logo + Banner
   await sendPhoto(platform, chatId, `${BANNER_BASE_URL}/../logo-full.png`);
-  await sendPhoto(platform, chatId, `${BANNER_BASE_URL}/jarvis_welcome.png`);
+  await sendPhoto(platform, chatId, `${BANNER_BASE_URL}/sniffer_welcome.png`);
 
   // 2. Welcome messages with delays
   const msgs = lang === "pt" ? WELCOME_PT : lang === "es" ? WELCOME_ES : WELCOME_EN;

@@ -14,7 +14,7 @@
 import { prisma } from "@payjarvis/database";
 
 const TRIAL_DAYS = 7;
-const REFERRAL_BONUS_DAYS = 7;
+const REFERRAL_BONUS_DAYS = 30; // 1 month Pro for every 3 referrals
 const REFERRALS_NEEDED = 3;
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
@@ -176,7 +176,7 @@ export async function sendTrialExpiredMessage(phone: string): Promise<void> {
   const upgradeLink = "https://www.payjarvis.com/upgrade";
 
   const messages: Record<string, string> = {
-    pt: `🦀 Seu trial de 7 dias no WhatsApp acabou!
+    pt: `🐕 Seu trial de 7 dias no WhatsApp acabou!
 
 Voce pode continuar usando o Jarvis de 3 formas:
 
@@ -191,7 +191,7 @@ ${pwaLink}
 
 Indica 3 amigos e ganha +7 dias gratis no WhatsApp! Manda "indicar" pra saber mais.`,
 
-    en: `🦀 Your 7-day WhatsApp trial has ended!
+    en: `🐕 Your 7-day WhatsApp trial has ended!
 
 You can keep using Jarvis in 3 ways:
 
@@ -206,7 +206,7 @@ ${pwaLink}
 
 Refer 3 friends and get +7 free days on WhatsApp! Send "refer" to learn more.`,
 
-    es: `🦀 Tu trial de 7 dias en WhatsApp termino!
+    es: `🐕 Tu trial de 7 dias en WhatsApp termino!
 
 Puedes seguir usando Jarvis de 3 formas:
 
@@ -239,7 +239,7 @@ export async function sendTrialReminder(userId: string, daysLeft: number): Promi
   const telegramLink = `https://t.me/${TELEGRAM_BOT_USERNAME}`;
 
   const messages: Record<string, string> = {
-    pt: `🦀 Faltam ${daysLeft} dia${daysLeft > 1 ? "s" : ""} do seu trial no WhatsApp!
+    pt: `🐕 Faltam ${daysLeft} dia${daysLeft > 1 ? "s" : ""} do seu trial no WhatsApp!
 
 Pra continuar aqui:
 • *Premium* R$30/mes → payjarvis.com/upgrade
@@ -247,7 +247,7 @@ Pra continuar aqui:
 
 Indica 3 amigos = +7 dias gratis!`,
 
-    en: `🦀 ${daysLeft} day${daysLeft > 1 ? "s" : ""} left on your WhatsApp trial!
+    en: `🐕 ${daysLeft} day${daysLeft > 1 ? "s" : ""} left on your WhatsApp trial!
 
 To keep using WhatsApp:
 • *Premium* R$30/month → payjarvis.com/upgrade
@@ -255,7 +255,7 @@ To keep using WhatsApp:
 
 Refer 3 friends = +7 free days!`,
 
-    es: `🦀 Quedan ${daysLeft} dia${daysLeft > 1 ? "s" : ""} de tu trial en WhatsApp!
+    es: `🐕 Quedan ${daysLeft} dia${daysLeft > 1 ? "s" : ""} de tu trial en WhatsApp!
 
 Para continuar aqui:
 • *Premium* R$30/mes → payjarvis.com/upgrade
@@ -328,12 +328,12 @@ export async function processReferral(referrerUserId: string, newUserId: string)
     if (referrerData?.phone) {
       const lang = detectLang(referrerData.phone);
       const msg = lang === "pt"
-        ? `🎉 Voce indicou ${referrer.referralCount} amigos! Ganhou +${bonusDays} dias gratis no WhatsApp! 🦀`
-        : `🎉 You referred ${referrer.referralCount} friends! Got +${bonusDays} free WhatsApp days! 🦀`;
+        ? `🎉 Parabéns! Você indicou ${referrer.referralCount} amigos e desbloqueou o Sniffer Pro por 30 dias! 🐕\n\nContinue indicando — a cada 3 amigos, mais 1 mês grátis!`
+        : `🎉 Congrats! You referred ${referrer.referralCount} friends and unlocked Sniffer Pro for 30 days! 🐕\n\nKeep referring — every 3 friends = 1 more free month!`;
       await sendWhatsApp(referrerData.phone, msg);
     }
     if (referrerData?.telegramChatId && TELEGRAM_BOT_TOKEN) {
-      const msg = `🎉 You referred ${referrer.referralCount} friends! +${bonusDays} free WhatsApp days earned! 🦀`;
+      const msg = `🎉 Parabéns! Você indicou ${referrer.referralCount} amigos e desbloqueou o Sniffer Pro por 30 dias! 🐕\n\nContinue indicando — a cada 3 amigos, mais 1 mês grátis!`;
       await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

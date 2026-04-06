@@ -504,7 +504,7 @@ export function formatShoppingPlan(plan: ShoppingPlan, userName: string, lang: "
     lines.push(`5️⃣ Salvar lista pra comprar depois`);
     lines.push(`6️⃣ Compartilhar lista com alguém`);
     lines.push(``);
-    lines.push(`O que deseja? 🦀`);
+    lines.push(`O que deseja? 🐕`);
   } else {
     lines.push(`1️⃣ Approve and buy everything`);
     lines.push(`2️⃣ Remove items from list`);
@@ -513,7 +513,7 @@ export function formatShoppingPlan(plan: ShoppingPlan, userName: string, lang: "
     lines.push(`5️⃣ Save list for later`);
     lines.push(`6️⃣ Share list with someone`);
     lines.push(``);
-    lines.push(`What would you like? 🦀`);
+    lines.push(`What would you like? 🐕`);
   }
 
   // Mark estimated prices

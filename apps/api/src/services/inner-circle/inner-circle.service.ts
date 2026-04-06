@@ -199,7 +199,7 @@ export async function generateIntroduction(
 
     const lang = context.language === "pt" ? "Portuguese" : context.language === "es" ? "Spanish" : "English";
 
-    const prompt = `You are Jarvis 🦀, a personal AI assistant. You're about to introduce your user to someone from your "Inner Circle" — a specialist you personally know and trust.
+    const prompt = `You are Sniffer 🐕, a personal AI assistant. You're about to introduce your user to someone from your "Inner Circle" — a specialist you personally know and trust.
 
 Specialist: ${specialist.name}
 Expertise: ${specialist.expertise}

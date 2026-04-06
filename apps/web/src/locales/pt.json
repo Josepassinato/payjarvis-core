@@ -19,7 +19,9 @@
     "stores": "Lojas",
     "billing": "Assinatura",
     "wallet": "Carteira",
-    "setupShopping": "Configurar Compras"
+    "setupShopping": "Configurar Compras",
+    "docs": "Documentos",
+    "setupPhone": "Configurar Telefone"
   },
   "common": {
     "save": "Salvar",
@@ -125,7 +127,9 @@
     "quantity": "Quantidade",
     "blockedTx": "{{count}} transacoes bloqueadas (trust score: {{score}})",
     "nearLimit": "atingiu {{pct}}% do limite mensal",
-    "txCount": "{{count}} transacoes"
+    "txCount": "{{count}} transacoes",
+    "snifferCtaTitle": "Ainda nao tem um bot? Experimente o SnifferShop",
+    "snifferCtaDesc": "Agente de compras IA plug & play, totalmente integrado ao PayJarvis. Sem codigo."
   },
   "bots": {
     "title": "Bots",
@@ -521,5 +525,112 @@
       "goToDashboard": "Ir ao Dashboard",
       "activationFailed": "Falha na ativacao. Tente novamente."
     }
+  },
+  "docs": {
+    "badge": "Documentacao para Desenvolvedores",
+    "title": "Construa com a",
+    "titleHighlight": "API PayJarvis",
+    "subtitle": "Tudo que voce precisa para integrar governanca de agentes IA na sua plataforma. SDKs, referencia de API e exemplos de codigo.",
+    "tab": {
+      "quickstart": "Inicio Rapido",
+      "auth": "Autenticacao",
+      "sdk": "SDKs",
+      "api": "Referencia API",
+      "webhooks": "Webhooks"
+    },
+    "qs": {
+      "overviewTitle": "Comece em 5 minutos",
+      "overviewDesc": "PayJarvis e um middleware de governanca para agentes IA. Ele fica entre seu bot e o lojista, aplicando limites de gasto, exigindo aprovacao humana e mantendo um log de auditoria imutavel. Cada compra do seu bot passa pelo nosso sistema de verificacao em 4 camadas.",
+      "step1Title": "Instale o SDK",
+      "step1Desc": "Disponivel para Node.js, Python, PHP, Java e Go.",
+      "step2Title": "Inicialize o cliente",
+      "step2Desc": "Use sua Bot API Key e Bot ID do dashboard.",
+      "step3Title": "Solicite uma decisao de pagamento",
+      "step3Desc": "Antes do bot concluir uma compra, pergunte ao PayJarvis se e permitido.",
+      "step4Title": "Verifique a reputacao",
+      "step4Desc": "Monitore o trust score e a taxa de sucesso do seu bot."
+    },
+    "auth": {
+      "title": "Metodos de Autenticacao",
+      "desc": "PayJarvis suporta multiplos metodos de autenticacao dependendo do contexto. Bot API Keys sao os mais comuns para integracoes via SDK.",
+      "botKeyTitle": "Bot API Key",
+      "botKeyDesc": "Autenticacao principal para SDK e chamadas bot-API. Gerada ao criar um bot. Prefixo: pj_bot_*",
+      "clerkTitle": "Clerk JWT",
+      "clerkDesc": "Dashboard e endpoints para usuarios. Emitido pelo Clerk apos login. Enviado como Bearer token.",
+      "bditTitle": "Token BDIT",
+      "bditDesc": "Bot Digital Identity Token. JWT assinado com RS256 para verificacao de bot pelo lojista.",
+      "hmacTitle": "Assinaturas de Webhook",
+      "hmacDesc": "Assinaturas HMAC-SHA256 para verificar payloads de webhooks do PayJarvis.",
+      "exampleTitle": "Exemplo de Autenticacao",
+      "securityTitle": "Boas Praticas de Seguranca",
+      "securityDesc": "Nunca exponha sua Bot API Key em codigo client-side. Armazene em variaveis de ambiente. Rotacione chaves imediatamente se comprometidas. Use HTTPS em todas as chamadas."
+    },
+    "sdk": {
+      "title": "SDKs Oficiais",
+      "desc": "Bibliotecas prontas para integrar o PayJarvis no seu agente IA em minutos.",
+      "agentDesc": "SDK completo para desenvolvedores de agentes IA. Gerencia pagamentos, aprovacoes, reputacao e eventos em tempo real.",
+      "verifyDesc": "SDK leve para lojistas verificarem identidade de bots (tokens BDIT) no checkout. Verificacao local em <5ms.",
+      "merchantDesc": "SDK completo para lojistas: verificacao de bot, confirmacao de compra e gerenciamento de webhooks."
+    },
+    "api": {
+      "title": "Referencia da API",
+      "desc": "API RESTful com 230+ endpoints. Todas as requisicoes usam JSON. Respostas incluem codigos HTTP padrao.",
+      "method": "Metodo",
+      "endpoint": "Endpoint",
+      "description": "Descricao",
+      "authCol": "Auth",
+      "botsTitle": "Bots",
+      "createBot": "Criar um novo bot",
+      "listBots": "Listar todos os seus bots",
+      "getBot": "Obter detalhes do bot",
+      "updateBot": "Atualizar configuracao do bot",
+      "botStatus": "Alterar status do bot (ativo/pausado/revogado)",
+      "deleteBot": "Excluir um bot permanentemente",
+      "paymentsTitle": "Pagamentos e Transacoes",
+      "requestPayment": "Solicitar decisao de pagamento (fluxo principal)",
+      "listTx": "Listar transacoes com filtros",
+      "exportPdf": "Exportar transacoes em PDF",
+      "approvalsTitle": "Aprovacoes",
+      "listApprovals": "Listar solicitacoes de aprovacao pendentes",
+      "sseApprovals": "Stream de aprovacoes em tempo real (SSE)",
+      "sseBotApprovals": "Stream de aprovacoes do bot (SSE)",
+      "respondApproval": "Aprovar ou rejeitar uma solicitacao",
+      "approvalStatus": "Verificar status da aprovacao",
+      "identityTitle": "Identidade e BDIT",
+      "verifyAgent": "Verificacao publica de identidade do agente",
+      "issueAit": "Emitir Agent Identity Token",
+      "jwks": "Chaves publicas JWKS para verificacao BDIT",
+      "bditStatus": "Verificar status do token BDIT",
+      "governanceTitle": "Governanca e Politicas",
+      "getPolicy": "Obter politica e nivel de confianca do bot",
+      "updatePolicy": "Atualizar politica de gastos",
+      "auditLog": "Visualizar log de auditoria imutavel",
+      "executeAction": "Executar acao governada (busca/reserva/compra)",
+      "commerceTitle": "APIs de Comercio",
+      "searchFlights": "Buscar voos (Amadeus)",
+      "searchHotels": "Buscar hoteis (Amadeus)",
+      "searchRestaurants": "Buscar restaurantes (Yelp)",
+      "searchProducts": "Buscar produtos (Mercado Libre + eBay)",
+      "retailSearch": "Busca multi-plataforma de varejo",
+      "retailCompare": "Comparacao de precos entre varejistas",
+      "fullRef": "Este e um resumo dos endpoints mais importantes. A API completa inclui 230+ rotas cobrindo comercio, transporte, voz, vault, lojas e mais. Entre em contato para a especificacao completa."
+    },
+    "wh": {
+      "title": "Webhooks",
+      "desc": "Receba notificacoes em tempo real quando eventos ocorrem na sua conta PayJarvis. Todos os webhooks sao assinados com HMAC-SHA256.",
+      "eventsTitle": "Eventos Disponiveis",
+      "paymentApproved": "Um pagamento foi aprovado pela politica ou humano",
+      "paymentBlocked": "Um pagamento foi bloqueado pelas regras de politica",
+      "paymentPending": "Um pagamento requer aprovacao humana",
+      "approvalResponded": "Um humano respondeu a uma solicitacao de aprovacao",
+      "botStatusChanged": "Status do bot alterado (ativo/pausado/revogado)",
+      "trustUpdated": "Trust score do bot foi recalculado",
+      "verifyTitle": "Verificando Assinaturas de Webhook",
+      "payloadTitle": "Exemplo de Payload"
+    },
+    "helpTitle": "Precisa de ajuda?",
+    "helpDesc": "Nossa equipe de desenvolvimento esta pronta para ajudar na integracao.",
+    "helpEmail": "Email dev@payjarvis.com",
+    "helpPartners": "Seja um Parceiro"
   }
 }
