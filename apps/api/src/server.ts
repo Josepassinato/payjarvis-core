@@ -93,6 +93,7 @@ import skyfireRoutes from "./routes/skyfire.js";
 import { glassesRoutes } from "./routes/glasses.js";
 import addressRoutes from "./routes/addresses.js";
 import { customServicesRoutes } from "./routes/custom-services.js";
+import { githubWebhookRoutes } from "./routes/github-webhook.js";
 import { rateLimiter, webhookRateLimiter } from "./middleware/rate-limiter.js";
 
 // Cron jobs
@@ -284,6 +285,9 @@ await app.register(onboardingBotRoutes);
 
 // Stripe Webhook — setup_intent.succeeded, payment confirmations
 await app.register(stripeWebhookRoutes);
+
+// GitHub Webhook — CI failure auto-fix
+await app.register(githubWebhookRoutes);
 
 // WhatsApp Webhook — Twilio production, Jarvis AI responses
 await app.register(whatsappWebhookRoutes);
