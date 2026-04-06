@@ -44,7 +44,7 @@ function getClient() {
  * Split a long message into chunks that fit Twilio's 1600-char WhatsApp limit.
  * Splits on paragraph breaks first, then sentence boundaries, then hard-cuts.
  */
-function splitMessage(text: string, maxLen = 1400): string[] {
+function splitMessage(text: string, maxLen = 3800): string[] {
   if (text.length <= maxLen) return [text];
 
   const chunks: string[] = [];

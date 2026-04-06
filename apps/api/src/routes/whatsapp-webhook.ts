@@ -22,6 +22,7 @@ import { sendWhatsAppMessage, sendWhatsAppAudio, sendWhatsAppDocument, sendWhats
 import { transcribeAudio, textToSpeech, cleanupFiles } from "../services/audio/index.js";
 import { downloadAudio, downloadAudioAsBase64, convertToWav, cleanupFile } from "../services/audio/index.js";
 import { readFileSync, existsSync } from "fs";
+import { detectPromise, detectResult, registerPromise, fulfillPromise } from "../services/watchdog/promise-tracker.js";
 
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN || "";
 const WEBHOOK_URL = process.env.WHATSAPP_WEBHOOK_URL || "https://www.payjarvis.com/webhook/whatsapp";
@@ -71,9 +72,9 @@ const GREETING_PATTERNS: Record<string, RegExp> = {
 };
 
 const GREETING_RESPONSES: Record<string, string> = {
-  pt: "Olá! Sou o Jarvis, seu assistente pessoal. Como posso te ajudar hoje?",
-  en: "Hello! I'm Jarvis, your personal assistant. How can I help you today?",
-  es: "¡Hola! Soy Jarvis, tu asistente personal. ¿En qué puedo ayudarte hoy?",
+  pt: "Olá! Sou o Sniffer, seu farejador de ofertas 🐕 Como posso te ajudar hoje?",
+  en: "Hello! I'm Sniffer, your deal-hunting agent 🐕 How can I help you today?",
+  es: "¡Hola! Soy Sniffer, tu cazador de ofertas 🐕 ¿En qué puedo ayudarte hoy?",
 };
 
 // Pre-generated greeting audio cache (populated lazily on first use)
@@ -360,14 +361,87 @@ export async function whatsappWebhookRoutes(app: FastifyInstance) {
         return;
       }
 
+      // ─── Recommendation feedback via text (before AI processing) ───
+      if (text) {
+        const lowerText = text.toLowerCase().trim();
+        // Check for "stop recommendations" patterns
+        const stopPatterns = ["parar dicas", "para dicas", "stop tips", "chega de dicas", "não manda mais dica", "stop recommendations"];
+        const isStop = stopPatterns.some(p => lowerText.includes(p));
+        if (isStop) {
+          try {
+            const cleanPhone = from.replace("whatsapp:", "");
+            const recUser = await prisma.user.findFirst({
+              where: { OR: [{ phone: cleanPhone }, { phone: cleanPhone.replace("+", "") }] },
+              select: { id: true },
+            });
+            if (recUser) {
+              await prisma.userNotificationPreferences.upsert({
+                where: { userId: recUser.id },
+                create: { userId: recUser.id, recommendations: false },
+                update: { recommendations: false },
+              });
+              const lang = detectLangFromPhone(from);
+              const msg = lang === "pt"
+                ? "Ok! Pausei as dicas de produtos. Se quiser reativar, me diz 'ativar dicas'."
+                : "OK! Product tips paused. Say 'enable tips' to reactivate.";
+              await sendWhatsAppMessage(from, msg, botNumber);
+              return;
+            }
+          } catch { /* fall through to normal processing */ }
+        }
+
+        // Check for "enable recommendations" patterns
+        const enablePatterns = ["ativar dicas", "ativa dicas", "enable tips", "quero dicas"];
+        const isEnable = enablePatterns.some(p => lowerText.includes(p));
+        if (isEnable) {
+          try {
+            const cleanPhone = from.replace("whatsapp:", "");
+            const recUser = await prisma.user.findFirst({
+              where: { OR: [{ phone: cleanPhone }, { phone: cleanPhone.replace("+", "") }] },
+              select: { id: true },
+            });
+            if (recUser) {
+              await prisma.userNotificationPreferences.upsert({
+                where: { userId: recUser.id },
+                create: { userId: recUser.id, recommendations: true },
+                update: { recommendations: true },
+              });
+              const lang = detectLangFromPhone(from);
+              const msg = lang === "pt"
+                ? "🐕 Dicas reativadas! Vou farejar as melhores ofertas pra você."
+                : "🐕 Tips reactivated! I'll sniff out the best deals for you.";
+              await sendWhatsAppMessage(from, msg, botNumber);
+              return;
+            }
+          } catch { /* fall through */ }
+        }
+      }
+
       // ─── Text message handling (original flow) ───
       if (!text) return;
 
       sendProcessingReaction();
       try {
-        const responseText = await processWhatsAppMessage(from, text, botNumber);
-        if (responseText) {
+        const rawResponseText = await processWhatsAppMessage(from, text, botNumber);
+        if (rawResponseText) {
+          const responseText = rawResponseText.replace(/\[FORMAT:(TEXT|AUDIO)\]\s*/gi, '').trim();
           await sendWhatsAppMessage(from, responseText, botNumber);
+
+          // Watchdog: track promises and fulfillments (non-blocking)
+          (async () => {
+            try {
+              // If this response contains actual results, fulfill any pending promise
+              if (detectResult(responseText)) {
+                await fulfillPromise(from);
+              }
+              // If this response contains a promise pattern, register it
+              if (detectPromise(responseText)) {
+                await registerPromise(from, "whatsapp", responseText, text.substring(0, 100));
+              }
+            } catch (err) {
+              console.error("[WATCHDOG] Promise tracking error:", (err as Error).message);
+            }
+          })();
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Unknown error";
@@ -718,7 +792,7 @@ async function processImageMessage(
     const timeoutPromise = new Promise<string>((resolve) =>
       setTimeout(() => {
         console.log(`[DEBUG-IMG] TIMEOUT! Pipeline exceeded ${IMAGE_PIPELINE_TIMEOUT_MS}ms. Sending fallback.`);
-        resolve("A análise da imagem demorou mais que o esperado. Me diz o nome do produto que eu busco pra você! 🦀");
+        resolve("A análise da imagem demorou mais que o esperado. Me diz o nome do produto que eu busco pra você! 🐕");
       }, IMAGE_PIPELINE_TIMEOUT_MS)
     );
     responseText = await Promise.race([processingPromise, timeoutPromise]);
@@ -726,10 +800,11 @@ async function processImageMessage(
   } catch (err) {
     console.log(`[DEBUG-IMG] ERROR! Pipeline threw: ${(err as Error).message}`);
     request.log.error({ err: (err as Error).message, from }, "[WhatsApp Image] Pipeline error");
-    responseText = "Erro ao processar a imagem. Tenta mandar de novo ou me diz o que procura! 🦀";
+    responseText = "Erro ao processar a imagem. Tenta mandar de novo ou me diz o que procura! 🐕";
   }
 
   if (responseText) {
+    responseText = responseText.replace(/\[FORMAT:(TEXT|AUDIO)\]\s*/gi, '').trim();
     console.log(`[DEBUG-IMG] 4. Sending response to WhatsApp (${responseText.length} chars)...`);
     try {
       await sendWhatsAppMessage(from, responseText, botNumber);

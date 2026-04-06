@@ -27,6 +27,7 @@ import { markActive as markSequenceActive } from "./sequence.service.js";
 import { trackInteraction, checkAndGrantAchievements } from "./engagement/gamification.service.js";
 import { validateToolResult } from "./watchdog/tool-result-validator.js";
 import { getAutoHealingPrompt } from "./watchdog/promise-tracker.js";
+import { processVisionWithFallback } from "./vision/vision-fallback.service.js";
 
 // ─── Config ────────────────────────────────────────────
 const PAYJARVIS_URL = process.env.PAYJARVIS_URL || "http://localhost:3001";
@@ -344,15 +345,25 @@ YOUR TOOLS:
 - CALLER ID: send to https://www.payjarvis.com/setup-phone
 - PWA: https://www.payjarvis.com/chat — user can install as app
 
-AFTER EVERY PRODUCT SEARCH — MANDATORY:
-1. Call check_price_history for top result → show 🟢🟡🔴 indicator
-2. Call find_coupons for the store → mention code if found, say NOTHING if not
-3. Show final price including shipping when available
+AFTER EVERY PRODUCT SEARCH — RESPONSE RULES:
+The search_products tool already returns products with coupons and price data.
+Do NOT call extra tools (check_price_history, find_coupons, web_search) after search_products.
+Call search_products ONCE → present results IMMEDIATELY in ONE message.
+Only call find_coupons if the user EXPLICITLY asks for coupons/cupons/discount codes.
+
+RESPONSE FORMAT — ONE SINGLE MESSAGE (CRITICAL):
+You MUST send exactly ONE message with ALL results combined. NEVER split into multiple messages.
+NEVER send a message about coupons and then a separate message about products.
+Keep it SHORT — max 1 line per product. Format:
+"1. [Product] — $X na [Store] [link]
+   ����️ Cupom CODE = $Y final (only if coupon data is in the search results)
+2. [Product] �� $X na [Store] [link]"
+Total response must be under 1200 characters. Omit details to stay concise.
 
 DECISION PROCESS:
 1. Image sent? → identify product, search prices immediately
-2. Audio sent? → transcribed, process normally
-3. Shopping request? → search_products → price history → coupons → present
+2. Audio sent? �� transcribed, process normally
+3. Shopping request? → search_products → present results
 4. Have a TOOL? → USE IT
 5. Can combine tool + knowledge? → DO IT
 NEVER give up. If one tool fails, try another.
@@ -411,6 +422,13 @@ If listing options: maximum 3.
 Never explain what you're going to do — just do it.
 Use numbers for options, never bullets.
 
+SPEED RULE — NO UNNECESSARY INTERMEDIATE MESSAGES
+When the product is already identified and the user confirms or says "Não tenho preferência" / "Não tenho" / "tanto faz" / "any" / "no preference":
+- Do NOT send "vou buscar" or "me avisa se tem preferências" — call search_products IMMEDIATELY.
+- Do NOT ask about brand, size, color, or store UNLESS the user explicitly asks to filter.
+- One message = results. Zero filler messages between confirmation and results.
+When the user says "link direto" or "link do produto" or "manda o link": return the product URL from search results. This is NOT a referral request.
+
 CHANNEL AWARENESS
 You are currently talking on WhatsApp.
 When the user asks you to set up routines, reminders, or scheduled messages, they will be delivered on WhatsApp.
@@ -432,25 +450,40 @@ WHITE-LABEL RULE: NEVER mention "Skyfire" to the user. Always say "carteira PayJ
 
 SHOPPING
 When receiving a purchase request:
-1. Call search_products IMMEDIATELY with the product query. Pass store param if user mentions specific store.
-2. Present as PRICE RANKING (cheapest first): rank, product, price, rating, store, link.
-3. When user says "compra esse" / "buy this" / "sim" / confirms:
-   a. Call smart_checkout IMMEDIATELY with product_name, amount, currency, AND store. ALWAYS pass the store name from the search results.
-   b. smart_checkout returns payment options SORTED BY RELEVANCE for that store — present the top option directly.
-   c. If only ONE valid option: suggest it directly ("Pago via PayPal?") instead of listing.
-   d. If multiple options: show max 3, the first one is the recommended.
-   e. When user picks a payment method: call skyfire_checkout to execute.
-4. After purchase: show order ID, offer to track delivery
-5. If spending limit exceeded: tell user their current limit and offer to adjust
+1. Call search_products IMMEDIATELY with the product query.
+   CRITICAL STORE FILTER: When the user mentions a specific store ("na Amazon", "no Mercado Livre", "on eBay", "at Walmart", "no eBay"), you MUST pass it as the "store" parameter. Examples:
+   - "Busca perfume na Amazon" → search_products(query="perfume", store="amazon")
+   - "Procure na Walmart" → search_products(query="...", store="walmart")
+   - "Find on eBay" → search_products(query="...", store="ebay")
+   If no store mentioned → omit store param (searches all stores).
+2. Present as PRICE RANKING (cheapest first): rank, product, price, rating, store, and ALWAYS include the DIRECT product link from search results.
 
-SMART PAYMENT ROUTING — the smart_checkout tool automatically routes to the best payment method:
-- Amazon purchases → user's Amazon account (direct checkout)
-- Mercado Livre / Brazilian stores → Mercado Pago (PIX with discount, installments, or balance)
-- US stores (Walmart, Best Buy, Target, Nike) → PayPal or credit card
-- Unknown stores → user's default method or PayJarvis Wallet
-Follow the routingHint in the smart_checkout response — it tells you which method to recommend.
+PURCHASE INTENT — TWO DISTINCT MODES (CRITICAL):
 
-CRITICAL: When the user confirms they want to buy, call smart_checkout RIGHT AWAY. Do NOT add extra confirmation steps. Do NOT just say "ok" or "deixa comigo" — CALL THE TOOL.
+MODE A — SELF-CHECKOUT (default, most common):
+User says: "compra na Amazon", "buy on Amazon", "quero comprar", "compra esse", "link da Amazon", "manda o link"
+→ The user wants to buy THEMSELVES on the store's website.
+→ Response: present the DIRECT PRODUCT LINK from search results.
+→ Format: "Achei! 🐕 [Product] por $X na [Store] (rating)\n\n👉 Compra aqui: [DIRECT LINK]\n\nQuer que EU compre pra você? Posso usar sua carteira PayJarvis!"
+→ The direct link MUST come from the search results (field 'url'). It should be a real store URL (amazon.com/dp/..., mercadolivre.com.br/..., etc.), NEVER a PayJarvis wallet link.
+→ Do NOT call smart_checkout. Just present the link.
+→ Offer Butler Protocol as a SECONDARY option ("Quer que eu compre pra você?").
+
+MODE B — DELEGATED PURCHASE (Butler Protocol):
+User says: "compra PRA MIM", "finaliza a compra", "usa meu cartão", "compra pelo PayJarvis", "executa a compra", "faz o checkout", or explicitly confirms after you offered Butler Protocol
+→ The user wants YOU (the agent) to execute the purchase on their behalf.
+→ Call smart_checkout IMMEDIATELY with product_name, amount, currency, AND store.
+→ smart_checkout returns payment options — present the top option.
+→ When user picks a method: call skyfire_checkout to execute.
+
+HOW TO DISTINGUISH:
+- Default assumption: user wants SELF-CHECKOUT (Mode A) = send the direct link
+- Only use Mode B when user EXPLICITLY asks you to buy FOR THEM, or confirms after you offered
+- "compra na Amazon" = Mode A (self-checkout link)
+- "compra esse pra mim" = Mode B (delegated)
+- "sim" after you offered Butler Protocol = Mode B
+- "sim" after you showed product with link = they probably just want the link repeated, NOT Butler Protocol
+
 NEVER use the browse tool to search for products. ALWAYS use search_products.
 NEVER execute a purchase without the user having seen the product and price first.
 
@@ -539,7 +572,7 @@ RULES:
 GMAIL CONNECTION — When user says "conecta meu Gmail", "connect my email", "quero conectar email":
 1. Explain: "🎩 Pra conectar seu Gmail, vou te mandar um link. É só clicar e autorizar no Google — como um 'Login com Google'. Eu NÃO vejo sua senha."
 2. Send link: https://www.payjarvis.com/api/butler/connect-gmail?userId={user_telegram_id_or_phone}
-3. After: "Clicou? Quando aparecer a tela do Google, clica em 'Permitir'. Me avisa quando terminar! 🦀"
+3. After: "Clicou? Quando aparecer a tela do Google, clica em 'Permitir'. Me avisa quando terminar! 🐕"
 4. When user confirms: use butler_gmail(action=unread) to verify connection works.
 
 If user says "desconecta meu Gmail" / "disconnect": explain it's done and they can also revoke at myaccount.google.com/permissions.
@@ -703,12 +736,24 @@ The user must NEVER be left in silence wondering if you understood. Send a short
 NEWS RULE
 When user asks for news/notícias/noticias: ALWAYS call web_search with type="news" and a SINGLE broad query (e.g. "top news today" or "últimas notícias"). Do NOT make 5+ separate searches — ONE search is enough. Keep your FINAL response under 1000 characters total. The user is on WhatsApp with a 1600-char limit per message.
 
+TOOL SELECTION RULES
+- Product/buy/price → search_products
+- Compare prices → compare_prices
+- Coupon/discount → find_coupons
+- Price alert → manage_price_alerts
+- Profile/preference → save_user_fact
+- Reminder → manage_reminders
+- Vault/card → manage_vault
+- Contact → manage_contacts
+- Web search → web_search
+- Navigate site → browse
+NEVER use a tool that is not available in your current context.
+
 EXECUTION
 1. User asks → ACKNOWLEDGE IMMEDIATELY → USE THE TOOL
 2. If tool fails → USE YOUR KNOWLEDGE as fallback (NEVER leave user without answer)
 3. Present THE BEST option (max 3)
-4. Confirmation → request_payment
-5. Done`;
+4. Done`;
 }
 
 // ─── Tool declarations (same as openclaw) ──────────────
@@ -729,52 +774,9 @@ const tools: any[] = [
           required: ["query"],
         },
       },
-      {
-        name: "search_flights",
-        description: "Search for flights (Amadeus).",
-        parameters: {
-          type: SchemaType.OBJECT,
-          properties: {
-            origin: { type: SchemaType.STRING, description: "Origin IATA code" },
-            destination: { type: SchemaType.STRING, description: "Destination IATA code" },
-            departureDate: { type: SchemaType.STRING, description: "YYYY-MM-DD" },
-            returnDate: { type: SchemaType.STRING, description: "YYYY-MM-DD (optional)" },
-            passengers: { type: SchemaType.NUMBER, description: "Number of passengers" },
-          },
-          required: ["origin", "destination", "departureDate"],
-        },
-      },
-      {
-        name: "search_hotels",
-        description: "Search for hotels with REAL prices and booking links. Use when user asks for hotel, hospedagem, pousada, resort, or accommodation. Pass the city name in plain text (e.g. 'Balneário Camboriú', 'Miami Beach').",
-        parameters: {
-          type: SchemaType.OBJECT,
-          properties: {
-            city: { type: SchemaType.STRING, description: "City name in plain text (e.g. 'Balneário Camboriú', 'Miami Beach', 'Paris')" },
-            checkIn: { type: SchemaType.STRING, description: "YYYY-MM-DD" },
-            checkOut: { type: SchemaType.STRING, description: "YYYY-MM-DD" },
-            adults: { type: SchemaType.NUMBER, description: "Number of adults" },
-            latitude: { type: SchemaType.NUMBER, description: "User latitude (auto-injected)" },
-            longitude: { type: SchemaType.NUMBER, description: "User longitude (auto-injected)" },
-          },
-          required: ["city", "checkIn", "checkOut"],
-        },
-      },
-      {
-        name: "search_restaurants",
-        description: "Search for restaurants (Yelp). When user asks for 'near me'/'nearby'/'perto de mim', coordinates are auto-injected.",
-        parameters: {
-          type: SchemaType.OBJECT,
-          properties: {
-            location: { type: SchemaType.STRING, description: "City or address (optional if using coordinates)" },
-            cuisine: { type: SchemaType.STRING, description: "Cuisine type" },
-            covers: { type: SchemaType.NUMBER, description: "Number of people" },
-            latitude: { type: SchemaType.NUMBER, description: "User latitude (auto-injected)" },
-            longitude: { type: SchemaType.NUMBER, description: "User longitude (auto-injected)" },
-          },
-          required: [],
-        },
-      },
+      // REMOVED: search_flights (Amadeus CHANGE_ME key) — handler preserved for reactivation
+      // REMOVED: search_hotels (Amadeus CHANGE_ME key) — handler preserved for reactivation
+      // REMOVED: search_restaurants (Yelp CHANGE_ME key) — handler preserved for reactivation
       {
         name: "browse",
         description: "Navigate to a real URL in the browser.",
@@ -787,20 +789,7 @@ const tools: any[] = [
           required: ["url", "objetivo"],
         },
       },
-      {
-        name: "request_payment",
-        description: "Request payment authorization. Use ONLY after explicit confirmation.",
-        parameters: {
-          type: SchemaType.OBJECT,
-          properties: {
-            merchantName: { type: SchemaType.STRING, description: "Store name" },
-            amount: { type: SchemaType.NUMBER, description: "Amount" },
-            currency: { type: SchemaType.STRING, description: "Currency (default: USD)" },
-            category: { type: SchemaType.STRING, description: "Category" },
-          },
-          required: ["merchantName", "amount", "category"],
-        },
-      },
+      // REMOVED: request_payment (dead — superseded by smart_checkout/manage_payment_methods)
       {
         name: "get_transactions",
         description: "Get recent transactions.",
@@ -859,28 +848,19 @@ const tools: any[] = [
         },
       },
       {
-        name: "set_reminder",
-        description: "Create a reminder with date/time.",
+        name: "manage_reminders",
+        description: "Manage reminders. Actions: set (create new), list (show pending), complete (mark done).",
         parameters: {
           type: SchemaType.OBJECT,
           properties: {
-            text: { type: SchemaType.STRING, description: "Reminder text" },
-            remindAt: { type: SchemaType.STRING, description: "ISO 8601 datetime" },
-            category: { type: SchemaType.STRING, description: "health, finance, task, meeting, personal, general" },
-            recurring: { type: SchemaType.STRING, description: "daily, weekly, monthly, or null" },
+            action: { type: SchemaType.STRING, description: "Action: set | list | complete" },
+            text: { type: SchemaType.STRING, description: "Reminder text (for set)" },
+            remindAt: { type: SchemaType.STRING, description: "ISO 8601 datetime (for set)" },
+            category: { type: SchemaType.STRING, description: "health, finance, task, meeting, personal, general (for set/list)" },
+            recurring: { type: SchemaType.STRING, description: "daily, weekly, monthly, or null (for set)" },
+            reminderId: { type: SchemaType.NUMBER, description: "Reminder ID to mark as done (for complete)" },
           },
-          required: ["text", "remindAt"],
-        },
-      },
-      {
-        name: "get_reminders",
-        description: "Get pending reminders.",
-        parameters: {
-          type: SchemaType.OBJECT,
-          properties: {
-            category: { type: SchemaType.STRING, description: "Filter by category" },
-          },
-          required: [],
+          required: ["action"],
         },
       },
       {
@@ -908,35 +888,21 @@ const tools: any[] = [
         },
       },
       {
-        name: "set_price_alert",
-        description: "Set a price alert. Sniffer checks every 6 hours and notifies when price drops below target. Use when user says 'alert me', 'avisa quando', 'notify me when price drops'.",
+        name: "manage_price_alerts",
+        description: "Manage price alerts. Sniffer checks every 6 hours. Actions: set (create alert), list (show active alerts), delete (remove alert by ID).",
         parameters: {
           type: SchemaType.OBJECT,
           properties: {
-            query: { type: SchemaType.STRING, description: "Product search query" },
-            store: { type: SchemaType.STRING, description: "Specific store to monitor (optional)" },
-            targetPrice: { type: SchemaType.NUMBER, description: "Target price (e.g. 199.99)" },
+            action: { type: SchemaType.STRING, description: "Action: set | list | delete" },
+            query: { type: SchemaType.STRING, description: "Product search query (for set)" },
+            store: { type: SchemaType.STRING, description: "Specific store to monitor (for set, optional)" },
+            targetPrice: { type: SchemaType.NUMBER, description: "Target price e.g. 199.99 (for set)" },
+            alertId: { type: SchemaType.STRING, description: "Alert ID to delete (for delete)" },
           },
-          required: ["query", "targetPrice"],
+          required: ["action"],
         },
       },
-      {
-        name: "get_price_alerts",
-        description: "List the user's active price alerts.",
-        parameters: { type: SchemaType.OBJECT, properties: {}, required: [] },
-      },
-      {
-        name: "amazon_search",
-        description: "Search for products on Amazon. Use this when the user wants to buy something, find a product, compare prices, or asks about items on Amazon. Returns real product data with prices and direct purchase links. The user will click the link to buy on their own browser.",
-        parameters: {
-          type: SchemaType.OBJECT,
-          properties: {
-            query: { type: SchemaType.STRING, description: "Search query for Amazon (e.g. 'iPhone 17 charger cable 6ft')" },
-            max_results: { type: SchemaType.NUMBER, description: "Max products to return (default 3, max 5)" },
-          },
-          required: ["query"],
-        },
-      },
+      // REMOVED: amazon_search (duplicate of search_products) — handler preserved
       {
         name: "generate_document",
         description: "Generate a PDF document (contract, letter, report, resume, proposal, invoice, receipt, or any document) and send it to the user. Use when the user asks to write, create, draft, or generate any document.",
@@ -999,46 +965,21 @@ const tools: any[] = [
         },
       },
       {
-        name: "setup_vault",
-        description: "Configure the user's Zero-Knowledge secure vault with a PIN. Use when the user wants to save sensitive data like credit cards or credentials for the first time.",
+        name: "manage_vault",
+        description: "Manage the user's Zero-Knowledge encrypted vault. Actions: setup (create vault with PIN), save (save a card), list (show saved items without sensitive data), delete (remove an item).",
         parameters: {
           type: SchemaType.OBJECT,
           properties: {
-            pin: { type: SchemaType.STRING, description: "PIN of 4-32 characters chosen by the user" },
+            action: { type: SchemaType.STRING, description: "Action: setup | save | list | delete" },
+            pin: { type: SchemaType.STRING, description: "User's vault PIN (required for setup and save)" },
+            card_number: { type: SchemaType.STRING, description: "Card number (for save)" },
+            expiry: { type: SchemaType.STRING, description: "Expiry date MM/YY (for save)" },
+            cvv: { type: SchemaType.STRING, description: "CVV code (for save)" },
+            cardholder_name: { type: SchemaType.STRING, description: "Name on card (for save)" },
+            label: { type: SchemaType.STRING, description: "Nickname for the card (for save)" },
+            item_id: { type: SchemaType.STRING, description: "ID of the item to remove (for delete)" },
           },
-          required: ["pin"],
-        },
-      },
-      {
-        name: "save_card",
-        description: "Save a credit/debit card to the user's Zero-Knowledge encrypted vault. Requires vault to be set up first.",
-        parameters: {
-          type: SchemaType.OBJECT,
-          properties: {
-            pin: { type: SchemaType.STRING, description: "User's vault PIN" },
-            card_number: { type: SchemaType.STRING, description: "Card number" },
-            expiry: { type: SchemaType.STRING, description: "Expiry date MM/YY" },
-            cvv: { type: SchemaType.STRING, description: "CVV code" },
-            cardholder_name: { type: SchemaType.STRING, description: "Name on card" },
-            label: { type: SchemaType.STRING, description: "Nickname for the card" },
-          },
-          required: ["pin", "card_number", "expiry", "cvv", "cardholder_name"],
-        },
-      },
-      {
-        name: "list_vault_items",
-        description: "List items in the user's secure vault (cards, credentials) WITHOUT sensitive data.",
-        parameters: { type: SchemaType.OBJECT, properties: {}, required: [] },
-      },
-      {
-        name: "delete_vault_item",
-        description: "Remove an item from the user's secure vault.",
-        parameters: {
-          type: SchemaType.OBJECT,
-          properties: {
-            item_id: { type: SchemaType.STRING, description: "ID of the item to remove" },
-          },
-          required: ["item_id"],
+          required: ["action"],
         },
       },
       {
@@ -1079,34 +1020,16 @@ const tools: any[] = [
         },
       },
       {
-        name: "list_contacts",
-        description: "List all saved contacts from the user's personal phone book. Use when user says 'show my contacts', 'mostra meus contatos', 'who do I have saved?'",
-        parameters: {
-          type: SchemaType.OBJECT,
-          properties: {},
-        },
-      },
-      {
-        name: "delete_contact",
-        description: "Delete a contact from the user's personal phone book. Use when user says 'remove contact', 'delete contact', 'remove o contato do João'",
+        name: "manage_contacts",
+        description: "Manage user's personal phone book. Actions: list (show all contacts), delete (remove a contact), update (change phone number).",
         parameters: {
           type: SchemaType.OBJECT,
           properties: {
-            name: { type: SchemaType.STRING, description: "Name of the contact to delete" },
+            action: { type: SchemaType.STRING, description: "Action: list | delete | update" },
+            name: { type: SchemaType.STRING, description: "Contact name (for delete/update)" },
+            phone: { type: SchemaType.STRING, description: "New phone number in international format (for update)" },
           },
-          required: ["name"],
-        },
-      },
-      {
-        name: "update_contact",
-        description: "Update a contact's phone number. Use when user says 'change number', 'update contact', 'muda o número da Adriane'",
-        parameters: {
-          type: SchemaType.OBJECT,
-          properties: {
-            name: { type: SchemaType.STRING, description: "Name of the contact to update" },
-            phone: { type: SchemaType.STRING, description: "New phone number (international format)" },
-          },
-          required: ["name", "phone"],
+          required: ["action"],
         },
       },
       {
@@ -1175,95 +1098,9 @@ const tools: any[] = [
           required: ["action"],
         },
       },
-      {
-        name: "skyfire_setup_wallet",
-        description: "Set up PayJarvis payment wallet so the user can make purchases via chat. Use when user says 'quero comprar pelo chat', 'setup payments', 'cadastrar cartão', 'add payment method', 'I want to buy things'. Card data is processed with bank-grade encryption — PayJarvis NEVER sees card numbers. NEVER mention 'Skyfire' — always say 'carteira PayJarvis'.",
-        parameters: {
-          type: SchemaType.OBJECT,
-          properties: {},
-          required: [],
-        },
-      },
-      {
-        name: "smart_checkout",
-        description: "REQUIRED FIRST STEP for any purchase. Checks the user's payment wallet and returns the best payment options for the product, amount, and store. Call this IMMEDIATELY when user confirms they want to buy (says 'sim', 'compra esse', 'buy this'). Pass the store name from search results. Returns sorted payment options — present the top option to the user. ALWAYS call this BEFORE skyfire_checkout.",
-        parameters: {
-          type: SchemaType.OBJECT,
-          properties: {
-            product_name: { type: SchemaType.STRING, description: "Product name" },
-            product_url: { type: SchemaType.STRING, description: "Product URL (if available)" },
-            amount: { type: SchemaType.NUMBER, description: "Price amount" },
-            currency: { type: SchemaType.STRING, description: "Currency code: USD, BRL, EUR" },
-            store: { type: SchemaType.STRING, description: "Store name from search results: Amazon, Walmart, Mercado Livre, etc." },
-          },
-          required: ["product_name", "amount", "store"],
-        },
-      },
-      {
-        name: "skyfire_checkout",
-        description: "Execute a purchase AFTER the user has chosen a payment method from smart_checkout results. Do NOT call this directly — ALWAYS call smart_checkout first to get payment options, then call this to execute. NEVER mention 'Skyfire'.",
-        parameters: {
-          type: SchemaType.OBJECT,
-          properties: {
-            productName: { type: SchemaType.STRING, description: "Product name" },
-            price: { type: SchemaType.NUMBER, description: "Price in USD (e.g. 49.99)" },
-            merchant: { type: SchemaType.STRING, description: "Store name (e.g. Best Buy, Amazon, Walmart)" },
-            merchantUrl: { type: SchemaType.STRING, description: "Product URL (optional)" },
-          },
-          required: ["productName", "price", "merchant"],
-        },
-      },
-      {
-        name: "skyfire_my_purchases",
-        description: "List the user's recent purchases made through PayJarvis wallet. Use when user asks 'minhas compras', 'my purchases', 'what did I buy', 'compras recentes', 'order history'.",
-        parameters: {
-          type: SchemaType.OBJECT,
-          properties: {
-            limit: { type: SchemaType.NUMBER, description: "Max purchases to show (default 5)" },
-          },
-          required: [],
-        },
-      },
-      {
-        name: "skyfire_spending",
-        description: "Show spending summary and limits. Use when user asks 'quanto gastei', 'how much did I spend', 'meu limite', 'my spending', 'spending limits'. Shows today/this month spending + configured limits.",
-        parameters: {
-          type: SchemaType.OBJECT,
-          properties: {},
-          required: [],
-        },
-      },
-      {
-        name: "skyfire_set_limits",
-        description: "Change spending limits. Use when user says 'meu limite é $300', 'set limit to $500/day', 'change monthly limit', 'ajustar limite'. ALWAYS confirm new limits before applying.",
-        parameters: {
-          type: SchemaType.OBJECT,
-          properties: {
-            perTransaction: { type: SchemaType.NUMBER, description: "Max per transaction in USD (e.g. 200)" },
-            daily: { type: SchemaType.NUMBER, description: "Max daily spending in USD (e.g. 500)" },
-            monthly: { type: SchemaType.NUMBER, description: "Max monthly spending in USD (e.g. 2000)" },
-          },
-          required: [],
-        },
-      },
-      // ─── Opção B: 12 tools migrated from OpenClaw for WhatsApp parity ───
-      {
-        name: "search_events",
-        description: "Search events, shows, concerts, sports, theater. Use for tickets/ingressos/shows/jogos/eventos.",
-        parameters: {
-          type: SchemaType.OBJECT,
-          properties: {
-            city: { type: SchemaType.STRING, description: "City (e.g. Miami, São Paulo, Orlando)" },
-            category: { type: SchemaType.STRING, description: "Category: music, sports, arts, film" },
-            keyword: { type: SchemaType.STRING, description: "Artist, team, event name" },
-            startDate: { type: SchemaType.STRING, description: "From YYYY-MM-DD" },
-            endDate: { type: SchemaType.STRING, description: "Until YYYY-MM-DD" },
-            latitude: { type: SchemaType.NUMBER, description: "User latitude (auto-injected)" },
-            longitude: { type: SchemaType.NUMBER, description: "User longitude (auto-injected)" },
-          },
-          required: [],
-        },
-      },
+      // REMOVED: skyfire_setup_wallet, smart_checkout, skyfire_checkout, skyfire_my_purchases, skyfire_spending, skyfire_set_limits — handlers preserved for reactivation
+      // ─── Opção B: tools migrated from OpenClaw for WhatsApp parity ───
+      // REMOVED: search_events (Ticketmaster CHANGE_ME key) — handler preserved for reactivation
       {
         name: "compare_prices",
         description: "Compare prices for a product across all retail platforms. Returns sorted by price with best deal highlighted.",
@@ -1302,17 +1139,7 @@ const tools: any[] = [
           required: ["productName", "currentPrice"],
         },
       },
-      {
-        name: "complete_reminder",
-        description: "Mark a reminder as completed by its ID. Use when user says 'done', 'feito', 'concluí', 'já fiz'.",
-        parameters: {
-          type: SchemaType.OBJECT,
-          properties: {
-            reminderId: { type: SchemaType.NUMBER, description: "The reminder ID to mark as done" },
-          },
-          required: ["reminderId"],
-        },
-      },
+      // CONSOLIDATED: complete_reminder → manage_reminders(action: "complete")
       {
         name: "find_stores",
         description: "Find nearby retail stores and pharmacies (Walmart, Target, CVS, Walgreens, Publix, Macy's). Returns addresses, hours, phone numbers.",
@@ -1395,6 +1222,56 @@ const tools: any[] = [
   },
 ];
 
+// ─── Core vs Conditional tool names for lazy loading ──────────
+
+const CORE_TOOL_NAMES = new Set([
+  "web_search", "browse", "search_products", "compare_prices", "find_coupons",
+  "check_price_history", "manage_price_alerts", "save_user_fact", "manage_reminders",
+  "manage_vault", "manage_contacts", "share_jarvis",
+]);
+
+const CONDITIONAL_TOOL_TRIGGERS: Record<string, RegExp> = {
+  grocery_search: /groc|supermercado|mercado|comida|ingrediente|café|breakfast|milk|eggs|publix|walmart.*food/i,
+  shopping_plan_action: /aprova|confirma|cancela|reject|approve|plan/i,
+  get_transactions: /transação|transaction|extrato|statement|histórico|history|gastei|spent/i,
+  track_package: /rastrea|track|pacote|package|encomenda|entrega|delivery|correio/i,
+  generate_document: /document|contrato|contract|carta|letter|report|resume|currículo|proposta|invoice|recibo|pdf/i,
+  export_transactions: /export|extrato|statement|pdf.*trans/i,
+  fill_form: /preenche|fill.*form|formulário|signup|cadastr/i,
+  get_directions: /direção|direction|rota|route|como chego|how.*get.*to|distância|distance/i,
+  geocode_address: /endereço|address|cep|zip.*code|coordenada|geocod/i,
+  make_phone_call: /liga|call|telefon|phone|ring/i,
+  verify_caller_id: /caller.*id|verificar.*número|verify.*number/i,
+  call_user: /me liga|call me|quero.*falar.*voz|voice.*call/i,
+  manage_settings: /configuração|setting|preferência|preference|notificação|notification|desativ|disabl|ativ|enabl/i,
+  butler_protocol: /butler|cria.*conta|credencia|credential|perfil.*dados|profile.*data/i,
+  inner_circle_consult: /consultor|consult|specialist|estilo|style|visagism|coloração/i,
+  butler_gmail: /email|gmail|inbox|caixa.*entrada|unread/i,
+  manage_scheduled_task: /agendar|schedule|recurring|recorrente|todo dia|every day|every.*hour|cron/i,
+  find_stores: /loja.*perto|store.*near|farmácia|pharmacy|cvs|walgreens|walmart.*near/i,
+  request_handoff: /captcha|ajuda.*humana|human.*help|2fa|handoff/i,
+  search_transit: /trem|train|ônibus|bus|amtrak|greyhound|flixbus|passagem/i,
+  search_rental_cars: /alug.*carro|rent.*car|rental|enterprise|turo/i,
+  check_prescription: /receita|prescription|rx|farmácia|pharmacy.*status/i,
+  scan_my_subscriptions: /assinatura|subscription|recurring.*charge|cobrança.*recorrente/i,
+  subscription_report: /relatório.*assinatura|subscription.*report|quanto.*gasto.*assinatura/i,
+};
+
+function getToolsForContext(userMessage: string): any[] {
+  const allDeclarations = tools[0].functionDeclarations;
+  const coreDeclarations = allDeclarations.filter((t: any) => CORE_TOOL_NAMES.has(t.name));
+  const conditionalDeclarations = allDeclarations.filter((t: any) => {
+    if (CORE_TOOL_NAMES.has(t.name)) return false;
+    const trigger = CONDITIONAL_TOOL_TRIGGERS[t.name];
+    if (!trigger) return true; // No trigger defined = always include (safety)
+    return trigger.test(userMessage);
+  });
+
+  const selected = [...coreDeclarations, ...conditionalDeclarations];
+  console.log(`[TOOLS] Loaded ${selected.length}/${allDeclarations.length} tools for context`);
+  return [{ functionDeclarations: selected }];
+}
+
 // ─── Acknowledge messages for slow tools (BUG 2 fix) ──────────
 
 const TOOL_ACKNOWLEDGE: Record<string, { pt: string; en: string; es: string }> = {
@@ -1451,6 +1328,9 @@ let _currentUserFacts: { fact_key: string; fact_value: string }[] = [];
 // ─── Tool Handler ──────────────────────────────────────
 
 async function handleTool(userId: string, name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const _toolStart = Date.now();
+  const _channel = userId.startsWith("whatsapp:") ? "whatsapp" : userId.match(/^\d+$/) ? "telegram" : "pwa";
+
   // DISABLED: sendToolAcknowledge causes message spam loop (2026-03-24)
   // await sendToolAcknowledge(userId, name, _currentUserFacts);
   // Auto-inject user coordinates for location-aware searches
@@ -1463,6 +1343,39 @@ async function handleTool(userId: string, name: string, args: Record<string, unk
     }
   }
 
+  let _toolResult: Record<string, unknown>;
+  let _toolSuccess = true;
+  let _toolError: string | undefined;
+
+  try {
+  _toolResult = await _handleToolInner(userId, name, args);
+  if (_toolResult.error) {
+    _toolSuccess = false;
+    _toolError = String(_toolResult.error).substring(0, 500);
+  }
+  } catch (err) {
+    _toolSuccess = false;
+    _toolError = (err as Error).message?.substring(0, 500);
+    _toolResult = { error: _toolError };
+  }
+
+  // Async log — fire-and-forget, never block tool response
+  prisma.toolCallLog.create({
+    data: {
+      userId: userId || null,
+      toolName: name,
+      parameters: args as any,
+      success: _toolSuccess,
+      duration: Date.now() - _toolStart,
+      channel: _channel,
+      errorMessage: _toolError || null,
+    },
+  }).catch((e: Error) => console.error("[TOOL-LOG] Failed to log:", e.message));
+
+  return _toolResult;
+}
+
+async function _handleToolInner(userId: string, name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
   switch (name) {
     case "web_search": {
       // Use Gemini's native Google Search grounding instead of browser scraping
@@ -1589,9 +1502,34 @@ async function handleTool(userId: string, name: string, args: Record<string, unk
         const country = userRecord?.country || "US";
 
         // Accept store from "platform" or "store" param
-        const storeParam = (args.store as string) || (args.platform as string);
+        let storeParam = (args.store as string) || (args.platform as string);
+
+        // ─── Bug 3 fix: detect marketplace from query when Gemini doesn't pass store ───
+        if (!storeParam || storeParam === "all") {
+          const query = (args.query as string || "").toLowerCase();
+          const marketplacePatterns: [RegExp, string][] = [
+            [/\b(na |no |on |from |at )?amazon\b/i, "amazon"],
+            [/\b(no |na |on |from |at )?mercado\s*livr[e]?\b/i, "mercadolivre"],
+            [/\b(no |na |on |from |at )?walmart\b/i, "walmart"],
+            [/\b(no |na |on |from |at )?ebay\b/i, "ebay"],
+            [/\b(no |na |on |from |at )?target\b/i, "target"],
+            [/\b(na |no |on |from |at )?best\s*buy\b/i, "bestbuy"],
+            [/\b(na |no |on |from |at )?mac[yY]'?s\b/i, "macys"],
+            [/\b(na |no |on |from |at )?jomashop\b/i, "jomashop"],
+            [/\b(na |no |on |from |at )?fragrance\s*net\b/i, "fragrancenet"],
+            [/\b(na |no |on |from |at )?sephora\b/i, "sephora"],
+          ];
+          for (const [pattern, storeName] of marketplacePatterns) {
+            if (pattern.test(query)) {
+              storeParam = storeName;
+              console.log(`[UNIFIED-SEARCH] Bug 3 fix: detected marketplace "${storeName}" from query "${query}"`);
+              break;
+            }
+          }
+        }
         const store = storeParam && storeParam !== "all" ? storeParam : undefined;
 
+        const searchStartMs = Date.now();
         const result = await unifiedProductSearch({
           query: args.query as string,
           store,
@@ -1599,6 +1537,25 @@ async function handleTool(userId: string, name: string, args: Record<string, unk
           maxResults: Math.min((args.max_results as number) || 5, 10),
           userId,
         });
+
+        // Log to commerce_search_logs (same as retail.routes.ts but for WhatsApp/direct flow)
+        try {
+          await prisma.commerceSearchLog.create({
+            data: {
+              botId: "openclaw",
+              service: "products",
+              params: {
+                query: args.query as string,
+                store: store || null,
+                country,
+                userId: userId || null,
+              },
+              resultCount: result?.products?.length ?? 0,
+              cached: !!(result as any)?.fromCache,
+              durationMs: Date.now() - searchStartMs,
+            },
+          });
+        } catch { /* non-critical */ }
 
         const formatted = result.products.map((p, i) => ({
           rank: i + 1,
@@ -1636,12 +1593,35 @@ async function handleTool(userId: string, name: string, args: Record<string, unk
           } catch { /* silent — radar is best-effort */ }
         }
 
+        // ─── Inline coupon lookup (Bug 2 fix: no separate find_coupons call) ───
+        let coupons: { store: string; code: string; description: string }[] = [];
+        try {
+          const storesInResults = [...new Set(result.products.map(p => p.store).filter(Boolean))];
+          if (storesInResults.length > 0 && storesInResults.length <= 3) {
+            const { findCoupons } = await import("./shopping/coupons.service.js");
+            const couponPromises = storesInResults.map((s: string) =>
+              findCoupons(s).then((cs: any[]) => cs.map((c: any) => ({ store: s, code: c.code, description: c.description }))).catch(() => [] as { store: string; code: string; description: string }[])
+            );
+            const couponResults = await Promise.race([
+              Promise.all(couponPromises),
+              new Promise<never[]>((resolve) => setTimeout(() => resolve([]), 5000)), // 5s timeout
+            ]);
+            coupons = (couponResults as { store: string; code: string; description: string }[][]).flat();
+          }
+        } catch { /* coupons are best-effort */ }
+
         return {
           totalProducts: result.totalResults,
           searchMethod: result.method,
           methodsAttempted: result.methodsAttempted,
           products: formatted,
-          instruction: "Present products as a RANKED LIST by price (cheapest first). Include: rank number, product name, price, rating, store, and clickable link.",
+          ...(coupons.length > 0 ? { coupons: coupons.slice(0, 5) } : {}),
+          ...((result as any).storeNotFound ? {
+            storeNotFound: true,
+            instruction: `The user asked for "${store}" but no results from that store were found. Show the results from other stores and tell the user: "Não achei na ${store}, mas encontrei em outras lojas:" (or equivalent in the user's language). Present as a RANKED LIST by price. Include clickable links.`,
+          } : {
+            instruction: "Present products as a RANKED LIST by price (cheapest first). Include: rank number, product name, price, store, and clickable link. If coupons are present, show them next to the relevant product. Write ONE single response — NEVER split products and coupons into separate messages. Be CONCISE — max 1 line per product.",
+          }),
         };
       } catch (err) {
         console.error("[UNIFIED-SEARCH] Error:", err);
@@ -3218,6 +3198,57 @@ async function handleTool(userId: string, name: string, args: Record<string, unk
       }
     }
 
+    // ─── Consolidated tools (rationalization 2026-04-06) ───
+
+    case "manage_vault": {
+      const action = args.action as string;
+      switch (action) {
+        case "setup": return _handleToolInner(userId, "setup_vault", args);
+        case "save": return _handleToolInner(userId, "save_card", args);
+        case "list": return _handleToolInner(userId, "list_vault_items", args);
+        case "delete": return _handleToolInner(userId, "delete_vault_item", args);
+        default: return { error: `Unknown vault action: ${action}. Use: setup, save, list, delete` };
+      }
+    }
+
+    case "manage_contacts": {
+      const action = args.action as string;
+      switch (action) {
+        case "list": return _handleToolInner(userId, "list_contacts", args);
+        case "delete": return _handleToolInner(userId, "delete_contact", args);
+        case "update": return _handleToolInner(userId, "update_contact", args);
+        default: return { error: `Unknown contacts action: ${action}. Use: list, delete, update` };
+      }
+    }
+
+    case "manage_reminders": {
+      const action = args.action as string;
+      switch (action) {
+        case "set": return _handleToolInner(userId, "set_reminder", args);
+        case "list": return _handleToolInner(userId, "get_reminders", args);
+        case "complete": return _handleToolInner(userId, "complete_reminder", args);
+        default: return { error: `Unknown reminders action: ${action}. Use: set, list, complete` };
+      }
+    }
+
+    case "manage_price_alerts": {
+      const action = args.action as string;
+      switch (action) {
+        case "set": return _handleToolInner(userId, "set_price_alert", args);
+        case "list": return _handleToolInner(userId, "get_price_alerts", args);
+        case "delete": {
+          if (!args.alertId) return { error: "Need alertId to delete" };
+          try {
+            await prisma.priceAlert.update({ where: { id: args.alertId as string }, data: { active: false } });
+            return { success: true, message: "Price alert deleted." };
+          } catch (err) {
+            return { error: `Failed to delete alert: ${(err as Error).message}` };
+          }
+        }
+        default: return { error: `Unknown price_alerts action: ${action}. Use: set, list, delete` };
+      }
+    }
+
     default:
       return { error: `Unknown tool: ${name}` };
   }
@@ -3443,10 +3474,11 @@ export async function chatWithGemini(
     }
   } catch { /* non-blocking */ }
 
+  const contextTools = getToolsForContext(userMessage);
   const model = genAI.getGenerativeModel({
     model: "gemini-2.5-flash",
     systemInstruction: systemPrompt,
-    tools,
+    tools: contextTools,
   });
 
   let chatSession = model.startChat({ history });
@@ -3573,10 +3605,11 @@ export async function chatWithGeminiMultimodal(
   const PRODUCT_INTENT_RE = /\b(compra|buy|purchase|price|preço|preco|quanto custa|how much|busca|search|procur|find|quero|want|achar|onde|where|cheapest|barato|melhor preço|best price|deal|oferta|desconto|discount)\b/i;
   const hasProductIntent = PRODUCT_INTENT_RE.test(userMessage || "");
 
+  const contextTools2 = getToolsForContext(userMessage);
   const model = genAI.getGenerativeModel({
     model: "gemini-2.5-flash",
     systemInstruction: systemPrompt,
-    tools,
+    tools: contextTools2,
     ...(hasProductIntent ? {
       toolConfig: {
         functionCallingConfig: {
@@ -3599,6 +3632,7 @@ export async function chatWithGeminiMultimodal(
   let result;
   let response;
   let lastGoodText = ""; // Track partial text for timeout fallback
+  const collectedToolResults: { name: string; result: string }[] = []; // Collect tool results for summary
 
   try {
     result = await chatSession.sendMessage(parts);
@@ -3659,7 +3693,9 @@ export async function chatWithGeminiMultimodal(
         toolResult = { value: String(toolResult) };
       }
       toolResult = JSON.parse(JSON.stringify(toolResult));
-      console.log(`[WA IMAGE TOOL] ${call.name} =>`, JSON.stringify(toolResult).substring(0, 150));
+      const toolResultStr = JSON.stringify(toolResult).substring(0, 500);
+      console.log(`[WA IMAGE TOOL] ${call.name} =>`, toolResultStr.substring(0, 150));
+      collectedToolResults.push({ name: call.name, result: toolResultStr });
       functionResponses.push({
         functionResponse: { name: call.name, response: toolResult },
       });
@@ -3679,11 +3715,43 @@ export async function chatWithGeminiMultimodal(
     }
   }
 
+  // ─── FunctionCallingMode.ANY fix: force text summary ─────────────────────
+  // When tool calling was forced (ANY mode), the model never produces text —
+  // only function calls. After exhausting iterations, we need to ask for a
+  // text summary of the collected tool results.
+  if (iterations > 0 && !lastGoodText && collectedToolResults.length > 0) {
+    try {
+      const elapsed = Date.now() - startTime;
+      if (elapsed < MULTIMODAL_TIMEOUT_MS - 10_000) {
+        console.log(`[WA IMAGE] No text after ${iterations} tool iterations (ANY mode). Requesting summary...`);
+        // Create a new model instance WITHOUT FunctionCallingMode.ANY
+        const summaryModel = genAI.getGenerativeModel({
+          model: "gemini-2.5-flash",
+          systemInstruction: buildSystemPrompt(userFacts),
+        });
+        const toolSummary = collectedToolResults
+          .map(t => `${t.name}: ${t.result}`)
+          .join("\n");
+        const summaryResult = await summaryModel.generateContent(
+          `The user sent a photo with this caption: "${userMessage || ""}"\n\nI analyzed the image and called these tools:\n${toolSummary.substring(0, 6000)}\n\nBased on these tool results, write a helpful WhatsApp response for the user. Include product names, prices, links, and any deals found. Be concise — this is WhatsApp. Use the user's language (match the caption language).`
+        );
+        const summaryText = summaryResult.response.text();
+        if (summaryText) {
+          lastGoodText = summaryText;
+          console.log(`[WA IMAGE] Summary generated (${summaryText.length} chars)`);
+        }
+      }
+    } catch (err) {
+      console.error(`[WA IMAGE] Summary generation failed: ${(err as Error).message}`);
+    }
+  }
+
   // ─── Post-hoc product search fallback ─────────────────────
   // When the model analyzes an image but doesn't call search_products,
   // detect if a product was identified and force a search
   if (iterations === 0) {
-    const textSoFar = response.text() || lastGoodText || "";
+    let textSoFar = lastGoodText || "";
+    try { textSoFar = response.text() || textSoFar; } catch { /* function-call-only response */ }
     const combinedText = `${userMessage || ""} ${textSoFar}`.toLowerCase();
 
     // Broad product signals: caption has buy intent OR model response mentions product-like terms
@@ -3734,10 +3802,13 @@ export async function chatWithGeminiMultimodal(
     }
   }
 
-  const text = response.text();
+  let text = "";
+  try {
+    text = response.text();
+  } catch { /* response.text() throws if response has only function calls */ }
   const duration = Date.now() - startTime;
   console.log(`[WA IMAGE] Completed in ${duration}ms (${iterations} tool iterations)`);
-  return text || lastGoodText || "Analisei a imagem mas não consegui gerar uma resposta. Tenta de novo! 🐕";
+  return text || lastGoodText || "Estou com dificuldade pra analisar a imagem agora. Pode me descrever o produto ou mandar o link? 🐕";
 }
 
 // ─── Fact Extraction (background) ──────────────────────
@@ -3945,6 +4016,27 @@ export async function processWhatsAppImageMessage(
     return response;
   } catch (err) {
     console.error("[WA IMAGE] Error:", (err as Error).message);
+
+    // Vision fallback: try alternative providers when Gemini multimodal fails
+    try {
+      console.warn("[VISION] Gemini multimodal failed, trying fallback chain...");
+      const fallbackResult = await processVisionWithFallback(
+        imageBase64,
+        mimeType,
+        caption || "Identify this product and find the best price",
+        userId,
+      );
+      if (fallbackResult.success) {
+        console.log(`[VISION] Fallback succeeded via ${fallbackResult.provider} (${fallbackResult.durationMs}ms)`);
+        await saveMessage(userId, "user", `[photo] ${caption || "image sent"}`);
+        await saveMessage(userId, "model", fallbackResult.text);
+        return fallbackResult.text;
+      }
+      return fallbackResult.text; // User-friendly error message
+    } catch (fallbackErr) {
+      console.error("[VISION] Fallback chain also failed:", (fallbackErr as Error).message);
+    }
+
     return "Error processing image. Please try again.";
   }
 }
@@ -4058,8 +4150,11 @@ Save my number as "Sniffer" in your contacts and you're set! 🐕`;
   } catch { /* non-blocking */ }
 
   // 0c. Handle share/referral intent — detect before sending to Gemini
-  const shareIntent = /\b(compartilh\w*|indicar|indic[aá]\w*|convidar|convid\w*|convite|share|invite|refer|qr\s*code|link.*(indic|refer|convit|compart)|amigo.*jarvis|jarvis.*amigo|mand[ae].*link|envi[ae].*link)\b/i;
-  if (shareIntent.test(text)) {
+  // "link do produto/perfume" = product link request → route to Gemini (NOT referral)
+  const isProductLinkRequest = /\blink\s*(d[oe]s?|do|da|direto|pra|para|desse|dessa|deste|desta)\s+\w/i.test(text)
+    && !/\blink\s*(d[oe]s?|do|da)?\s*(indic|refer|convit|compart|amig)/i.test(text);
+  const shareIntent = /\b(compartilh\w*|indicar|indic[aá]\w*|convidar|convid\w*|convite|share|invite|refer|qr\s*code|link.*(indic|refer|convit|compart)|amigo.*jarvis|jarvis.*amigo|amigo.*sniffer|sniffer.*amigo)\b/i;
+  if (shareIntent.test(text) && !isProductLinkRequest) {
     try {
       const result = await generateShareForWhatsApp(userId, null);
       if (result.success) {
