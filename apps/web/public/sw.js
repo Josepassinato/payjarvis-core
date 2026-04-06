@@ -28,21 +28,27 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
-// Push notifications
+// Push notifications — only show when chat is not in foreground
 self.addEventListener("push", (event) => {
   if (!event.data) return;
   const data = event.data.json();
   event.waitUntil(
-    self.registration.showNotification(data.title || "Jarvis 🦀", {
-      body: data.body || "",
-      icon: data.icon || "/icon-192.png",
-      badge: data.badge || "/icon-192.png",
-      data: data.data || { url: "/chat" },
-      vibrate: [100, 50, 100],
-      actions: [
-        { action: "open", title: "Open" },
-        { action: "dismiss", title: "Later" },
-      ],
+    self.clients.matchAll({ type: "window", includeUncontrolled: false }).then((clients) => {
+      const chatFocused = clients.some(
+        (c) => c.visibilityState === "visible" && c.url.includes("/chat")
+      );
+      if (chatFocused) return; // user is already looking at chat
+      return self.registration.showNotification(data.title || "Jarvis", {
+        body: data.body || "",
+        icon: data.icon || "/icon-192.png",
+        badge: data.badge || "/icon-192.png",
+        data: data.data || { url: "/chat" },
+        vibrate: [100, 50, 100],
+        actions: [
+          { action: "open", title: "Open" },
+          { action: "dismiss", title: "Later" },
+        ],
+      });
     })
   );
 });

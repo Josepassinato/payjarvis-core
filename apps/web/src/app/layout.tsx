@@ -6,20 +6,29 @@ import { PwaInstallBanner } from "@/components/pwa-install-banner";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "PayJarvis — Agente de Compras Inteligente",
-  description: "Acha o melhor preço, compara, monitora e compra pra você",
+  metadataBase: new URL("https://www.payjarvis.com"),
+  title: "PayJarvis — Spending Firewall for AI Agents | Open-source",
+  description: "Open-source spending firewall for autonomous AI agents. BDIT cryptographic identity, CredScore behavioral trust, and granular policy control. Self-hosted or Hosted SaaS.",
   icons: {
     icon: "/favicon.ico",
     apple: "/apple-touch-icon.png",
   },
   openGraph: {
-    title: "PayJarvis — Agente de Compras Inteligente",
-    description: "Acha o melhor preço, compara, monitora e compra pra você",
-    images: ["/og-image.png"],
+    title: "PayJarvis — Spending Firewall for AI Agents",
+    description: "Control how your AI agents spend money. Open-source under Apache 2.0.",
+    images: ["https://www.payjarvis.com/og-image.png"],
+    url: "https://www.payjarvis.com",
     siteName: "PayJarvis",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "PayJarvis — Spending Firewall for AI Agents",
+    description: "Control how your AI agents spend money. Open-source under Apache 2.0.",
+    images: ["https://www.payjarvis.com/og-image.png"],
   },
   other: {
-    "theme-color": "#00BFFF",
+    "theme-color": "#f59e0b",
     "apple-mobile-web-app-capable": "yes",
     "apple-mobile-web-app-status-bar-style": "black-translucent",
     "application-name": "PayJarvis",
@@ -40,11 +49,11 @@ export default function RootLayout({
           <link rel="icon" href="/favicon.ico" sizes="32x32" />
           <link rel="icon" type="image/png" href="/icon-192.png" sizes="192x192" />
           <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-          <meta name="theme-color" content="#00BFFF" />
+          <meta name="theme-color" content="#f59e0b" />
           <meta name="apple-mobile-web-app-capable" content="yes" />
           <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-          <meta name="apple-mobile-web-app-title" content="Jarvis" />
-          <meta name="application-name" content="Jarvis" />
+          <meta name="apple-mobile-web-app-title" content="PayJarvis" />
+          <meta name="application-name" content="PayJarvis" />
         </head>
         <body className="bg-surface text-gray-100 antialiased font-body">
           <I18nProvider>

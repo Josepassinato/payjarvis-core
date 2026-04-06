@@ -48,6 +48,47 @@
 .animate-float { animation: float 8s ease-in-out infinite; }
 .animate-float-delay { animation: float-delay 10s ease-in-out 2s infinite; }
 
+/* LiveOrb animations */
+@keyframes orb-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.08); opacity: 0.7; }
+}
+@keyframes orb-pulse-fast {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.12); opacity: 0.6; }
+}
+@keyframes orb-wave {
+  0%, 100% { height: 8px; }
+  25% { height: 28px; }
+  50% { height: 16px; }
+  75% { height: 32px; }
+}
+@keyframes orb-wave-slow {
+  0%, 100% { height: 8px; }
+  50% { height: 20px; }
+}
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.animate-orb-pulse { animation: orb-pulse 3s ease-in-out infinite; }
+.animate-orb-pulse-fast { animation: orb-pulse-fast 1.5s ease-in-out infinite; }
+.animate-orb-wave { animation: orb-wave 0.8s ease-in-out infinite; }
+.animate-orb-wave-slow { animation: orb-wave-slow 1.5s ease-in-out infinite; }
+.animate-spin-slow { animation: spin-slow 8s linear infinite; }
+
+/* Live mode grid */
+.live-grid-pattern {
+  background-image:
+    linear-gradient(rgba(0, 191, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 191, 255, 0.08) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* Hide scrollbar utility */
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
 /* Code syntax colors */
 .code-keyword { color: #7c3aed; }
 .code-string { color: #059669; }

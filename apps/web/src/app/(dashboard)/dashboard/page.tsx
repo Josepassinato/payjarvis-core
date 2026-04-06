@@ -228,6 +228,31 @@ export default function DashboardPage() {
         <p className="text-sm text-gray-500 mt-1">{t("dashboard.subtitle")}</p>
       </div>
 
+      {/* SnifferShop CTA — only when user has no bots */}
+      {allBots.length === 0 && (
+        <a
+          href="https://sniffershop.com"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mb-8 flex items-center gap-4 rounded-xl border border-brand-500/20 bg-gradient-to-r from-brand-600/10 to-orange-500/10 p-5 transition-all hover:border-brand-500/40 hover:shadow-lg"
+        >
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-orange-500/20 text-2xl">
+            🐕
+          </div>
+          <div className="flex-1">
+            <h3 className="font-semibold text-gray-900">
+              {t("dashboard.snifferCtaTitle")}
+            </h3>
+            <p className="mt-0.5 text-sm text-gray-500">
+              {t("dashboard.snifferCtaDesc")}
+            </p>
+          </div>
+          <svg className="h-5 w-5 shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+          </svg>
+        </a>
+      )}
+
       {/* Stat Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mb-8">
         <StatCard

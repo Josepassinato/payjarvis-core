@@ -8,7 +8,7 @@ export default function SignInPage() {
       <div className="relative animate-fade-in">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-display font-bold text-gradient-brand">PayJarvis</h1>
-          <p className="text-gray-400 mt-2 font-body text-sm">Bot Payment Identity</p>
+          <p className="text-gray-400 mt-2 font-body text-sm">AI Commerce Governance Platform</p>
         </div>
         <SignIn
           appearance={{
@@ -34,7 +34,7 @@ export default function SignInPage() {
           routing="path"
           path="/sign-in"
           signUpUrl="/sign-up"
-          forceRedirectUrl="/dashboard"
+          forceRedirectUrl="/chat"
         />
       </div>
     </div>

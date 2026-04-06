@@ -4,9 +4,9 @@ const badges = [
   {
     title: "Visa Trusted Agent Protocol",
     description:
-      "Credenciado para transacoes autonomas com cartoes Visa. Identificacao verificavel via TAP standard.",
+      "Certified for autonomous transactions with Visa cards. Verifiable identification via TAP standard.",
     gradient: "from-[#1A1F71] to-[#2A2F91]",
-    status: "Integrado",
+    status: "Integrated",
     statusColor: "bg-emerald-500/20 text-emerald-400",
     icon: (
       <svg
@@ -27,9 +27,9 @@ const badges = [
   {
     title: "Mastercard AgentPay",
     description:
-      "Processamento seguro via AgentPay protocol. Limites dinamicos por agente.",
+      "Secure processing via AgentPay protocol. Dynamic per-agent limits.",
     gradient: "from-[#EB001B] to-[#FF5F00]",
-    status: "Em registro",
+    status: "Registering",
     statusColor: "bg-amber-500/20 text-amber-400",
     icon: (
       <svg
@@ -50,9 +50,9 @@ const badges = [
   {
     title: "Anthropic MCP",
     description:
-      "Model Context Protocol para comunicacao segura entre LLMs e ferramentas de pagamento.",
+      "Model Context Protocol for secure communication between LLMs and payment tools.",
     gradient: "from-[#1a1a2e] to-[#16213e]",
-    status: "Integrado",
+    status: "Integrated",
     statusColor: "bg-emerald-500/20 text-emerald-400",
     icon: (
       <svg
@@ -73,9 +73,9 @@ const badges = [
   {
     title: "Cloudflare Verified Bot",
     description:
-      "Bot verificado no registro Cloudflare. Rate limits prioritarios e bypass de WAF.",
+      "Verified bot in Cloudflare registry. Priority rate limits and WAF bypass.",
     gradient: "from-[#F48120] to-[#FAAD3F]",
-    status: "Integrado",
+    status: "Integrated",
     statusColor: "bg-emerald-500/20 text-emerald-400",
     icon: (
       <svg
@@ -106,11 +106,11 @@ export default function TrustBadges() {
           </span>
         </div>
         <h2 className="mb-6 text-center font-display text-3xl font-bold text-gray-900 sm:text-4xl lg:text-5xl">
-          Credenciado pelos padroes globais de agentic commerce
+          Certified by global agentic commerce standards
         </h2>
         <p className="mx-auto mb-16 max-w-2xl text-center text-gray-600 text-lg">
-          PayJarvis opera com os protocolos mais recentes de pagamento autonomo,
-          garantindo seguranca e conformidade em cada transacao.
+          PayJarvis operates with the latest autonomous payment protocols,
+          ensuring security and compliance in every transaction.
         </p>
 
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">

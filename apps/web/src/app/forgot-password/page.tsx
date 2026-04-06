@@ -110,7 +110,7 @@ export default function ForgotPasswordPage() {
         <div className="relative w-full max-w-md animate-fade-in">
           <div className="text-center mb-8">
             <h1 className="text-3xl font-display font-bold text-gradient-brand">PayJarvis</h1>
-            <p className="text-gray-400 mt-2 font-body text-sm">Bot Payment Identity</p>
+            <p className="text-gray-400 mt-2 font-body text-sm">AI Commerce Governance Platform</p>
           </div>
           <div className="bg-white border border-gray-200 rounded-2xl p-8 shadow-xl">
             {children}
@@ -284,7 +284,7 @@ export default function ForgotPasswordPage() {
           Nova senha
         </h2>
         <p className="text-gray-400 text-sm text-center mb-6">
-          Defina sua nova senha para acessar o PayJarvis.
+          Set your new password to access PayJarvis.
         </p>
 
         <form onSubmit={handleResetPassword} className="space-y-5">
