@@ -7,6 +7,13 @@ import { prisma } from "@payjarvis/database";
 import { requireAuth } from "../middleware/auth.js";
 import { getGamificationStats, trackInteraction, checkAndGrantAchievements } from "../services/engagement/gamification.service.js";
 import { registerPushSubscription, removePushSubscription, getVapidPublicKey } from "../services/engagement/push.service.js";
+import {
+  recordRecommendationClick,
+  recordRecommendationConversion,
+  recordRecommendationRejection,
+  getRecommendationMetrics,
+} from "../services/engagement/recommendation-engine.service.js";
+import { handleFollowUpCallback, getFollowUpMetrics } from "../services/engagement/purchase-followup.service.js";
 
 export async function engagementRoutes(app: FastifyInstance) {
 
@@ -124,6 +131,7 @@ export async function engagementRoutes(app: FastifyInstance) {
           smartTips: prefs.smartTips,
           achievements: prefs.achievements,
           birthday: prefs.birthday,
+          recommendations: prefs.recommendations,
           pushEnabled: prefs.pushEnabled,
           timezone: prefs.timezone,
         },
@@ -132,7 +140,7 @@ export async function engagementRoutes(app: FastifyInstance) {
 
     if (!setting) return reply.status(400).send({ error: "Specify which setting to change" });
 
-    const boolSettings = ["morningBriefing", "priceAlerts", "reengagement", "weeklyReport", "smartTips", "achievements", "birthday", "pushEnabled"];
+    const boolSettings = ["morningBriefing", "priceAlerts", "reengagement", "weeklyReport", "smartTips", "achievements", "birthday", "recommendations", "pushEnabled"];
     if (boolSettings.includes(setting)) {
       const newValue = action === "enable" ? true : action === "disable" ? false : value === "true";
       await prisma.userNotificationPreferences.upsert({
@@ -196,5 +204,112 @@ export async function engagementRoutes(app: FastifyInstance) {
     const stats = await trackInteraction(user.id, type as any, value);
     await checkAndGrantAchievements(user.id);
     return { ok: true, stats };
+  });
+
+  // ─── Recommendation Feedback (Internal — called by OpenClaw bot + PWA) ───
+
+  // POST /api/recommendations/:id/feedback
+  app.post("/api/recommendations/:id/feedback", async (req: any, reply) => {
+    // Accept internal secret OR Clerk auth
+    const secret = req.headers["x-internal-secret"];
+    const isInternal = secret === process.env.INTERNAL_SECRET;
+    if (!isInternal) {
+      // Could add Clerk auth check here for PWA, but for now require internal secret
+      return reply.status(403).send({ error: "Forbidden" });
+    }
+
+    const recId = (req.params as { id: string }).id;
+    const { action, userId } = req.body as { action: string; userId?: string };
+
+    if (!recId || !action) {
+      return reply.status(400).send({ error: "id and action required" });
+    }
+
+    // Fetch recommendation to get product info
+    const rec = await prisma.recommendation.findUnique({ where: { id: recId } });
+    if (!rec) return reply.status(404).send({ error: "Recommendation not found" });
+
+    try {
+      if (action === "click") {
+        await recordRecommendationClick(recId);
+        return { ok: true, action: "clicked", productUrl: rec.productUrl };
+      }
+
+      if (action === "reject") {
+        await recordRecommendationRejection(recId);
+        return { ok: true, action: "rejected", product: rec.productName };
+      }
+
+      if (action === "stop") {
+        await recordRecommendationRejection(recId);
+        // Disable recommendations for this user
+        if (userId) {
+          const user = await prisma.user.findFirst({
+            where: {
+              OR: [
+                { telegramChatId: userId },
+                { phone: userId.replace("whatsapp:", "") },
+                { id: userId },
+              ],
+            },
+            select: { id: true },
+          });
+          if (user) {
+            await prisma.userNotificationPreferences.upsert({
+              where: { userId: user.id },
+              create: { userId: user.id, recommendations: false },
+              update: { recommendations: false },
+            });
+          }
+        }
+        return { ok: true, action: "stopped" };
+      }
+
+      if (action === "convert") {
+        await recordRecommendationConversion(recId);
+        return { ok: true, action: "converted" };
+      }
+
+      return reply.status(400).send({ error: `Unknown action: ${action}. Use: click, reject, stop, convert` });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Feedback failed";
+      return reply.status(500).send({ error: message });
+    }
+  });
+
+  // GET /api/recommendations/metrics (admin)
+  app.get("/api/recommendations/metrics", async (req: any, reply) => {
+    const secret = req.headers["x-internal-secret"];
+    if (secret !== process.env.INTERNAL_SECRET) {
+      return reply.status(403).send({ error: "Forbidden" });
+    }
+    const days = parseInt((req.query as any).days || "14", 10);
+    return getRecommendationMetrics(days);
+  });
+
+  // ─── Post-Purchase Follow-Up ───
+
+  // POST /api/purchases/:id/followup (Internal — from OpenClaw callbacks)
+  app.post("/api/purchases/:id/followup", async (req: any, reply) => {
+    const secret = req.headers["x-internal-secret"];
+    if (secret !== process.env.INTERNAL_SECRET) {
+      return reply.status(403).send({ error: "Forbidden" });
+    }
+    const purchaseId = (req.params as { id: string }).id;
+    const { action, userId } = req.body as { action: string; userId?: string };
+    if (!purchaseId || !action) return reply.status(400).send({ error: "id and action required" });
+
+    const result = await handleFollowUpCallback(purchaseId, action, userId || "");
+    return result;
+  });
+
+  // GET /api/purchases/metrics (admin)
+  app.get("/api/purchases/metrics", async (req: any, reply) => {
+    const secret = req.headers["x-internal-secret"];
+    if (secret !== process.env.INTERNAL_SECRET) {
+      return reply.status(403).send({ error: "Forbidden" });
+    }
+    const days = parseInt((req.query as any).days || "30", 10);
+    return getFollowUpMetrics(days);
   });
 }

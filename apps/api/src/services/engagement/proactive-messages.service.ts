@@ -11,6 +11,7 @@ import { sendWhatsAppMessage } from "../twilio-whatsapp.service.js";
 import { redisGet, redisSet } from "../redis.js";
 import { sendPushToUser } from "./push.service.js";
 import { trackInteraction, checkAndGrantAchievements } from "./gamification.service.js";
+import { getRecommendationsForBriefing } from "./recommendation-engine.service.js";
 
 // ─── Helpers ───
 
@@ -75,7 +76,7 @@ async function sendToUserChannel(user: UserWithChannel, message: string, type: s
       }
     }
     // Push notification (always try)
-    await sendPushToUser(user.id, `Jarvis 🦀`, message.replace(/<[^>]+>/g, "").substring(0, 200));
+    await sendPushToUser(user.id, `Jarvis 🐕`, message.replace(/<[^>]+>/g, "").substring(0, 200));
   } catch (err) {
     console.error(`[PROACTIVE] Failed to send ${type} to ${user.id}:`, err);
   }
@@ -461,7 +462,7 @@ async function buildAlertsSection(user: UserWithChannel, facts: Record<string, s
     });
     if (radarCount > 0 && drops.length === 0) {
       lines.push(lang === "pt"
-        ? `🔍 Monitorando ${radarCount} produto${radarCount > 1 ? "s" : ""} pra voce`
+        ? `🔍 Monitorando ${radarCount} produto${radarCount > 1 ? "s" : ""} pra você`
         : `🔍 Watching ${radarCount} product${radarCount > 1 ? "s" : ""} for price drops`);
     }
   } catch { /* non-critical */ }
@@ -498,16 +499,16 @@ async function buildNewsSection(facts: Record<string, string>, lang: "pt" | "es"
 
 // SECTION 4 — Rotating tip (never repeat for same user)
 const BRIEFING_TIPS_PT = [
-  "Sabia que posso ligar pra restaurante e reservar por voce? E so pedir!",
-  "Me manda uma foto de qualquer produto e eu acho o melhor preco!",
-  "Diga 'monitora o preco do [produto]' e te aviso quando cair!",
-  "Manda audio que eu entendo perfeitamente!",
-  "Posso rastrear qualquer encomenda — manda o codigo!",
-  "Diga 'compara preco de [produto]' e busco em 100+ lojas!",
-  "Posso gerar documentos como PDF — contratos, cartas, relatorios!",
-  "Busco voos, hoteis e restaurantes pra sua viagem!",
-  "Diga 'relatorio semanal' pra ver suas estatisticas!",
-  "Posso fazer ligacoes telefonicas por voce — e so pedir!",
+  "Sabia que posso ligar pra restaurante e reservar por você? É só pedir!",
+  "Me manda uma foto de qualquer produto e eu acho o melhor preço!",
+  "Diga 'monitora o preço do [produto]' e te aviso quando cair!",
+  "Manda áudio que eu entendo perfeitamente!",
+  "Posso rastrear qualquer encomenda — manda o código!",
+  "Diga 'compara preço de [produto]' e busco em 100+ lojas!",
+  "Posso gerar documentos como PDF — contratos, cartas, relatórios!",
+  "Busco voos, hotéis e restaurantes pra sua viagem!",
+  "Diga 'relatório semanal' pra ver suas estatísticas!",
+  "Posso fazer ligações telefônicas por você — é só pedir!",
 ];
 
 const BRIEFING_TIPS_EN = [
@@ -561,10 +562,11 @@ export async function sendMorningBriefing(user: UserWithChannel) {
   const name = facts.name || facts.first_name || user.fullName.split(" ")[0];
   const lang = detectLang(facts, user);
 
-  // Build all 5 sections in parallel
-  const [weather, alerts, news, tip, currency] = await Promise.all([
+  // Build all 6 sections in parallel
+  const [weather, alerts, recommendations, news, tip, currency] = await Promise.all([
     buildWeatherSection(user, facts, lang),
     buildAlertsSection(user, facts, lang),
+    getRecommendationsForBriefing(user.id, user.telegramChatId, user.phone, lang),
     buildNewsSection(facts, lang),
     buildTipSection(user.id, lang),
     buildCurrencySection(lang),
@@ -577,17 +579,18 @@ export async function sendMorningBriefing(user: UserWithChannel) {
   const sections: string[] = [];
   if (weather) sections.push(weather);
   if (alerts) sections.push(alerts);
+  if (recommendations) sections.push(recommendations);
   if (news) sections.push(news);
   if (tip) sections.push(tip);
   if (currency) sections.push(currency);
 
-  const closing = lang === "pt" ? "Bom dia! 🦀" : lang === "es" ? "Buen dia! 🦀" : "Have a great day! 🦀";
+  const closing = lang === "pt" ? "Bom dia! 🐕" : lang === "es" ? "Buen dia! 🐕" : "Have a great day! 🐕";
 
   let message = `${greeting} ${name}!\n\n${sections.join("\n\n")}\n\n${closing}`;
 
   // Enforce 500 char limit — prioritize: alerts > weather > news > tip > currency
   if (message.length > 500) {
-    const priority = [alerts, weather, news, tip, currency].filter(Boolean);
+    const priority = [alerts, recommendations, weather, news, tip, currency].filter(Boolean);
     let trimmed = `${greeting} ${name}!\n\n`;
     for (const section of priority) {
       if (trimmed.length + section.length + closing.length + 4 > 500) break;
@@ -635,11 +638,11 @@ export async function checkReengagement() {
     let message: string;
 
     if (daysSince <= 3) {
-      message = `Hey ${name}, how's it going? I found some cool stuff that might interest you! 🦀`;
+      message = `Hey ${name}, how's it going? I found some cool stuff that might interest you! 🐕`;
     } else if (daysSince <= 7) {
       message = `Missing you! 😄 Did you know I can now search flights and hotels? Give it a try!`;
     } else if (daysSince <= 15) {
-      message = `${name}, it's been a while! I've got new features since we last talked. Come say hi! 🦀`;
+      message = `${name}, it's been a while! I've got new features since we last talked. Come say hi! 🐕`;
     } else {
       message = `Hi ${name}! Just checking in to say I'm still here if you need me. Take care! 😊`;
     }
@@ -683,7 +686,7 @@ export async function sendWeeklyReport(user: UserWithChannel) {
     `🔍 ${searches} product searches\n` +
     (gam ? `💰 Total savings: $${gam.totalSavingsUsd.toFixed(0)}\n` : "") +
     (gam ? `🔥 Streak: ${gam.streakDays} day(s)\n` : "") +
-    `\nHave a great week! 🦀`;
+    `\nHave a great week! 🐕`;
 
   await sendToUserChannel(user, message, "weekly_report");
 }
@@ -734,7 +737,7 @@ export async function checkBirthdays() {
     if (alreadySent) continue;
 
     const name = user.fullName.split(" ")[0];
-    const message = `🎂 Happy Birthday ${name}! As a gift, your next 20 searches are on me! 🎁🦀`;
+    const message = `🎂 Happy Birthday ${name}! As a gift, your next 20 searches are on me! 🎁🐕`;
     await sendToUserChannel(user, message, "birthday");
   }
 }

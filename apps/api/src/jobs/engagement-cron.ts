@@ -18,6 +18,8 @@ import {
   runBirthdayCheck,
 } from "../services/engagement/proactive-messages.service.js";
 import { checkRenewalAlerts, checkSubscriptionWaste } from "../services/subscriptions/subscription-cron.service.js";
+import { runRecommendationCron } from "./recommendation-cron.js";
+import { runFollowUpCron } from "../services/engagement/purchase-followup.service.js";
 
 // Morning briefing: 8AM EST = 12:00 UTC
 cron.schedule("0 12 * * *", async () => {
@@ -79,6 +81,24 @@ cron.schedule("0 14 1 * *", async () => {
     await checkSubscriptionWaste();
   } catch (err) {
     console.error("[ENGAGEMENT-CRON] Subscription waste detection error:", err);
+  }
+});
+
+// Proactive recommendations: every 6 hours (00:00, 06:00, 12:00, 18:00 UTC)
+cron.schedule("0 */6 * * *", async () => {
+  try {
+    await runRecommendationCron();
+  } catch (err) {
+    console.error("[ENGAGEMENT-CRON] Recommendation cron error:", err);
+  }
+});
+
+// Post-purchase follow-up: every 2 hours
+cron.schedule("30 */2 * * *", async () => {
+  try {
+    await runFollowUpCron();
+  } catch (err) {
+    console.error("[ENGAGEMENT-CRON] Follow-up cron error:", err);
   }
 });
 

@@ -42,28 +42,64 @@ const ACHIEVEMENTS: Achievement[] = [
   { id: "streak_3", label: "🔥 3 days in a row!", check: (g) => g.streakDays >= 3 },
   { id: "streak_7", label: "🔥🔥 7-day streak! On fire!", check: (g) => g.streakDays >= 7 },
   { id: "streak_30", label: "🔥🔥🔥 30-day streak! Legendary!", check: (g) => g.streakDays >= 30 },
-  { id: "savings_50", label: "💰 Saved $50 with Jarvis!", check: (g) => g.totalSavingsUsd >= 50 },
+  { id: "savings_50", label: "💰 Saved $50 with Sniffer!", check: (g) => g.totalSavingsUsd >= 50 },
   { id: "savings_100", label: "💰💰 Saved $100!", check: (g) => g.totalSavingsUsd >= 100 },
   { id: "savings_500", label: "💰💰💰 Saved $500! Shopping legend!", check: (g) => g.totalSavingsUsd >= 500 },
   { id: "interactions_50", label: "⭐ 50 interactions — Explorer unlocked!", check: (g) => g.totalInteractions >= 50 },
-  { id: "interactions_200", label: "🏆 200 interactions — Jarvis VIP!", check: (g) => g.totalInteractions >= 200 },
+  { id: "interactions_200", label: "🏆 200 interactions — Sniffer VIP!", check: (g) => g.totalInteractions >= 200 },
 ];
 
-// ─── Level Calculation ───
+// ─── Level Calculation (savings-based Sniffer tiers) ───
 
-function calculateLevel(totalInteractions: number): string {
-  if (totalInteractions > 200) return "jarvis_vip";
-  if (totalInteractions > 50) return "power_user";
-  if (totalInteractions > 10) return "explorer";
-  return "newbie";
+function calculateSavingsLevel(totalSavingsUsd: number): string {
+  if (totalSavingsUsd >= 10000) return "legend";
+  if (totalSavingsUsd >= 5000) return "master";
+  if (totalSavingsUsd >= 2000) return "hunter";
+  if (totalSavingsUsd >= 500) return "sniffer";
+  return "puppy";
+}
+
+function calculateLevel(totalInteractions: number, totalSavingsUsd: number = 0): string {
+  // Primary: savings-based level
+  return calculateSavingsLevel(totalSavingsUsd);
 }
 
 const LEVEL_LABELS: Record<string, string> = {
-  newbie: "🌱 Newbie",
-  explorer: "🧭 Explorer",
-  power_user: "⚡ Power User",
-  jarvis_vip: "🏆 Jarvis VIP",
+  puppy: "🐶 Puppy",
+  sniffer: "🐕 Sniffer",
+  hunter: "🦮 Hunter",
+  master: "🏅 Master",
+  legend: "🏆 Legend",
 };
+
+const LEVEL_THRESHOLDS: Record<string, number> = {
+  puppy: 0,
+  sniffer: 500,
+  hunter: 2000,
+  master: 5000,
+  legend: 10000,
+};
+
+const LEVEL_REWARDS: Record<string, string> = {
+  sniffer: "🎁 Caneca Sniffer exclusiva!",
+  hunter: "🎁 Camiseta Sniffer + 1 mes Pro!",
+  master: "🎁 Kit Sniffer completo + 3 meses Pro!",
+  legend: "🎁 Sniffer Pro vitalicio + merch exclusivo!",
+};
+
+export function getNextLevelInfo(currentLevel: string, totalSavingsUsd: number) {
+  const levels = ["puppy", "sniffer", "hunter", "master", "legend"];
+  const idx = levels.indexOf(currentLevel);
+  if (idx >= levels.length - 1) return null;
+  const nextLevel = levels[idx + 1];
+  const threshold = LEVEL_THRESHOLDS[nextLevel];
+  return {
+    nextLevel,
+    nextLevelLabel: LEVEL_LABELS[nextLevel],
+    threshold,
+    remaining: Math.max(0, threshold - totalSavingsUsd),
+  };
+}
 
 // ─── Core: Track Interaction ───
 
@@ -105,10 +141,21 @@ export async function trackInteraction(
   if (type === "search") updates.totalSearches = gam.totalSearches + 1;
   if (type === "call") updates.totalCalls = gam.totalCalls + 1;
   if (type === "restaurant") updates.totalRestaurants = gam.totalRestaurants + 1;
-  if (type === "savings" && value) updates.totalSavingsUsd = gam.totalSavingsUsd + value;
+  if (type === "savings" && value) {
+    updates.totalSavingsUsd = gam.totalSavingsUsd + value;
+    // Also update monthly leaderboard
+    const now = new Date();
+    const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    prisma.savingsLeaderboard.upsert({
+      where: { userId_month: { userId, month } },
+      create: { userId, month, totalSaved: value, totalPurchases: 1 },
+      update: { totalSaved: { increment: value }, totalPurchases: { increment: 1 } },
+    }).catch((e: any) => console.error("[Leaderboard] Upsert failed:", e.message));
+  }
 
-  // Level
-  const newLevel = calculateLevel(updates.totalInteractions);
+  // Level (savings-based)
+  const savingsTotal = updates.totalSavingsUsd ?? gam.totalSavingsUsd;
+  const newLevel = calculateLevel(updates.totalInteractions, savingsTotal);
   updates.level = newLevel;
 
   await prisma.userGamification.update({
@@ -116,9 +163,16 @@ export async function trackInteraction(
     data: updates,
   });
 
-  // Level up notification
-  if (newLevel !== gam.level) {
-    const levelMsg = `🎉 Level up! You're now ${LEVEL_LABELS[newLevel]}!`;
+  // Level up notification with Sniffer branding
+  if (newLevel !== gam.level && newLevel !== "puppy") {
+    const reward = LEVEL_REWARDS[newLevel] || "";
+    const savingsStr = `$${savingsTotal.toFixed(2)}`;
+    const levelMsg = [
+      `🎉 Parabéns! Você é agora ${LEVEL_LABELS[newLevel]}!`,
+      `Economia total: ${savingsStr}`,
+      reward ? `\nVocê ganhou: ${reward}` : "",
+      reward ? `Me manda seu endereço que a gente envia. 🐕` : "",
+    ].filter(Boolean).join("\n");
     await notifyUser(userId, levelMsg);
   }
 
@@ -206,7 +260,7 @@ async function notifyUser(userId: string, message: string) {
   if (user.phone) {
     await sendWhatsAppMessage(user.phone, message).catch(() => {});
   }
-  await sendPushToUser(userId, "Jarvis 🦀", message).catch(() => {});
+  await sendPushToUser(userId, "Sniffer 🐕", message).catch(() => {});
 
   await prisma.proactiveMessageLog.create({
     data: { userId, type: "achievement", channel: "multi", message },
