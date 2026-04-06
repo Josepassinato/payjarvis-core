@@ -690,85 +690,130 @@ function buildBriefingSystemPrompt(briefing: CallBriefing): string {
   const keyMsgs = briefing.keyMessages.map((m, i) => `   ${i + 1}. ${m}`).join("\n");
   const langName = briefing.language === "pt" ? "Brazilian Portuguese" : briefing.language === "es" ? "Spanish" : briefing.language === "fr" ? "French" : "English";
 
+  // Build language-specific script examples
+  const scriptExamples = buildScriptExamples(briefing);
+
   return `You are making a PHONE CALL. You must sound EXACTLY like a real human being — not a robot, not an AI, not a script.
 
-You are the personal assistant of ${briefing.userName}.
+You are Sniffer, the personal assistant of ${briefing.userName}.
 Your identity: ${briefing.callerIdentity}
 Target: ${briefing.targetName}
 Language: Speak in ${langName}
 
-OBJECTIVE (deliver ONLY after rapport is built): ${briefing.objective}
+OBJECTIVE (deliver ONLY after greeting and introduction): ${briefing.objective}
 
 Key messages to deliver (ONE AT A TIME, with pauses for reactions):
 ${keyMsgs}
 
+=== HUMANIZED CALL SCRIPT — MANDATORY PHASES ===
+
+PHASE 1 — OPENING (ALWAYS do this):
+${scriptExamples.opening}
+→ Wait 1-2 seconds for their response before continuing.
+
+PHASE 2 — CONTEXT (after they respond to greeting):
+${scriptExamples.context}
+→ Wait 1-2 seconds for acknowledgment.
+
+PHASE 3 — BODY (deliver key messages ONE AT A TIME):
+Rephrase each key message naturally. NEVER copy them word-for-word.
+After each question/message, PAUSE 2 seconds and wait for their response.
+React to what they say: "Oh really?", "Got it!", "That makes sense!"
+
+PHASE 4 — CONFIRMATION (after all messages delivered):
+${scriptExamples.confirmation}
+→ Wait 2 seconds for any additional info.
+
+PHASE 5 — FAREWELL (ALWAYS do this — never skip):
+${scriptExamples.farewell}
+
+=== END SCRIPT ===
+
 CRITICAL PHONE RULES:
 
-1. WAIT FOR THEM TO SPEAK FIRST
-   - Stay completely silent until they say 'hello', 'alô', 'who is this', etc.
-   - Only after hearing them speak, you respond
-
-2. MATCH THEIR ENERGY
+1. MATCH THEIR ENERGY
    - If they sound rushed → be brief and fast
    - If they sound relaxed → be warm and chatty
    - If they sound confused → slow down and explain
    - If they sound annoyed → be extra polite and quick
 
-3. USE NATURAL SPEECH PATTERNS
+2. USE NATURAL SPEECH PATTERNS
    - Start sentences with: 'So...', 'Hey...', 'Look...', 'Actually...'
    - Use fillers naturally: 'um', 'you know', 'like', 'I mean'
    - Pause between thoughts (don't dump everything at once)
    - React to what they say: 'Oh really?', 'No way!', 'Got it!'
-   - Laugh when appropriate: 'haha'
    - Show empathy: 'I totally get that', 'That makes sense'
 
-4. NEVER DO THESE:
-   - Never say 'As an AI' or 'I am a virtual assistant'
+3. NEVER DO THESE:
+   - Never say 'As an AI' or 'I am a virtual assistant' (unless directly asked)
    - Never read a script word-for-word
    - Never use formal/corporate language: 'I would like to inform you that...'
    - Never ignore what they said and continue with your script
    - Never speak for more than 15 seconds without pausing
    - Never use the exact words from the briefing — ALWAYS rephrase naturally
+   - Never skip the greeting or farewell
 
-5. CONVERSATION PHASES — follow this order naturally:
-   Phase 1 GREETING: "Hi! Is this ${briefing.targetName}?" — wait for confirmation
-   Phase 2 RAPPORT: "Hey ${briefing.targetName}! How are you doing?" — wait, react naturally: "Oh great!" / "Good to hear!"
-   Phase 3 INTRODUCTION: "So, I'm calling on behalf of ${briefing.userName} — I'm his personal assistant."
-   Phase 4 MESSAGE: Rephrase the key messages naturally. NEVER copy them word-for-word.
-   Phase 5 CLOSING: Confirm, offer to relay messages, warm goodbye
-
-6. ADAPT THE MESSAGE — ALWAYS rephrase naturally:
+4. ADAPT THE MESSAGE — ALWAYS rephrase naturally:
    Briefing says: 'Ask if he can meet at 4pm at the church'
    BAD (robotic): 'I am calling to ask if you can meet ${briefing.userName} at 4pm at the church.'
    GOOD (human): 'So hey, ${briefing.userName} wanted me to check with you — are you free around 4 today? He was thinking of meeting up at the church.'
 
-   Briefing says: 'Inform that the meeting is cancelled'
-   BAD: 'I am informing you that the meeting has been cancelled.'
-   GOOD: 'Hey so... quick heads up — that meeting? It is not happening anymore. ${briefing.userName} asked me to let you know so you don't make the trip.'
-
-7. HANDLE QUESTIONS NATURALLY
+5. HANDLE QUESTIONS NATURALLY
    If they ask something unexpected:
    - 'Good question, let me think... I believe...'
    - 'Hmm, I'm not 100% sure about that. Want me to have ${briefing.userName} call you back about it?'
    - 'Oh that's a good point. I'll pass that along to ${briefing.userName}.'
 
-8. CLOSING — Don't be abrupt
-   BAD: 'Thank you. Goodbye.'
-   GOOD: 'Alright, awesome! I'll let ${briefing.userName} know. You have a great rest of your day! Bye!'
-
-9. IF THEY ASK IF YOU'RE AI
+6. IF THEY ASK IF YOU'RE AI
    Be honest but casual: 'Yeah actually I'm an AI assistant! Pretty cool right? But everything I'm telling you comes straight from ${briefing.userName}. He asked me to call you personally.'
    If they're uncomfortable: 'Totally understand! Want me to have ${briefing.userName} give you a call directly instead?'
 
-10. MESSAGE RELAY: If ${briefing.targetName} wants to leave a message for ${briefing.userName}, take note and confirm: "Got it! I'll let ${briefing.userName} know right away."
+7. MESSAGE RELAY: If ${briefing.targetName} wants to leave a message for ${briefing.userName}, take note and confirm: "Got it! I'll let ${briefing.userName} know right away."
 
 VOICE BEHAVIOR:
 - Speak warmly and friendly, like a trusted personal assistant
 - Match the caller's pace — fast or slow
 - Use natural fillers: 'Sure!', 'Of course!', 'Got it!', 'Perfect!', 'Awesome!'
 - Use ${briefing.targetName}'s name naturally in conversation
-- Keep each response under 15 words — this is a phone call, not a text chat
+- Keep each response under 20 words — this is a phone call, not a text chat
 - Tone: ${briefing.tone === "professional_friendly" ? "Professional but friendly" : briefing.tone}`;
+}
+
+/**
+ * Build language-specific script examples for each call phase.
+ */
+function buildScriptExamples(briefing: CallBriefing): {
+  opening: string;
+  context: string;
+  confirmation: string;
+  farewell: string;
+} {
+  const t = briefing.targetName;
+  const u = briefing.userName;
+  const reason = briefing.objective;
+
+  if (briefing.language === "pt") {
+    return {
+      opening: `"Olá, ${t}! Tudo bem? Aqui é o Sniffer, assistente do ${u}. Desculpa incomodar, espero que esteja num bom momento."`,
+      context: `"O ${u} me pediu pra te ligar porque ${reason}. Posso falar rapidinho sobre isso?"`,
+      confirmation: `"Perfeito, vou passar tudo isso pro ${u}. Tem mais alguma coisa que gostaria que eu avisasse pra ele?"`,
+      farewell: `"Muito obrigado pela atenção, ${t}! Foi um prazer falar com você. Tenha um ótimo dia! Tchau tchau!"`,
+    };
+  } else if (briefing.language === "es") {
+    return {
+      opening: `"¡Hola ${t}! ¿Cómo estás? Soy Sniffer, el asistente de ${u}. Disculpa la molestia, espero que sea un buen momento."`,
+      context: `"${u} me pidió que te llamara porque ${reason}. ¿Tienes un momentito?"`,
+      confirmation: `"Perfecto, le paso todo esto a ${u}. ¿Hay algo más que quieras que le diga?"`,
+      farewell: `"¡Muchas gracias por tu tiempo, ${t}! Fue un placer hablar contigo. ¡Que tengas un excelente día! ¡Chao!"`,
+    };
+  } else {
+    return {
+      opening: `"Hi ${t}! How are you? This is Sniffer, ${u}'s assistant. Sorry to bother you, I hope this is a good time."`,
+      context: `"${u} asked me to call you because ${reason}. Do you have a quick moment?"`,
+      confirmation: `"Perfect, I'll pass everything along to ${u}. Is there anything else you'd like me to let them know?"`,
+      farewell: `"Thank you so much for your time, ${t}! It was great talking to you. Have a wonderful day! Bye bye!"`,
+    };
+  }
 }
 
 // ─── Public API ──────────────────────────────────────
@@ -964,9 +1009,9 @@ export async function makeCall(params: {
 }
 
 /**
- * Build the greeting text — ONLY the initial greeting, no identity or message.
- * The goal is to sound like a real person: "Hi! Is this [name]?"
- * Identity and message come in later turns after rapport is built.
+ * Build the greeting text — humanized opening with self-identification.
+ * For briefed calls: greet by name + identify as assistant.
+ * For live calls: just identify as Sniffer.
  */
 function buildGreetingText(call: ActiveCall): string {
   const isLive = call.objective === "live_conversation";
@@ -974,52 +1019,52 @@ function buildGreetingText(call: ActiveCall): string {
   if (isLive) {
     const greetings: Record<string, string[]> = {
       en: [
-        "Hey, this is Jarvis. How can I help you?",
-        "Hi there! Jarvis here. What can I do for you?",
-        "Hello! It's Jarvis. What's on your mind?",
+        "Hey, this is Sniffer. How can I help you?",
+        "Hi there! Sniffer here. What can I do for you?",
+        "Hello! It's Sniffer. What's on your mind?",
       ],
       pt: [
-        "Oi, aqui é o Jarvis. Como posso te ajudar?",
-        "E aí! Jarvis aqui. No que posso ajudar?",
-        "Olá! Aqui é o Jarvis. O que você precisa?",
+        "Oi, aqui é o Sniffer. Como posso te ajudar?",
+        "E aí! Sniffer aqui. No que posso ajudar?",
+        "Olá! Aqui é o Sniffer. O que você precisa?",
       ],
       es: [
-        "Hola, soy Jarvis. ¿En qué puedo ayudarte?",
-        "¡Hola! Jarvis aquí. ¿Qué necesitas?",
+        "Hola, soy Sniffer. ¿En qué puedo ayudarte?",
+        "¡Hola! Sniffer aquí. ¿Qué necesitas?",
       ],
       fr: [
-        "Salut, c'est Jarvis. Comment puis-je vous aider?",
-        "Bonjour! Jarvis à votre service. Que puis-je faire?",
+        "Salut, c'est Sniffer. Comment puis-je vous aider?",
+        "Bonjour! Sniffer à votre service. Que puis-je faire?",
       ],
     };
     return randomPick(greetings[call.language] || greetings.en);
   }
 
-  // Briefed call — ONLY ask if they are the target. Nothing else.
+  // Briefed call — warm greeting with name + self-identification
   if (call.briefing) {
     const target = call.briefing.targetName;
+    const userName = call.briefing.userName || "my boss";
 
     if (call.language === "pt") {
       return randomPick([
-        `Oi! É ${target}?`,
-        `Olá! Falo com ${target}?`,
-        `Oi! Tudo bem? É ${target}?`,
+        `Olá, ${target}! Tudo bem? Aqui é o Sniffer, assistente do ${userName}. Desculpa incomodar, espero que esteja num bom momento.`,
+        `Oi, ${target}! Tudo bem? Aqui é o Sniffer, assistente pessoal do ${userName}. Espero não estar atrapalhando!`,
+        `Olá, ${target}! Aqui é o Sniffer, assistente do ${userName}. Desculpa ligar assim, espero que esteja tudo bem!`,
       ]);
     } else if (call.language === "es") {
       return randomPick([
-        `¡Hola! ¿Hablo con ${target}?`,
-        `¡Hola! ¿Es ${target}?`,
+        `¡Hola, ${target}! ¿Cómo estás? Soy Sniffer, el asistente de ${userName}. Disculpa la molestia, espero que sea un buen momento.`,
+        `¡Hola, ${target}! Soy Sniffer, asistente personal de ${userName}. ¡Espero no estar interrumpiendo!`,
       ]);
     } else if (call.language === "fr") {
       return randomPick([
-        `Bonjour! C'est bien ${target}?`,
-        `Bonjour! Je parle à ${target}?`,
+        `Bonjour ${target}! C'est Sniffer, l'assistant de ${userName}. Désolé de vous déranger, j'espère que c'est un bon moment.`,
       ]);
     } else {
       return randomPick([
-        `Hi! Is this ${target}?`,
-        `Hey! Is this ${target}?`,
-        `Hello! Am I speaking with ${target}?`,
+        `Hi ${target}! How are you? This is Sniffer, ${userName}'s assistant. Sorry to bother you, I hope this is a good time.`,
+        `Hey ${target}! This is Sniffer, ${userName}'s personal assistant. Hope I'm not catching you at a bad time!`,
+        `Hello ${target}! I'm Sniffer, ${userName}'s assistant. Sorry to call out of the blue, hope you're doing well!`,
       ]);
     }
   }
@@ -1514,6 +1559,125 @@ async function grokGenerate(prompt: string): Promise<string> {
   return data.choices?.[0]?.message?.content || "";
 }
 
+// ─── Dual-LLM: Gemini Tool Execution for Voice ─────
+
+interface VoiceToolIntent {
+  tool: string;
+  params: Record<string, string>;
+}
+
+const VOICE_TOOL_PATTERN = /\[TOOL:(\w+)\|([^\]]+)\]/;
+
+function parseToolIntent(text: string): { intent: VoiceToolIntent | null; cleanText: string } {
+  const match = text.match(VOICE_TOOL_PATTERN);
+  if (!match) return { intent: null, cleanText: text };
+
+  const tool = match[1];
+  const paramStr = match[2];
+  const params: Record<string, string> = {};
+  for (const pair of paramStr.split("|")) {
+    const [key, ...rest] = pair.split("=");
+    if (key && rest.length > 0) params[key.trim()] = rest.join("=").trim();
+  }
+
+  const cleanText = text.replace(VOICE_TOOL_PATTERN, "").trim();
+  return { intent: { tool, params }, cleanText };
+}
+
+async function executeVoiceTool(intent: VoiceToolIntent, userId: string): Promise<string> {
+  const baseUrl = `http://localhost:${process.env.API_PORT || 3001}`;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "x-internal-secret": INTERNAL_SECRET,
+  };
+
+  try {
+    switch (intent.tool) {
+      case "search_products": {
+        const res = await fetch(`${baseUrl}/api/retail/search`, {
+          method: "POST", headers,
+          body: JSON.stringify({ query: intent.params.query, zip: intent.params.zip || "33401" }),
+        });
+        const data = await res.json() as { results?: { name: string; price: string; store: string }[] };
+        const items = (data.results || []).slice(0, 3);
+        return items.length > 0
+          ? items.map((i) => `${i.name} - ${i.price} at ${i.store}`).join("; ")
+          : "No products found.";
+      }
+      case "search_flights": {
+        const res = await fetch(`${baseUrl}/api/commerce/flights/search`, {
+          method: "POST", headers,
+          body: JSON.stringify({ origin: intent.params.from, destination: intent.params.to, date: intent.params.date }),
+        });
+        const data = await res.json() as { flights?: { airline: string; price: string; departure: string }[] };
+        const flights = (data.flights || []).slice(0, 3);
+        return flights.length > 0
+          ? flights.map((f) => `${f.airline} at ${f.departure} - ${f.price}`).join("; ")
+          : "No flights found for those dates.";
+      }
+      case "search_hotels": {
+        const res = await fetch(`${baseUrl}/api/commerce/hotels/search`, {
+          method: "POST", headers,
+          body: JSON.stringify({ city: intent.params.city, checkIn: intent.params.checkin, checkOut: intent.params.checkout }),
+        });
+        const data = await res.json() as { hotels?: { name: string; price: string; rating: string }[] };
+        const hotels = (data.hotels || []).slice(0, 3);
+        return hotels.length > 0
+          ? hotels.map((h) => `${h.name} - ${h.price}/night (${h.rating}★)`).join("; ")
+          : "No hotels found.";
+      }
+      case "search_restaurants": {
+        const res = await fetch(`${baseUrl}/api/commerce/restaurants/search`, {
+          method: "POST", headers,
+          body: JSON.stringify({ query: intent.params.query || intent.params.cuisine, location: intent.params.location }),
+        });
+        const data = await res.json() as { restaurants?: { name: string; rating: string; price: string }[] };
+        const restaurants = (data.restaurants || []).slice(0, 3);
+        return restaurants.length > 0
+          ? restaurants.map((r) => `${r.name} (${r.rating}★, ${r.price})`).join("; ")
+          : "No restaurants found nearby.";
+      }
+      case "track_package": {
+        const res = await fetch(`${baseUrl}/api/tracking/${encodeURIComponent(intent.params.code)}`, { headers });
+        const data = await res.json() as { status?: string; location?: string; eta?: string };
+        return data.status ? `Status: ${data.status}${data.location ? ` — ${data.location}` : ""}${data.eta ? ` — ETA: ${data.eta}` : ""}` : "Could not track that package.";
+      }
+      case "search_events": {
+        const res = await fetch(`${baseUrl}/api/commerce/events/search`, {
+          method: "POST", headers,
+          body: JSON.stringify({ query: intent.params.query, city: intent.params.city }),
+        });
+        const data = await res.json() as { events?: { name: string; date: string; venue: string; price: string }[] };
+        const events = (data.events || []).slice(0, 3);
+        return events.length > 0
+          ? events.map((e) => `${e.name} — ${e.date} at ${e.venue} (${e.price})`).join("; ")
+          : "No events found.";
+      }
+      default:
+        return `Tool "${intent.tool}" is not available during calls. Tell the user you'll handle it after the call.`;
+    }
+  } catch (err) {
+    console.error(`[VOICE-TOOL] ${intent.tool} failed:`, (err as Error).message);
+    return "I couldn't check that right now. Let me try again later.";
+  }
+}
+
+async function humanizeToolResult(toolResult: string, originalRequest: string, language: string): Promise<string> {
+  const langName = { en: "English", pt: "Portuguese", es: "Spanish", fr: "French" }[language] || "English";
+  return grokGenerate(`You are in a live phone call. Deliver this information naturally and concisely in ${langName}.
+
+The user asked: "${originalRequest}"
+The result is: ${toolResult}
+
+Rules:
+- Maximum 15 words. This is a phone call.
+- Sound warm and helpful, like a personal assistant
+- Highlight the most important detail first
+- If multiple options, mention the best one and say "I found a few options"
+- Never say "based on my search" or "according to my data"
+- Sound like you just KNOW this, not like you looked it up`);
+}
+
 async function buildCallPlan(objective: string, details: string, businessName: string, language: string): Promise<string> {
   const langName = { en: "English", pt: "Portuguese", es: "Spanish", fr: "French" }[language] || "English";
 
@@ -1562,8 +1726,15 @@ Rules:
 - When you acknowledge what they said, briefly echo back key details to confirm understanding.
   Example: They say "Can we move it to 5 instead of 4?" → You say "At 5, got it."
 - Adapt your tone: if they seem rushed, be more direct. If confused, explain simply.
-- You have access to ALL your tools: search restaurants, flights, hotels, products, track packages, set reminders, etc.
-- When you need to use a tool, say "Let me check that..." then give the result concisely.
+- You have access to ALL your tools: search restaurants, flights, hotels, products, track packages, events.
+- When the user asks you to search, find, or check something, include a tool marker in your response:
+  [TOOL:search_products|query=iphone charger] — search products
+  [TOOL:search_flights|from=MIA|to=NYC|date=2026-04-10] — search flights
+  [TOOL:search_hotels|city=Miami|checkin=2026-04-10|checkout=2026-04-12] — search hotels
+  [TOOL:search_restaurants|query=italian|location=Miami] — search restaurants
+  [TOOL:track_package|code=1Z999AA10123456784] — track a package
+  [TOOL:search_events|query=concert|city=Miami] — search events
+- Say "Let me check that for you..." BEFORE the [TOOL:...] marker. The system will execute the tool and you'll deliver the result naturally.
 - If the user says goodbye/tchau/bye, respond with DONE: followed by a summary of what you discussed.
 - Be warm, efficient, helpful. You know the user personally.
 - Never say you are an AI.
@@ -1719,7 +1890,19 @@ If the objective is met, start with "DONE:" followed by a summary.
 Otherwise, just write what to say next.`;
   }
 
-  const text = (await grokGenerate(prompt)).trim();
+  let text = (await grokGenerate(prompt)).trim();
+
+  // ─── Dual-LLM: Detect tool intent from Grok → Execute via API → Humanize ───
+  if (isLive) {
+    const { intent, cleanText } = parseToolIntent(text);
+    if (intent) {
+      console.log(`[VOICE-DUAL-LLM] Tool detected: ${intent.tool} params=${JSON.stringify(intent.params)}`);
+      const toolResult = await executeVoiceTool(intent, call.userId);
+      console.log(`[VOICE-DUAL-LLM] Tool result: ${toolResult.substring(0, 100)}`);
+      const humanized = await humanizeToolResult(toolResult, calleeResponse, call.language);
+      text = humanized.trim() || cleanText || "I found some info for you.";
+    }
+  }
 
   if (text.startsWith("DONE:")) {
     const summary = text.replace("DONE:", "").trim();

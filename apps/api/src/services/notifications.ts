@@ -197,7 +197,7 @@ export async function notifyHandoffCreated(
       description: data.description,
       sessionUrl: data.sessionUrl,
     });
-    sendEmail({ to: user.email, ...template }).catch((err) =>
+    await sendEmail({ to: user.email, ...template }).catch((err) =>
       console.error("[Notification] Email send failed:", err)
     );
   }
@@ -235,7 +235,7 @@ export async function notifyTransactionApproved(
       transactionId: data.transactionId,
       timestamp: now,
     });
-    sendEmail({ to: user.email, ...template }).catch((err) =>
+    await sendEmail({ to: user.email, ...template }).catch((err) =>
       console.error("[Notification] Email send failed:", err)
     );
   }
@@ -274,7 +274,7 @@ export async function notifyTransactionBlocked(
       reason: data.reason,
       dashboardUrl: `${DASHBOARD_URL}/rules`,
     });
-    sendEmail({ to: user.email, ...template }).catch((err) =>
+    await sendEmail({ to: user.email, ...template }).catch((err) =>
       console.error("[Notification] Email send failed:", err)
     );
   }
@@ -330,7 +330,7 @@ export async function notifyApprovalCreated(
       expiresAt,
       dashboardUrl: `${DASHBOARD_URL}/approvals`,
     });
-    sendEmail({ to: user.email, ...template }).catch((err) =>
+    await sendEmail({ to: user.email, ...template }).catch((err) =>
       console.error("[Notification] Email send failed:", err)
     );
   }
