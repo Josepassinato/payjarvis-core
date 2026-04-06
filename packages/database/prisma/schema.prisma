@@ -156,6 +156,7 @@ model User {
   whatsappTrialStartsAt  DateTime?  @map("whatsapp_trial_starts_at")
   whatsappTrialEndsAt    DateTime?  @map("whatsapp_trial_ends_at")
   whatsappTrialExpired   Boolean    @default(false) @map("whatsapp_trial_expired")
+  referralCode           String?    @unique @map("referral_code") // short invite code (e.g. J7KX2M)
   referralBonusDays      Int        @default(0) @map("referral_bonus_days") // extra trial days from referrals
   referredByUserId       String?    @map("referred_by_user_id")
   referralCount          Int        @default(0) @map("referral_count") // how many friends signed up
@@ -1274,15 +1275,18 @@ model UserContact {
 model UserNotificationPreferences {
   id              String   @id @default(cuid())
   userId          String   @unique
-  morningBriefing Boolean  @default(true)
-  priceAlerts     Boolean  @default(true)
-  reengagement    Boolean  @default(true)
-  weeklyReport    Boolean  @default(true)
-  smartTips       Boolean  @default(true)
-  achievements    Boolean  @default(true)
-  birthday        Boolean  @default(true)
-  pushEnabled     Boolean  @default(true)
-  timezone        String   @default("America/New_York")
+  morningBriefing  Boolean  @default(true)
+  priceAlerts      Boolean  @default(true)
+  reengagement     Boolean  @default(true)
+  weeklyReport     Boolean  @default(true)
+  smartTips        Boolean  @default(true)
+  achievements     Boolean  @default(true)
+  birthday         Boolean  @default(true)
+  recommendations  Boolean  @default(true)
+  pushEnabled      Boolean  @default(true)
+  quietHoursStart  Int      @default(22) // 22 = 10 PM local
+  quietHoursEnd    Int      @default(8)  // 8 = 8 AM local
+  timezone         String   @default("America/New_York")
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -1308,6 +1312,50 @@ model UserGamification {
   updatedAt        DateTime @updatedAt
 
   @@map("user_gamification")
+}
+
+// ─── Savings Leaderboard (monthly ranking) ───
+
+model SavingsLeaderboard {
+  id              String   @id @default(cuid())
+  userId          String
+  month           String   // "2026-04"
+  totalSaved      Float    @default(0)
+  totalPurchases  Int      @default(0)
+  updatedAt       DateTime @default(now()) @updatedAt
+
+  @@unique([userId, month])
+  @@index([month, totalSaved])
+  @@map("savings_leaderboard")
+}
+
+// ─── Promo Codes (influencer/creator access) ───
+
+model PromoCode {
+  id          String    @id @default(cuid())
+  code        String    @unique
+  type        String    @default("pro_months") // pro_months | free_trial
+  months      Int       @default(3)
+  maxUses     Int       @default(1)
+  usedCount   Int       @default(0)
+  createdBy   String?   // admin who created it
+  active      Boolean   @default(true)
+  expiresAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  redemptions PromoRedemption[]
+  @@map("promo_codes")
+}
+
+model PromoRedemption {
+  id          String   @id @default(cuid())
+  promoCodeId String
+  userId      String
+  redeemedAt  DateTime @default(now())
+
+  promoCode   PromoCode @relation(fields: [promoCodeId], references: [id])
+  @@unique([promoCodeId, userId])
+  @@map("promo_redemptions")
 }
 
 // ─── Engagement — Proactive Messages Log ───
@@ -1645,4 +1693,75 @@ model ShoppingList {
   @@index([userId])
   @@index([userId, status])
   @@map("shopping_lists")
+}
+
+// ─── Watchdog: Promise Tracker ───
+
+model WatchdogPromise {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId         String    @map("user_id")
+  channel        String    @db.VarChar(20) // whatsapp, telegram
+  promiseText    String    @map("promise_text")
+  promisedAction String?   @map("promised_action") @db.VarChar(100)
+  status         String    @default("PENDING") @db.VarChar(20) // PENDING, FULFILLED, FAILED
+  fallbackSentAt DateTime? @map("fallback_sent_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  fulfilledAt    DateTime? @map("fulfilled_at")
+
+  @@index([status, createdAt])
+  @@index([userId, status])
+  @@map("watchdog_promises")
+}
+
+// ─── Proactive Recommendations ───
+
+model Recommendation {
+  id              String    @id @default(cuid())
+  userId          String
+  triggerType     String    @db.VarChar(30) // price_drop | similar | restock | deal_alert
+  productName     String
+  productUrl      String?
+  imageUrl        String?
+  store           String?   @db.VarChar(100)
+  originalPrice   Float?
+  currentPrice    Float?
+  currency        String    @default("USD") @db.VarChar(3)
+  savingsPercent  Float?
+  confidenceScore Float     @default(0)
+  message         String
+  channel         String?   @db.VarChar(20) // telegram | whatsapp | web
+  status          String    @default("pending") @db.VarChar(20) // pending | sent | clicked | converted | rejected | ignored
+  sentAt          DateTime?
+  clickedAt       DateTime?
+  convertedAt     DateTime?
+  rejectedAt      DateTime?
+  sourceQuery     String?   // original search query that led to this
+  metadata        Json?     // extra context (category, brand, etc)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([userId, status])
+  @@index([userId, createdAt])
+  @@index([triggerType])
+  @@index([status, createdAt])
+  @@map("recommendations")
+}
+
+// ─── Tool Call Logs (rationalization safety net) ───
+
+model ToolCallLog {
+  id           String   @id @default(uuid())
+  userId       String?
+  toolName     String   @db.VarChar(64)
+  parameters   Json?
+  success      Boolean  @default(true)
+  duration     Int      @default(0) // ms
+  channel      String   @db.VarChar(20) // whatsapp | telegram | pwa
+  errorMessage String?
+  createdAt    DateTime @default(now())
+
+  @@index([toolName, createdAt])
+  @@index([userId, createdAt])
+  @@index([createdAt])
+  @@map("tool_call_logs")
 }

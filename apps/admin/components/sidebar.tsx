@@ -12,6 +12,7 @@ const navItems = [
   { label: "Broadcast", icon: "📢", href: "/broadcast" },
   { label: "Revenue", icon: "💰", href: "/revenue" },
   { label: "Finance", icon: "📈", href: "/finance" },
+  { label: "SnifferShop", icon: "🐕", href: "/sniffershop" },
   { label: "System Health", icon: "🛡️", href: "/system" },
   { label: "Security", icon: "🔒", href: "/security" },
 ];

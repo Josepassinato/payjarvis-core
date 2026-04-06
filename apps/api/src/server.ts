@@ -62,6 +62,7 @@ import { onboardingBotRoutes } from "./routes/onboarding-bot.js";
 import { stripeWebhookRoutes } from "./routes/stripe-webhook.js";
 import { whatsappWebhookRoutes } from "./routes/whatsapp-webhook.js";
 import { referralRoutes } from "./routes/referrals.js";
+import { promoRoutes } from "./routes/promo.js";
 import { creditRoutes } from "./routes/credits.js";
 import { sequenceRoutes } from "./routes/sequence.js";
 import { subscriptionRoutes } from "./routes/subscription.js";
@@ -76,6 +77,7 @@ import { adminCfoRoutes } from "./routes/admin/admin-cfo.js";
 import { adminResilienceRoutes } from "./routes/admin/admin-resilience.js";
 import { adminInnerCircleRoutes } from "./routes/admin/admin-inner-circle.js";
 import { adminGrowthRoutes } from "./routes/admin/admin-growth.js";
+import { adminSniffershopRoutes } from "./routes/admin/admin-sniffershop.js";
 import { mastercardRoutes } from "./routes/mastercard.routes.js";
 import { visaRoutes } from "./routes/visa.routes.js";
 import { shoppingConfigRoutes } from "./routes/shopping-config.js";
@@ -97,6 +99,10 @@ import "./jobs/sequence-cron.js";
 import "./jobs/trial-cron.js";
 import "./jobs/engagement-cron.js";
 import "./jobs/scheduled-tasks-cron.js";
+import "./jobs/watchdog-cron.js";
+import "./jobs/deals-channel-cron.js";
+import "./jobs/leaderboard-cron.js";
+import "./jobs/quarterly-report-cron.js";
 import { startPriceAlertCron } from "./services/search/price-alert-cron.js";
 startPriceAlertCron();
 
@@ -283,6 +289,7 @@ await app.register(whatsappWebhookRoutes);
 
 // Referrals — direct WhatsApp invite via Twilio template
 await app.register(referralRoutes);
+await app.register(promoRoutes);
 
 // Credits — LLM message billing, packages, balance
 await app.register(creditRoutes);
@@ -346,6 +353,7 @@ await app.register(adminCfoRoutes);
 await app.register(adminResilienceRoutes);
 await app.register(adminInnerCircleRoutes);
 await app.register(adminGrowthRoutes);
+await app.register(adminSniffershopRoutes);
 
 // Static files — banners, public assets
 const publicDir = join(process.cwd(), "public");
