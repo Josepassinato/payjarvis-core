@@ -186,6 +186,18 @@ If in doubt, ALWAYS use [FORMAT:TEXT].
 CRITICAL RULE
 Never reveal internal failures, technical terms, or system details to the user. Never say "erro", "tilt", "sistema", "Gemini" or similar.
 
+REGRA DE CHAMADAS TELEFÔNICAS 📞
+Quando o usuário pedir pra ligar pra alguém ("liga pro João", "call John", "telefona pro restaurante"):
+1. PERGUNTE O IDIOMA: "Em que idioma devo falar na ligação? 🇧🇷 Português, 🇺🇸 English ou 🇪🇸 Español?"
+2. MOSTRE O RESUMO: "📞 Vou ligar pra [nome/número]:
+   - Cumprimentar [nome]
+   - Perguntar: [X, Y, Z]
+   - Me despedir educadamente
+   Confirma? 🐕"
+3. SÓ APÓS confirmação → passe pro sistema executar a chamada
+4. APÓS a ligação → mande resumo caloroso: "📞 Liguei pro [nome]! Ele disse [resumo]. Quer que eu faça mais alguma coisa? 🐕"
+NUNCA ligue sem confirmar idioma e resumo antes.
+
 Lembre sempre: você é o Sniffer 🐕 — o amigo que conversa de boa, fica animado com economias e ajuda o ${userName} a tomar boas decisões.
 
 ${userProfile}
@@ -340,7 +352,7 @@ YOUR TOOLS:
 - VAULT: setup_vault, save_card, list_vault_items, delete_vault_item
 - MEMORY: save_user_fact, set_reminder, get_reminders, complete_reminder
 - SCHEDULED TASKS: manage_scheduled_task (create, list, edit, delete, pause, resume)
-- PHONE: make_phone_call (call stores/restaurants), call_user (voice call with user), list_contacts, update_contact, delete_contact
+- PHONE: make_phone_call (call stores/restaurants/people — ALWAYS confirm language + summary + explicit OK before calling. language param REQUIRED: 'pt', 'en', or 'es'), call_user (voice call with user), list_contacts, update_contact, delete_contact
 - OTHER: search_restaurants, search_hotels, search_flights, search_events, search_transit, search_rental_cars, find_home_service, find_mechanic, get_directions, geocode_address, web_search, browse, generate_document, fill_form, export_transactions, check_prescription, share_jarvis, request_handoff
 - CALLER ID: send to https://www.payjarvis.com/setup-phone
 - PWA: https://www.payjarvis.com/chat — user can install as app
@@ -984,7 +996,7 @@ const tools: any[] = [
       },
       {
         name: "make_phone_call",
-        description: "Make a phone call on behalf of the user. Use when the user asks to call a restaurant, hotel, store, doctor, airline, or any person. You conduct the conversation autonomously and report the result. Always confirm before calling. If the user gives a name without a number (e.g. 'call Adriane'), the system will auto-lookup from saved contacts. If not found, ask for the number.",
+        description: "Make a phone call on behalf of the user. Use when the user asks to call a restaurant, hotel, store, doctor, airline, or any person. You conduct the conversation autonomously with a humanized script (greeting, identification, questions, farewell) and report the result. CRITICAL: Before calling, you MUST have confirmed with the user: 1) the language (pt/en/es), 2) a summary of what you will say, 3) explicit confirmation. If the user gives a name without a number, the system auto-lookups from saved contacts.",
         parameters: {
           type: SchemaType.OBJECT,
           properties: {
@@ -992,9 +1004,9 @@ const tools: any[] = [
             business_name: { type: SchemaType.STRING, description: "Name of the person or business being called" },
             objective: { type: SchemaType.STRING, description: "What to accomplish: 'make reservation', 'ask about hours', 'check availability', 'invite to beach', etc." },
             details: { type: SchemaType.STRING, description: "Specifics: '2 people, 8pm tonight, name José Passinato'" },
-            language: { type: SchemaType.STRING, description: "Language to speak on the call: 'en', 'pt', 'es'" },
+            language: { type: SchemaType.STRING, description: "REQUIRED — Language to speak on the call: 'en', 'pt', 'es'. Must be confirmed with user before calling." },
           },
-          required: ["objective"],
+          required: ["objective", "language"],
         },
       },
       {
@@ -3246,6 +3258,103 @@ async function _handleToolInner(userId: string, name: string, args: Record<strin
           }
         }
         default: return { error: `Unknown price_alerts action: ${action}. Use: set, list, delete` };
+      }
+    }
+
+    // ─── Coupon Hunter — search_coupons & manage_wishlist ───
+
+    case "search_coupons": {
+      console.log(`[COUPON-HUNTER] Tool called: search_coupons { store: "${args.store}", category: "${args.category}", country: "${args.country}" }`);
+      try {
+        const { searchCoupons } = await import("./shopping/coupon-hunter.js");
+        const deals = await searchCoupons(
+          args.store as string | undefined,
+          args.category as string | undefined,
+          (args.country as "US" | "BR") || "US"
+        );
+        if (deals.length === 0) {
+          return { message: "No deals found right now. Try a different store or category.", deals: [] };
+        }
+        return {
+          deals: deals.slice(0, 10),
+          count: deals.length,
+          message: `Found ${deals.length} deals${args.store ? ` for ${args.store}` : ""}`,
+        };
+      } catch (err) {
+        console.error("[COUPON-HUNTER] search_coupons error:", (err as Error).message);
+        return { error: "Coupon search failed. Try again." };
+      }
+    }
+
+    case "manage_wishlist": {
+      const action = args.action as string;
+      console.log(`[COUPON-HUNTER] Tool called: manage_wishlist { action: "${action}" }`);
+      try {
+        const userRecord = await prisma.user.findFirst({
+          where: { OR: [{ telegramChatId: userId }, { phone: userId.replace("whatsapp:", "") }] },
+          select: { id: true, clerkId: true, telegramChatId: true, phone: true },
+        });
+        if (!userRecord) return { error: "User not found. Complete onboarding first." };
+
+        switch (action) {
+          case "add": {
+            const query = args.query as string;
+            if (!query) return { error: "Need a product name to watch. Example: 'AirPods Pro'" };
+
+            const channel = userId.startsWith("whatsapp:") ? "whatsapp" : "telegram";
+            const channelId = channel === "whatsapp" ? userId : (userRecord.telegramChatId || "");
+            if (!channelId) return { error: "No notification channel configured." };
+
+            const item = await prisma.userWishlistItem.create({
+              data: {
+                userId: userRecord.clerkId,
+                query: query.trim(),
+                category: (args.category as string) || null,
+                maxPrice: args.max_price ? Number(args.max_price) : null,
+                country: (args.country as string) || "US",
+                channel,
+                channelId,
+                active: true,
+              },
+            });
+            return {
+              success: true,
+              item: { id: item.id, query: item.query, maxPrice: item.maxPrice, country: item.country },
+              message: `Added "${query}" to your wish list! I'll notify you when a deal appears.`,
+            };
+          }
+          case "list": {
+            const items = await prisma.userWishlistItem.findMany({
+              where: { userId: userRecord.clerkId, active: true },
+              orderBy: { createdAt: "desc" },
+            });
+            if (items.length === 0) return { items: [], message: "Your wish list is empty. Add items with: 'watch AirPods Pro'" };
+            return {
+              items: items.map(i => ({
+                id: i.id,
+                query: i.query,
+                maxPrice: i.maxPrice,
+                country: i.country,
+                matchCount: i.matchCount,
+                lastMatch: i.lastMatchAt,
+              })),
+              count: items.length,
+            };
+          }
+          case "remove": {
+            const itemId = args.item_id as string;
+            if (!itemId) return { error: "Need item_id to remove. Use action=list to see IDs." };
+            await prisma.userWishlistItem.deleteMany({
+              where: { id: itemId, userId: userRecord.clerkId },
+            });
+            return { success: true, message: "Removed from wish list." };
+          }
+          default:
+            return { error: `Unknown wishlist action: ${action}. Use: add, list, remove` };
+        }
+      } catch (err) {
+        console.error("[COUPON-HUNTER] manage_wishlist error:", (err as Error).message);
+        return { error: "Wish list operation failed. Try again." };
       }
     }
 

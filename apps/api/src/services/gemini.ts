@@ -12,7 +12,8 @@ You find the best prices, compare stores, monitor deals, and save money. You res
 
 CORE RULE — SELF-AWARENESS
 Before responding, check your available tools. NEVER say "I can't" or "I don't know" when you have a tool that helps.
-YOUR TOOLS: amazon_search, search_products (Amazon/Walmart/Google Shopping — use platform='all' to compare prices), generate_document, export_transactions, setup_vault, save_card, list_vault_items, delete_vault_item, save_store_credentials, remove_store_credentials, share_bot, skyfire_setup_wallet, skyfire_checkout, skyfire_my_purchases, skyfire_spending, skyfire_set_limits, manage_payment_methods, smart_checkout, list_call_recordings.
+YOUR TOOLS: amazon_search, search_products (Amazon/Walmart/Google Shopping — use platform='all' to compare prices), generate_document, export_transactions, setup_vault, save_card, list_vault_items, delete_vault_item, save_store_credentials, remove_store_credentials, share_bot, skyfire_setup_wallet, skyfire_checkout, skyfire_my_purchases, skyfire_spending, skyfire_set_limits, manage_payment_methods, smart_checkout, list_call_recordings, search_coupons, manage_wishlist.
+COUPON HUNTER: When user asks for coupons, deals, or discounts, use search_coupons. When user wants to be alerted about a product deal, use manage_wishlist action=add. When user asks "what's on my wish list", use manage_wishlist action=list.
 PAYMENT WALLET: When user wants to buy something, use smart_checkout — it checks the user's payment wallet and shows available options. When user asks about payment methods ("how can I pay?", "add PayPal", "my payment methods"), use manage_payment_methods. NEVER hardcode a payment method — always check the wallet first.
 If user sends an image → ANALYZE IT (you have vision). If user asks to buy → search_products. If user wants a document → generate_document.
 SHOPPING: Present results as PRICE RANKING (cheapest first). Show rank, product name, price, rating, link. Highlight BEST VALUE.
@@ -225,6 +226,35 @@ const credentialTools = [{
           limit: { type: SchemaType.NUMBER, description: "Number of recordings to return (default 5, max 20)" },
         },
         required: [],
+      } as FunctionDeclarationSchema,
+    },
+    {
+      name: "search_coupons",
+      description: "Search for coupon codes and deals. Use when the user asks for coupons, deals, discounts, promos, or 'find me a deal'. Searches multiple sources: API databases, web scraping, and social media. Can filter by store, category, and country (US or BR).",
+      parameters: {
+        type: SchemaType.OBJECT,
+        properties: {
+          store: { type: SchemaType.STRING, description: "Store name to search coupons for (e.g. 'Amazon', 'Walmart', 'Magazine Luiza')" },
+          category: { type: SchemaType.STRING, description: "Product category: electronics, smartphones, computers, tv_displays, clothing, kitchen, home, gaming, tablets_ereaders" },
+          country: { type: SchemaType.STRING, description: "Country: 'US' for United States or 'BR' for Brazil. Detect from context — if user speaks Portuguese, default BR; if English, default US." },
+        },
+        required: [],
+      } as FunctionDeclarationSchema,
+    },
+    {
+      name: "manage_wishlist",
+      description: "Manage the user's deal wish list. Sniffer monitors prices and sends alerts when matching deals are found. Use when user says: 'avisa quando', 'alert me when', 'watch price', 'add to wish list', 'lista de desejos', 'me avisa se'. Actions: add (watch for a product), list (show all watched items), remove (stop watching).",
+      parameters: {
+        type: SchemaType.OBJECT,
+        properties: {
+          action: { type: SchemaType.STRING, description: "Action: add, list, remove" },
+          query: { type: SchemaType.STRING, description: "For add: product to watch (e.g. 'AirPods Pro', 'PS5')" },
+          max_price: { type: SchemaType.NUMBER, description: "For add: maximum price to alert (optional)" },
+          category: { type: SchemaType.STRING, description: "For add: category filter (optional)" },
+          country: { type: SchemaType.STRING, description: "For add: 'US' or 'BR'" },
+          item_id: { type: SchemaType.STRING, description: "For remove: wish list item ID" },
+        },
+        required: ["action"],
       } as FunctionDeclarationSchema,
     },
   ],

@@ -1765,3 +1765,57 @@ model ToolCallLog {
   @@index([createdAt])
   @@map("tool_call_logs")
 }
+
+// ─── Coupon Hunter — Deal Monitoring & Wish List ───
+
+model CouponDeal {
+  id            String    @id @default(cuid())
+  store         String    @db.VarChar(100)
+  title         String    // "AirPods Pro — $189 (normal $249)"
+  code          String?   @db.VarChar(50)
+  description   String
+  discountType  String    @db.VarChar(20) // percentage, fixed, free_shipping, deal
+  discountValue Float?
+  originalPrice Float?
+  dealPrice     Float?
+  currency      String    @default("USD") @db.VarChar(3)
+  country       String    @default("US") @db.VarChar(2) // US, BR
+  category      String?   @db.VarChar(50)
+  productUrl    String?
+  imageUrl      String?
+  urgency       String    @default("NORMAL") @db.VarChar(10) // URGENT, NORMAL, ALWAYS_ACTIVE
+  urgencyReason String?   // "Limited stock", "Expires in 2h"
+  source        String    @db.VarChar(50) // serpapi, couponapi, linkmydeals, pelando, promobit, slickdeals, twitter, rss
+  sourceId      String?   @db.VarChar(500) // external deal ID for dedup
+  expiresAt     DateTime?
+  verified      Boolean   @default(false)
+  notified      Boolean   @default(false) // already pushed to matching wish list users
+  createdAt     DateTime  @default(now())
+
+  @@unique([source, sourceId])
+  @@index([store, createdAt])
+  @@index([country, createdAt])
+  @@index([urgency, notified])
+  @@index([category])
+  @@map("coupon_deals")
+}
+
+model UserWishlistItem {
+  id          String    @id @default(cuid())
+  userId      String
+  query       String    // "AirPods Pro", "PS5", "iPhone 16"
+  category    String?   @db.VarChar(50) // electronics, clothing, travel, etc.
+  maxPrice    Float?    // alert only if deal price <= this
+  country     String    @default("US") @db.VarChar(2)
+  channel     String    @default("telegram") @db.VarChar(20) // telegram, whatsapp
+  channelId   String    // telegram chatId or whatsapp number
+  active      Boolean   @default(true)
+  lastMatchAt DateTime?
+  matchCount  Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([active])
+  @@index([userId])
+  @@map("user_wishlist_items")
+}

@@ -54,6 +54,8 @@ import { instanceRoutes } from "./routes/instances.js";
 import { trackingRoutes } from "./routes/tracking.js";
 import { retailRoutes } from "./routes/retail.routes.js";
 import { transitRoutes } from "./routes/transit.routes.js";
+import { weatherRoutes } from "./routes/weather.js";
+import { sportsRoutes } from "./routes/sports.js";
 import { vaultRoutes } from "./routes/vault.js";
 import { checkoutRoutes } from "./routes/checkout.js";
 import { storeRoutes } from "./routes/stores.js";
@@ -95,6 +97,7 @@ import { glassesRoutes } from "./routes/glasses.js";
 import addressRoutes from "./routes/addresses.js";
 import { customServicesRoutes } from "./routes/custom-services.js";
 import { githubWebhookRoutes } from "./routes/github-webhook.js";
+import { couponHunterRoutes } from "./routes/coupon-hunter.routes.js";
 import { rateLimiter, webhookRateLimiter } from "./middleware/rate-limiter.js";
 
 // Cron jobs
@@ -104,6 +107,7 @@ import "./jobs/engagement-cron.js";
 import "./jobs/scheduled-tasks-cron.js";
 import "./jobs/watchdog-cron.js";
 import "./jobs/deals-channel-cron.js";
+import "./jobs/coupon-hunter-cron.js";
 import "./jobs/leaderboard-cron.js";
 import "./jobs/quarterly-report-cron.js";
 import { startPriceAlertCron } from "./services/search/price-alert-cron.js";
@@ -266,6 +270,12 @@ await app.register(retailRoutes);
 // Transit — Amtrak, FlixBus, Greyhound
 await app.register(transitRoutes);
 
+// Weather — Open-Meteo (free, no API key)
+await app.register(weatherRoutes);
+
+// Sports — ESPN scores and standings (free, no API key)
+await app.register(sportsRoutes);
+
 // Vault — encrypted session storage (Amazon, etc.)
 await app.register(vaultRoutes);
 
@@ -353,6 +363,9 @@ await app.register(addressRoutes);
 
 // Custom Services — self-configuration engine (user-provided APIs + automations)
 await app.register(customServicesRoutes);
+
+// Coupon Hunter — deal monitoring, wish list, coupon search
+await app.register(couponHunterRoutes);
 
 // Admin Dashboard — separate auth, overview, users, broadcast, revenue
 await app.register(adminAuthRoutes);
