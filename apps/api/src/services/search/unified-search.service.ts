@@ -57,13 +57,13 @@ export interface SearchOptions {
 
 // ─── Config ──────────────────────────────────────────
 const TIMEOUT = {
-  mercadoLivre: 8000,
-  grounding: 18000,     // 18s — Google Search via Gemini Grounding
-  browserAgent: 12000,  // 12s
+  mercadoLivre: 12000,
+  grounding: 25000,     // 25s — Google Search via Gemini Grounding
+  browserAgent: 20000,  // 20s
 } as const;
 
-const PARALLEL_TIMEOUT = 25000; // Global timeout: return whatever we have after 25s
-const EARLY_RETURN_MS = 8000;   // If a high-priority source succeeds within 8s, return immediately
+const PARALLEL_TIMEOUT = 30000; // Global timeout: return whatever we have after 30s
+const EARLY_RETURN_MS = 10000;  // If a high-priority source succeeds within 10s, return immediately
 const CACHE_TTL = 3600;         // 1 hour
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";

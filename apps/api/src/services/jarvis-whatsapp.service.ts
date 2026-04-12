@@ -1341,6 +1341,9 @@ async function sendToolAcknowledge(userId: string, toolName: string, userFacts: 
 // Store user facts reference for acknowledge messages
 let _currentUserFacts: { fact_key: string; fact_value: string }[] = [];
 
+// Anti-spam: track last ack sent per userId+tool (prevents message loop)
+const _ackSentMap = new Map<string, number>();
+
 // ─── Image Search Pipeline: per-request validated query (thread-safe) ───
 // Map<userId, { query, identification, timestamp }> — keyed by userId to avoid
 // race conditions when multiple users send images concurrently.
@@ -1407,8 +1410,16 @@ async function handleTool(userId: string, name: string, args: Record<string, unk
   const _toolStart = Date.now();
   const _channel = userId.startsWith("whatsapp:") ? "whatsapp" : userId.match(/^\d+$/) ? "telegram" : "pwa";
 
-  // DISABLED: sendToolAcknowledge causes message spam loop (2026-03-24)
-  // await sendToolAcknowledge(userId, name, _currentUserFacts);
+  // Send "searching..." acknowledge for slow tools (WhatsApp only, max 1 per user per tool per 60s)
+  const SLOW_TOOLS = new Set(["search_products", "amazon_search", "search_products_latam", "search_products_global", "compare_prices", "search_restaurants", "search_hotels", "search_flights", "search_events", "find_stores", "find_home_service", "find_mechanic", "web_search", "grocery_search"]);
+  if (SLOW_TOOLS.has(name) && _channel === "whatsapp") {
+    const ackKey = `${userId}:${name}`;
+    const now = Date.now();
+    if (!_ackSentMap.has(ackKey) || now - _ackSentMap.get(ackKey)! > 60_000) {
+      _ackSentMap.set(ackKey, now);
+      sendToolAcknowledge(userId, name, _currentUserFacts).catch(() => {});
+    }
+  }
   // Auto-inject user coordinates for location-aware searches
   const locationTools = ["search_restaurants", "search_hotels", "search_events", "find_stores", "search_products"];
   if (locationTools.includes(name) && !args.latitude && !args.longitude) {
@@ -1470,7 +1481,7 @@ async function _handleToolInner(userId: string, name: string, args: Record<strin
 
         const searchResult = await Promise.race([
           searchModel.generateContent(searchPrompt),
-          new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Search timeout after 15s")), 15000)),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Search timeout after 30s")), 30000)),
         ]);
         const searchText = searchResult.response.text().substring(0, 800);
 
