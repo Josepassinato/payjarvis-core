@@ -4067,14 +4067,18 @@ export async function chatWithGeminiMultimodal(
     console.warn(`[IMG-SEARCH][2-LLM-SENT] Pre-identification failed: ${(err as Error).message}`);
   }
 
-  // ─── CAPTION FALLBACK: if image identification failed but user sent text, use it as query ───
-  // "Procura este relógio Casio" is a perfectly good search query even without image analysis.
+  // ─── CAPTION FALLBACK: if image identification failed but user sent text with product intent,
+  // bypass the entire image pipeline and go straight to text-only search (Phase 1).
+  // WHY: if we send the image back to Gemini after identification failed, Gemini will
+  // BOTH search for the product AND comment "I had trouble analyzing the image" —
+  // creating contradictory dual responses. The fix is to not give Gemini the image at all.
   if (!validatedQuery && userMessage && hasProductIntent) {
-    validatedQuery = userMessage
+    const captionQuery = userMessage
       .replace(/\b(procura|busca|compra|acha|find|buy|search|get)\s*(este|esta|esse|essa|isso|isto|this|that|me|pra mim|for me)\b/gi, "")
       .replace(/\b(para|pra|for)\s*(eu|me|mim)\s*(comprar|buy|purchase)?\b/gi, "")
       .trim() || userMessage;
-    console.log(`[IMG-SEARCH][CAPTION-FALLBACK] Image identification failed but caption has product intent. Using caption as query: "${validatedQuery}"`);
+    console.log(`[IMG-SEARCH][CAPTION-BYPASS] Image identification failed but caption has product intent: "${captionQuery}". Bypassing image pipeline entirely → text-only Phase 1.`);
+    return chatWithGemini(history, userMessage, userId, userFacts);
   }
 
   // Store validated query per-userId so search_products handler can use it (thread-safe)
@@ -4086,9 +4090,6 @@ export async function chatWithGeminiMultimodal(
   let enhancedMessage = userMessage || "Analyze this image and tell me how I can help.";
   if (preIdentification && validatedQuery) {
     enhancedMessage = `${userMessage || "Find this product"}\n\n[PRODUCT IDENTIFIED FROM IMAGE: brand="${preIdentification.brand}", model="${preIdentification.model}", category="${preIdentification.category}", color="${preIdentification.color}". USE THIS SEARCH QUERY for search_products: "${validatedQuery}"]`;
-  } else if (validatedQuery && !preIdentification) {
-    // Caption fallback: no image identification but we have a query from the caption
-    enhancedMessage = `${userMessage}\n\n[IMAGE IDENTIFICATION FAILED. USE THIS TEXT AS SEARCH QUERY for search_products: "${validatedQuery}". Search for this product NOW.]`;
   }
 
   const model = genAI.getGenerativeModel({
