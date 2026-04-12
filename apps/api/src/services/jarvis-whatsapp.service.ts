@@ -3920,14 +3920,21 @@ const IDENTIFY_PRODUCT_PROMPT = `You are a product identification expert. Analyz
 Return ONLY a valid JSON object in this EXACT format — no markdown, no code fences, no explanation:
 {"brand":"...","model":"...","category":"...","color":"...","searchQuery":"...","confidence":0.0,"rawDescription":"..."}
 
+PRIORITY #1 — READ TEXT ON THE PRODUCT:
+Before classifying visually, LOOK FOR ANY READABLE TEXT on the product:
+- Brand logos, names, or text on the dial, bezel, face, sole, label, tag, body, or packaging
+- Model numbers, series names (e.g. "G-SHOCK", "Air Max", "Galaxy S24")
+- Any text like "WATER RESIST 50M", "JAPAN MOV'T", "Swiss Made" — these help identify the exact product
+Text you can READ on the product is MORE RELIABLE than visual classification. If you can read "Casio" on a watch dial, brand is "Casio" with high confidence — even if the logo is small.
+
 Field rules:
-- brand: visible brand name, or "unknown" if not visible
-- model: specific model name/number, or "unknown"
+- brand: readable brand name from the product, or "unknown" if truly not visible. CHECK the dial, bezel, sole, label, body for text.
+- model: specific model name/number if readable, or "unknown"
 - category: product type (watch, headphone, shoe, sneaker, perfume, phone, laptop, bag, sunglasses, etc.)
 - color: primary color(s)
-- searchQuery: a Google Shopping search query with at least 4 descriptive words to find THIS EXACT PRODUCT for purchase. Include brand + model + category + distinguishing features. The query must describe the PRODUCT ITSELF, NOT accessories, tools, or repair kits related to it. NEVER use words like "generic", "genérico", "removal kit", "repair tool", "replacement band".
-- confidence: 0.0 to 1.0 (how sure you are about the identification)
-- rawDescription: brief visual description of the product as seen in the image
+- searchQuery: a Google Shopping search query with at least 4 descriptive words to find THIS EXACT PRODUCT. ALWAYS include brand if readable. Include brand + model + category + distinguishing features. The query must describe the PRODUCT ITSELF, NOT accessories or repair kits.
+- confidence: 0.0 to 1.0 — if you can READ the brand name, confidence should be >= 0.7
+- rawDescription: brief visual description including ANY TEXT you can read on the product
 
 CRITICAL RULES:
 1. searchQuery must have AT LEAST 4 words
@@ -3936,6 +3943,7 @@ CRITICAL RULES:
 4. If you see a phone, the searchQuery should be for BUYING that phone, not phone cases or screen protectors
 5. NEVER use "generic", "genérico", "product", "item", "unknown", "image", "photo" in searchQuery
 6. If the image is NOT a product (landscape, person, meme, etc.), set confidence to 0.0
+7. If you can read text like "Casio", "Nike", "Samsung" on the product, ALWAYS put it in brand and searchQuery
 
 Examples:
 
@@ -4061,6 +4069,31 @@ export async function chatWithGeminiMultimodal(
       if (preIdentification.confidence < 0.3 && !hasProductIntent) {
         console.log(`[IMG-SEARCH][5-VALIDATED] Low confidence (${preIdentification.confidence}) and no product intent — skipping forced search`);
         validatedQuery = null;
+      }
+
+      // ─── MERGE image identification + caption keywords ───
+      // When user sends "Procura este relógio Casio" + photo, the image may identify
+      // "dive watch blue bezel" but miss the brand "Casio" that's in the caption.
+      // Merge caption keywords into the query so we get "Casio dive watch blue dial".
+      if (validatedQuery && userMessage) {
+        const captionClean = userMessage
+          .replace(/\b(procura|busca|compra|acha|find|buy|search|get|quero|want)\b/gi, "")
+          .replace(/\b(este|esta|esse|essa|isso|isto|this|that|me|pra mim|for me)\b/gi, "")
+          .replace(/\b(para|pra|for)\s*(eu|me|mim)\s*(comprar|buy|purchase)?\b/gi, "")
+          .trim();
+        if (captionClean.length > 2) {
+          // Extract words from caption that are NOT already in the query
+          const queryLower = validatedQuery.toLowerCase();
+          const newKeywords = captionClean
+            .split(/\s+/)
+            .filter(w => w.length > 2 && !queryLower.includes(w.toLowerCase()))
+            .slice(0, 4); // max 4 extra keywords from caption
+          if (newKeywords.length > 0) {
+            const mergedQuery = `${newKeywords.join(" ")} ${validatedQuery}`;
+            console.log(`[IMG-SEARCH][5-MERGE] Merged caption keywords into image query: "${validatedQuery}" → "${mergedQuery}"`);
+            validatedQuery = mergedQuery;
+          }
+        }
       }
     }
   } catch (err) {
