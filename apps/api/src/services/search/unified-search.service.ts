@@ -1,15 +1,16 @@
 /**
  * Unified Product Search Service — Single entry point for ALL product searches.
  *
- * PARALLEL search across multiple sources with Redis caching:
- *   1. SerpAPI Google Shopping — fast, structured, 100+ stores ($50/mo or free tier)
- *   2. Mercado Livre API (Brazil) — free, instant, 99% reliable
- *   3. Apify Amazon Scraper — paid but reliable, structured data
- *   4. Google Search Grounding (Gemini) — free, returns links + prices
- *   5. Browser Agent /navigate — last resort, slow
+ * 2-Phase Architecture:
+ *   Phase 1 (Discovery): Google Search (Gemini Grounding) — multi-store results
+ *   Phase 2 (Purchase):  Official marketplace APIs + Browser Agent
  *
- * All sources run in PARALLEL. First results win, others supplement.
- * Redis cache: 1 hour TTL. User NEVER receives "error" or "not found".
+ * Sources:
+ *   1. Google Search Grounding (Gemini) — free, multi-store, real prices
+ *   2. Mercado Livre API (Brazil) — official API, free
+ *   3. Browser Agent /navigate — scrapes store sites directly (Best Buy, Target, etc.)
+ *
+ * Redis cache: 1 hour TTL.
  */
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
@@ -56,10 +57,8 @@ export interface SearchOptions {
 
 // ─── Config ──────────────────────────────────────────
 const TIMEOUT = {
-  serpapi: 15000,       // 15s (increased from 10s — bug report: Google Search was timing out)
   mercadoLivre: 8000,
-  apify: 15000,
-  grounding: 18000,     // 18s (increased from 12s — was timing out in discovery phase)
+  grounding: 18000,     // 18s — Google Search via Gemini Grounding
   browserAgent: 12000,  // 12s
 } as const;
 
@@ -68,7 +67,6 @@ const EARLY_RETURN_MS = 8000;   // If a high-priority source succeeds within 8s,
 const CACHE_TTL = 3600;         // 1 hour
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
-const SERPAPI_KEY = process.env.SERPAPI_KEY || "";
 const BROWSER_AGENT_URL = process.env.BROWSER_AGENT_URL || "http://localhost:3003";
 
 // ─── Main Entry Point (PARALLEL) ─────────────────────
@@ -96,72 +94,52 @@ export async function unifiedProductSearch(opts: SearchOptions): Promise<Unified
   } catch { /* corrupted cache, proceed */ }
 
   // ─── Build sources array ───────────────────────────
-  // 2-PHASE ARCHITECTURE:
-  //   discovery = Google Search ONLY (Gemini Grounding) — returns results from ALL stores
-  //   purchase  = Marketplace APIs (Walmart, eBay, ML, Apify, Browser)
-  //   undefined = all sources (legacy/backward compat)
+  // 2-PHASE ARCHITECTURE (simplified — no SerpAPI, no Apify):
+  //   Phase 1 (discovery) = Google Search (Gemini Grounding) ONLY
+  //   Phase 2 (purchase)  = Official marketplace APIs + Browser Agent + Google filtered
+  //   undefined (legacy)  = Google Search (same as discovery)
   type Source = { name: string; fn: () => Promise<UnifiedProduct[]>; priority: number };
   const sources: Source[] = [];
 
   // ── PHASE 1: GOOGLE SEARCH (one source, one call) ──
-  // Google Search already returns results from Amazon, Walmart, Best Buy, Target,
-  // Mercado Livre, etc. No need for SerpAPI intermediary or Apify (Amazon-only).
-  if (isDiscovery) {
+  // Google Search returns results from Amazon, Walmart, Best Buy, Target, etc.
+  if (isDiscovery || !isPurchase) {
     if (GEMINI_API_KEY) {
       sources.push({ name: "google", fn: () => withTimeout(searchGeminiGrounding(storeQuery, maxResults), TIMEOUT.grounding), priority: 1 });
     }
-  } else if (!isPurchase) {
-    // Legacy (no phase specified): use all Google sources for backward compat
-    if (SERPAPI_KEY) {
-      sources.push({ name: "serpapi", fn: () => withTimeout(searchSerpApi(storeQuery, country, maxResults), TIMEOUT.serpapi), priority: 1 });
-    }
-    if (GEMINI_API_KEY) {
-      sources.push({ name: "grounding", fn: () => withTimeout(searchGeminiGrounding(storeQuery, maxResults), TIMEOUT.grounding), priority: store ? 4 : 2 });
-    }
   }
 
-  // ── PHASE 2: MARKETPLACE / STORE-SPECIFIC SOURCES ──
-  // When user asks for a specific store (e.g. "busca na Best Buy"), prioritize
-  // that store's dedicated source. Otherwise, use all marketplace APIs.
-  if (!isDiscovery) {
+  // ── PHASE 2: OFFICIAL MARKETPLACE APIs + BROWSER AGENT ──
+  // Only official APIs — no paid intermediaries (SerpAPI, Apify).
+  // If no API for a store, Browser Agent scrapes directly or Google link is used.
+  if (isPurchase) {
     const storeLower = (store || "").toLowerCase();
-    const isAmazon = storeLower.includes("amazon");
-    const isWalmart = storeLower.includes("walmart");
-    const isEbay = storeLower.includes("ebay");
     const isMercadoLivre = storeLower.includes("mercado") || storeLower.includes("ml");
 
     if (store) {
       // ── SPECIFIC STORE requested ──
-      // Use the best source for that store, with Browser Agent as fallback
-
-      if (isAmazon) {
-        sources.push({ name: "apify", fn: () => withTimeout(searchApify(query, country, maxResults, userId), TIMEOUT.apify), priority: 1 });
-      } else if (isWalmart && SERPAPI_KEY) {
-        sources.push({ name: "serpapi_walmart", fn: () => withTimeout(searchSerpApiWalmart(query, maxResults), TIMEOUT.serpapi), priority: 1 });
-      } else if (isEbay && SERPAPI_KEY) {
-        sources.push({ name: "serpapi_ebay", fn: () => withTimeout(searchSerpApiEbay(query, maxResults), TIMEOUT.serpapi), priority: 1 });
-      } else if (isMercadoLivre) {
+      if (isMercadoLivre) {
         sources.push({ name: "mercadolivre", fn: () => withTimeout(searchMercadoLivre(query, maxResults), TIMEOUT.mercadoLivre), priority: 1 });
       }
 
-      // Browser Agent for ANY store (Best Buy, Target, Macy's, etc.) — has URL mappings
-      sources.push({ name: "browser", fn: () => withTimeout(searchBrowserAgent(query, store, maxResults), TIMEOUT.browserAgent), priority: sources.length > 0 ? 3 : 1 });
+      // Browser Agent for any store with URL mapping (Amazon, Best Buy, Walmart, Target, etc.)
+      sources.push({ name: "browser", fn: () => withTimeout(searchBrowserAgent(query, store, maxResults), TIMEOUT.browserAgent), priority: isMercadoLivre ? 3 : 1 });
 
-      // Google Grounding as safety net — will include results from that store if available
+      // Google Search filtered by store name as fallback
       if (GEMINI_API_KEY) {
-        sources.push({ name: "google", fn: () => withTimeout(searchGeminiGrounding(`${query} ${store}`, maxResults), TIMEOUT.grounding), priority: 4 });
+        sources.push({ name: "google", fn: () => withTimeout(searchGeminiGrounding(`${query} site:${storeLower}.com OR ${query} ${store}`, maxResults), TIMEOUT.grounding), priority: 4 });
       }
 
-      console.log(`[PHASE-2][STORE] Searching "${store}" specifically: ${sources.map(s => s.name).join(", ")}`);
+      console.log(`[PHASE-2][STORE] Searching "${store}": ${sources.map(s => s.name).join(", ")}`);
     } else {
-      // ── NO SPECIFIC STORE — use all marketplace APIs ──
-      if (SERPAPI_KEY) {
-        sources.push({ name: "serpapi_walmart", fn: () => withTimeout(searchSerpApiWalmart(query, maxResults), TIMEOUT.serpapi), priority: 2 });
-      }
+      // ── NO SPECIFIC STORE — marketplace APIs ──
       if (isBrazil) {
         sources.push({ name: "mercadolivre", fn: () => withTimeout(searchMercadoLivre(query, maxResults), TIMEOUT.mercadoLivre), priority: 1 });
       }
-      sources.push({ name: "apify", fn: () => withTimeout(searchApify(query, country, maxResults, userId), TIMEOUT.apify), priority: 2 });
+      // Google as broad fallback for Phase 2 without store
+      if (GEMINI_API_KEY) {
+        sources.push({ name: "google", fn: () => withTimeout(searchGeminiGrounding(query, maxResults), TIMEOUT.grounding), priority: 2 });
+      }
     }
   }
 
@@ -310,107 +288,7 @@ export async function unifiedProductSearch(opts: SearchOptions): Promise<Unified
   } as UnifiedSearchResult & { searchFailed: boolean };
 }
 
-// ─── Method: SerpAPI Google Shopping ─────────────────
-
-async function searchSerpApi(query: string, country: string, maxResults: number): Promise<UnifiedProduct[]> {
-  if (!SERPAPI_KEY) return [];
-
-  const params = new URLSearchParams({
-    engine: "google_shopping",
-    q: query,
-    api_key: SERPAPI_KEY,
-    gl: country.toLowerCase(),
-    num: String(maxResults),
-  });
-
-  const res = await fetch(`https://serpapi.com/search.json?${params}`, {
-    signal: AbortSignal.timeout(TIMEOUT.serpapi),
-  });
-
-  if (!res.ok) throw new Error(`SerpAPI ${res.status}`);
-  const data = await res.json() as any;
-  const results = data.shopping_results || [];
-
-  return results.slice(0, maxResults).map((item: any) => ({
-    title: item.title || "",
-    price: item.extracted_price || null,
-    currency: "USD",
-    url: (item.link && !item.link.includes("google.com/")) ? item.link : (item.product_link || item.link || ""),
-    imageUrl: item.thumbnail || null,
-    rating: item.rating || null,
-    reviewCount: item.reviews || null,
-    store: item.source || "Online",
-    isApproximate: false,
-  }));
-}
-
-// ─── Method: SerpAPI Walmart ─────────────────────────
-
-async function searchSerpApiWalmart(query: string, maxResults: number): Promise<UnifiedProduct[]> {
-  if (!SERPAPI_KEY) return [];
-
-  const params = new URLSearchParams({
-    engine: "walmart",
-    query,
-    api_key: SERPAPI_KEY,
-  });
-
-  const res = await fetch(`https://serpapi.com/search.json?${params}`, {
-    signal: AbortSignal.timeout(TIMEOUT.serpapi),
-  });
-
-  if (!res.ok) throw new Error(`SerpAPI Walmart ${res.status}`);
-  const data = await res.json() as any;
-  const results = data.organic_results || [];
-
-  return results.slice(0, maxResults).map((item: any) => ({
-    title: item.title || "",
-    price: item.primary_offer?.offer_price || null,
-    currency: "USD",
-    url: item.product_page_url || item.link || "",
-    imageUrl: item.thumbnail || null,
-    rating: item.rating || null,
-    reviewCount: item.reviews || null,
-    store: "Walmart",
-    isApproximate: false,
-  }));
-}
-
-// ─── Method: SerpAPI eBay ────────────────────────────
-
-async function searchSerpApiEbay(query: string, maxResults: number): Promise<UnifiedProduct[]> {
-  if (!SERPAPI_KEY) return [];
-
-  const params = new URLSearchParams({
-    engine: "ebay",
-    _nkw: query,
-    api_key: SERPAPI_KEY,
-  });
-
-  const res = await fetch(`https://serpapi.com/search.json?${params}`, {
-    signal: AbortSignal.timeout(TIMEOUT.serpapi),
-  });
-
-  if (!res.ok) throw new Error(`SerpAPI eBay ${res.status}`);
-  const data = await res.json() as any;
-  const results = data.organic_results || [];
-
-  return results.slice(0, maxResults).map((item: any) => ({
-    title: item.title || "",
-    price: item.price?.extracted || null,
-    currency: "USD",
-    url: item.link || "",
-    imageUrl: item.thumbnail || null,
-    rating: null,
-    reviewCount: null,
-    store: "eBay",
-    condition: item.condition || null,
-    freeShipping: item.shipping?.toLowerCase().includes("free") || false,
-    isApproximate: false,
-  }));
-}
-
-// ─── Method: Mercado Livre ───────────────────────────
+// ─── Method: Mercado Livre (Official API) ───────────
 
 async function searchMercadoLivre(query: string, maxResults: number): Promise<UnifiedProduct[]> {
   const { searchMeliProducts } = await import("../commerce/mercadolibre.js");
@@ -428,27 +306,6 @@ async function searchMercadoLivre(query: string, maxResults: number): Promise<Un
     store: "Mercado Livre",
     condition: p.condition,
     freeShipping: p.freeShipping,
-  }));
-}
-
-// ─── Method: Apify (Amazon) ─────────────────────────
-
-async function searchApify(query: string, country: string, maxResults: number, userId?: string): Promise<UnifiedProduct[]> {
-  const { searchProducts } = await import("../apify-ecommerce.service.js");
-  const result = await searchProducts({ query, platform: "amazon", maxResults, country }, userId);
-  if (result.products.length === 0) return [];
-
-  return result.products.map((p: any) => ({
-    title: p.title,
-    price: p.price,
-    currency: p.currency || "USD",
-    url: p.url,
-    imageUrl: p.imageUrl || null,
-    rating: p.rating,
-    reviewCount: p.reviewCount,
-    store: "Amazon",
-    asin: p.asin,
-    isApproximate: false,
   }));
 }
 
