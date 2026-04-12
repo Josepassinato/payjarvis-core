@@ -5013,6 +5013,36 @@ Save my number as "Sniffer" in your contacts and you're set! 🐕`;
       }
     }
 
+    // ─── RECENT IMAGE CONTEXT: if user sent a photo recently (<30s) and now sends text,
+    // merge the image identification with the text to build a better search query.
+    // Example: user sends photo of dive watch → 5s later texts "Casio" →
+    // we combine "Casio" + image identification ("dive watch blue dial") into one search.
+    const recentImgCtx = getImageSearchContext(userId);
+    if (recentImgCtx?.identification && recentImgCtx.identification.confidence >= 0.3) {
+      const imgAge = Date.now() - ((_imageSearchContext.get(userId)?.timestamp) || 0);
+      if (imgAge < 30_000) {
+        // User sent text within 30s of sending a photo — combine them
+        const id = recentImgCtx.identification;
+        const imgParts: string[] = [];
+        if (id.brand && id.brand.toLowerCase() !== "unknown") imgParts.push(id.brand);
+        if (id.model && id.model.toLowerCase() !== "unknown") imgParts.push(id.model);
+        if (id.category && id.category.toLowerCase() !== "unknown") imgParts.push(id.category);
+        if (id.color && id.color.toLowerCase() !== "unknown") imgParts.push(id.color);
+        const imgDesc = imgParts.join(" ") || id.rawDescription?.split(/\s+/).slice(0, 6).join(" ") || "";
+
+        if (imgDesc.length > 3) {
+          // Merge: caption keywords that aren't already in image description
+          const imgLower = imgDesc.toLowerCase();
+          const newWords = text.split(/\s+/).filter(w => w.length > 2 && !imgLower.includes(w.toLowerCase()));
+          const mergedQuery = newWords.length > 0 ? `${newWords.join(" ")} ${imgDesc}` : `${text} ${imgDesc}`;
+          console.log(`[IMG-CONTEXT-MERGE] Text "${text}" arrived ${imgAge}ms after image. Merged query: "${mergedQuery}"`);
+          // Rewrite the text to include image context, so chatWithGemini searches correctly
+          text = `${text} (I just sent a photo of this product: ${imgDesc}. Search for: ${mergedQuery})`;
+          clearImageSearchContext(userId);
+        }
+      }
+    }
+
     let response: string;
 
     if (userTier === "premium") {
