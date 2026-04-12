@@ -50,15 +50,17 @@ export interface SearchOptions {
   zipCode?: string;
   maxResults?: number;
   userId?: string;
+  /** 2-Phase Architecture: 'discovery' = Google only, 'purchase' = marketplace APIs, undefined = all (legacy) */
+  phase?: "discovery" | "purchase";
 }
 
 // ─── Config ──────────────────────────────────────────
 const TIMEOUT = {
-  serpapi: 8000,        // 8s (was 6s — too tight under load)
+  serpapi: 15000,       // 15s (increased from 10s — bug report: Google Search was timing out)
   mercadoLivre: 8000,
   apify: 15000,
-  grounding: 12000,     // 12s (was 22s — no need to wait that long)
-  browserAgent: 12000,  // 12s (was 20s)
+  grounding: 18000,     // 18s (increased from 12s — was timing out in discovery phase)
+  browserAgent: 12000,  // 12s
 } as const;
 
 const PARALLEL_TIMEOUT = 25000; // Global timeout: return whatever we have after 25s
@@ -72,66 +74,87 @@ const BROWSER_AGENT_URL = process.env.BROWSER_AGENT_URL || "http://localhost:300
 // ─── Main Entry Point (PARALLEL) ─────────────────────
 
 export async function unifiedProductSearch(opts: SearchOptions): Promise<UnifiedSearchResult> {
-  const { query, store, country = "US", zipCode, maxResults = 5, userId } = opts;
+  const { query, store, country = "US", zipCode, maxResults = 5, userId, phase } = opts;
   const isBrazil = country === "BR" || country === "brasil" || country === "Brazil";
   const storeQuery = store ? `${query} ${store}` : query;
+  const isDiscovery = phase === "discovery";
+  const isPurchase = phase === "purchase";
 
-  console.log(`[UNIFIED-SEARCH] query="${query}" store="${store || "any"}" country="${country}"`);
+  console.log(`[UNIFIED-SEARCH] query="${query}" store="${store || "any"}" country="${country}" phase="${phase || "all"}"`);
 
   // ─── Check Redis cache first ───────────────────────
-  const cacheKey = `search:products:${query.toLowerCase().trim()}:${store || "any"}:${country}`;
+  const cacheKey = `search:products:${query.toLowerCase().trim()}:${store || "any"}:${country}:${phase || "all"}`;
   try {
     const cached = await redisGet(cacheKey);
     if (cached) {
       const parsed = JSON.parse(cached) as UnifiedSearchResult;
       if (parsed.products && parsed.products.length > 0) {
-        console.log(`[UNIFIED-SEARCH] CACHE HIT "${query}" (method=${parsed.method}, ${parsed.products.length} products)`);
+        console.log(`[UNIFIED-SEARCH] CACHE HIT "${query}" (method=${parsed.method}, ${parsed.products.length} products, phase=${phase || "all"})`);
         return { ...parsed, methodsAttempted: ["cache"], fromCache: true };
       }
     }
   } catch { /* corrupted cache, proceed */ }
 
   // ─── Build sources array ───────────────────────────
+  // 2-PHASE ARCHITECTURE:
+  //   discovery = Google only (SerpAPI Google Shopping + Gemini Grounding)
+  //   purchase  = Marketplace APIs only (Walmart, eBay, ML, Apify, Browser)
+  //   undefined = all sources (legacy/backward compat)
   type Source = { name: string; fn: () => Promise<UnifiedProduct[]>; priority: number };
   const sources: Source[] = [];
 
-  // SerpAPI Google Shopping — fastest, covers 100+ stores
-  if (SERPAPI_KEY) {
-    sources.push({ name: "serpapi", fn: () => withTimeout(searchSerpApi(storeQuery, country, maxResults), TIMEOUT.serpapi), priority: 1 });
+  // ── GOOGLE SOURCES (Phase 1: Discovery + legacy) ──
+  if (!isPurchase) {
+    // SerpAPI Google Shopping — fastest, covers 100+ stores
+    if (SERPAPI_KEY) {
+      sources.push({ name: "serpapi", fn: () => withTimeout(searchSerpApi(storeQuery, country, maxResults), TIMEOUT.serpapi), priority: 1 });
+    }
+
+    // Google Search Grounding — free, works well for general queries
+    if (GEMINI_API_KEY) {
+      sources.push({ name: "grounding", fn: () => withTimeout(searchGeminiGrounding(storeQuery, maxResults), TIMEOUT.grounding), priority: store ? 4 : 2 });
+    }
+
+    // Apify as FALLBACK in discovery — low priority so Google sources win if they work,
+    // but prevents total failure when SerpAPI is rate-limited (429) and grounding times out
+    if (isDiscovery) {
+      sources.push({ name: "apify", fn: () => withTimeout(searchApify(query, country, maxResults, userId), TIMEOUT.apify), priority: 5 });
+    }
   }
 
-  // SerpAPI Walmart — dedicated engine for Walmart
-  const isWalmart = store && store.toLowerCase().includes("walmart");
-  if (SERPAPI_KEY && isWalmart) {
-    sources.push({ name: "serpapi_walmart", fn: () => withTimeout(searchSerpApiWalmart(query, maxResults), TIMEOUT.serpapi), priority: 1 });
+  // ── MARKETPLACE SOURCES (Phase 2: Purchase + legacy + direct_store) ──
+  if (!isDiscovery) {
+    // SerpAPI Walmart — dedicated engine for Walmart
+    const isWalmart = store && store.toLowerCase().includes("walmart");
+    if (SERPAPI_KEY && isWalmart) {
+      sources.push({ name: "serpapi_walmart", fn: () => withTimeout(searchSerpApiWalmart(query, maxResults), TIMEOUT.serpapi), priority: 1 });
+    }
+
+    // SerpAPI eBay — dedicated engine for eBay
+    const isEbay = store && store.toLowerCase().includes("ebay");
+    if (SERPAPI_KEY && isEbay) {
+      sources.push({ name: "serpapi_ebay", fn: () => withTimeout(searchSerpApiEbay(query, maxResults), TIMEOUT.serpapi), priority: 1 });
+    }
+
+    // Mercado Livre — Brazil only, free
+    if (isBrazil) {
+      sources.push({ name: "mercadolivre", fn: () => withTimeout(searchMercadoLivre(query, maxResults), TIMEOUT.mercadoLivre), priority: 1 });
+    }
+
+    // Apify — Amazon, paid but reliable
+    const isAmazon = store && store.toLowerCase().includes("amazon");
+    sources.push({ name: "apify", fn: () => withTimeout(searchApify(query, country, maxResults, userId), TIMEOUT.apify), priority: isAmazon ? 1 : 3 });
+
+    // Browser Agent — last resort, slow
+    if (store) {
+      sources.push({ name: "browser", fn: () => withTimeout(searchBrowserAgent(query, store, maxResults), TIMEOUT.browserAgent), priority: 5 });
+    }
   }
 
-  // SerpAPI eBay — dedicated engine for eBay
-  const isEbay = store && store.toLowerCase().includes("ebay");
-  if (SERPAPI_KEY && isEbay) {
-    sources.push({ name: "serpapi_ebay", fn: () => withTimeout(searchSerpApiEbay(query, maxResults), TIMEOUT.serpapi), priority: 1 });
-  }
-
-  // Mercado Livre — Brazil only, free
-  if (isBrazil) {
-    sources.push({ name: "mercadolivre", fn: () => withTimeout(searchMercadoLivre(query, maxResults), TIMEOUT.mercadoLivre), priority: 1 });
-  }
-
-  // Apify — Amazon, paid but reliable
-  // When user specifically asks for Amazon, Apify gets top priority (direct source, not Google middleman)
-  const isAmazon = store && store.toLowerCase().includes("amazon");
-  sources.push({ name: "apify", fn: () => withTimeout(searchApify(query, country, maxResults, userId), TIMEOUT.apify), priority: isAmazon ? 1 : 3 });
-
-  // Google Search Grounding — free, works well for specific stores
-  // When user asks for a specific marketplace (amazon, walmart, etc.), deprioritize grounding
-  // because it returns google.com URLs instead of direct store links
-  if (GEMINI_API_KEY) {
-    sources.push({ name: "grounding", fn: () => withTimeout(searchGeminiGrounding(storeQuery, maxResults), TIMEOUT.grounding), priority: store ? 4 : 2 });
-  }
-
-  // Browser Agent — last resort, slow
-  if (store) {
-    sources.push({ name: "browser", fn: () => withTimeout(searchBrowserAgent(query, store, maxResults), TIMEOUT.browserAgent), priority: 5 });
+  if (isDiscovery) {
+    console.log(`[PHASE-1][DISCOVERY] Google-only search: ${sources.map(s => s.name).join(", ")} for query="${query}"`);
+  } else if (isPurchase) {
+    console.log(`[PHASE-2][PURCHASE] Marketplace search: ${sources.map(s => s.name).join(", ")} for query="${query}"`);
   }
 
   // ─── Run ALL sources in parallel with early return ──
@@ -258,28 +281,19 @@ export async function unifiedProductSearch(opts: SearchOptions): Promise<Unified
     return searchResult;
   }
 
-  // ─── ALL FAILED — return direct store link (NEVER google.com) ──────
-  console.log(`[UNIFIED-SEARCH] ALL methods failed for "${query}". Returning direct store fallback.`);
-  methodsAttempted.push("store_fallback");
-  const fallbackUrl = buildDirectStoreUrl(query, store || "");
+  // ─── ALL FAILED — return empty results with error flag ──────
+  // NEVER return fake products — this causes LLM hallucination of prices/links
+  console.log(`[UNIFIED-SEARCH] ALL methods failed for "${query}". Returning empty results with searchFailed flag.`);
+  methodsAttempted.push("all_failed");
   return {
-    products: [{
-      title: query,
-      price: null,
-      currency: "USD",
-      url: fallbackUrl,
-      imageUrl: null,
-      rating: null,
-      reviewCount: null,
-      store: store || "Amazon",
-      isApproximate: true,
-    }],
-    method: "store_fallback",
+    products: [],
+    method: "all_failed",
     methodsAttempted,
     query,
     store,
-    totalResults: 1,
-  };
+    totalResults: 0,
+    searchFailed: true,
+  } as UnifiedSearchResult & { searchFailed: boolean };
 }
 
 // ─── Method: SerpAPI Google Shopping ─────────────────

@@ -63,17 +63,13 @@ export function validateToolResult(
   if (isEmptyResult(toolResult)) {
     console.log(`[WATCHDOG-VALIDATOR] Empty result from ${toolName} for: "${userMessage.substring(0, 60)}"`);
 
+    // Flag the result as empty — the code-level anti-hallucination guard in the
+    // tool-calling loop will intercept this and return a hardcoded message.
+    // NEVER instruct Gemini to "use training knowledge" — that causes hallucination.
     return {
       ...toolResult,
       error: toolResult.error || "No results found",
-      MANDATORY_FALLBACK: `The tool "${toolName}" returned NO results for "${userMessage}". ` +
-        `You MUST respond with a USEFUL answer NOW. Rules:\n` +
-        `1. NEVER say "vou buscar", "estou procurando", "let me search", or any promise to search later.\n` +
-        `2. NEVER say "não foi possível" or "I couldn't find".\n` +
-        `3. Use your training knowledge to give approximate prices and direct URLs.\n` +
-        `4. Format: "Não achei preços exatos, mas aqui vão opções:" + numbered list with links.\n` +
-        `5. Mark prices as "preço aproximado" or "approximate price".\n` +
-        `6. ALWAYS include at least 2 direct links (amazon.com, booking.com, etc).`,
+      searchFailed: true,
       WATCHDOG_EMPTY_RESULT: true,
     };
   }

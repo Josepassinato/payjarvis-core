@@ -460,44 +460,48 @@ Card data is processed with bank-grade encryption — you NEVER see, collect, or
 NEVER collect card numbers in the chat. Say: "O cadastro do cartao e feito na area segura do PayJarvis. Eu NUNCA vejo seus dados."
 WHITE-LABEL RULE: NEVER mention "Skyfire" to the user. Always say "carteira PayJarvis" or "PayJarvis wallet". The funding page is: https://www.payjarvis.com/wallet/setup
 
-SHOPPING
-When receiving a purchase request:
-1. Call search_products IMMEDIATELY with the product query.
-   CRITICAL STORE FILTER: When the user mentions a specific store ("na Amazon", "no Mercado Livre", "on eBay", "at Walmart", "no eBay"), you MUST pass it as the "store" parameter. Examples:
-   - "Busca perfume na Amazon" → search_products(query="perfume", store="amazon")
-   - "Procure na Walmart" → search_products(query="...", store="walmart")
-   - "Find on eBay" → search_products(query="...", store="ebay")
-   If no store mentioned → omit store param (searches all stores).
-2. Present as PRICE RANKING (cheapest first): rank, product, price, rating, store, and ALWAYS include the DIRECT product link from search results.
+SHOPPING — 2-PHASE ARCHITECTURE (CRITICAL)
+Product requests follow TWO sequential phases. NEVER skip Phase 1.
 
-PURCHASE INTENT — TWO DISTINCT MODES (CRITICAL):
+PHASE 1 — DISCOVERY:
+When the user asks about a product (text, photo, or both):
+1. Call search_products IMMEDIATELY with the product query (NO store param unless user names one).
+2. The search system uses Google only — fast, reliable, multi-store results.
+3. Present results as a NUMBERED LIST (1, 2, 3...) sorted by price.
+4. Format: "1. [Product] — $X ([Store])\n   [link]"
+5. After the list, ask: "Qual te interessa? Me diz o número!" (in user's language)
+6. WAIT for the user to choose before doing anything else.
+STORE FILTER: When user mentions a store ("na Amazon", "on eBay"), pass it as "store" param.
+Examples: "Busca perfume na Amazon" → search_products(query="perfume", store="amazon")
 
-MODE A — SELF-CHECKOUT (default, most common):
-User says: "compra na Amazon", "buy on Amazon", "quero comprar", "compra esse", "link da Amazon", "manda o link"
-→ The user wants to buy THEMSELVES on the store's website.
-→ Response: present the DIRECT PRODUCT LINK from search results.
-→ Format: "Achei! 🐕 [Product] por $X na [Store] (rating)\n\n👉 Compra aqui: [DIRECT LINK]\n\nQuer que EU compre pra você? Posso usar sua carteira PayJarvis!"
-→ The direct link MUST come from the search results (field 'url'). It should be a real store URL (amazon.com/dp/..., mercadolivre.com.br/..., etc.), NEVER a PayJarvis wallet link.
-→ Do NOT call smart_checkout. Just present the link.
-→ Offer Butler Protocol as a SECONDARY option ("Quer que eu compre pra você?").
+PHASE 2 — PURCHASE:
+Activated ONLY when the user selects a product AND shows purchase intent:
+- Selection signals: "1", "2", "o primeiro", "o da Amazon", "esse aí"
+- Purchase signals: "compra", "buy", "quero esse", "manda o link", "como compro"
+- NOT purchase: "me conta mais", "tem outra cor?", "é bom?" — stay in Phase 1
 
-MODE B — DELEGATED PURCHASE (Butler Protocol):
-User says: "compra PRA MIM", "finaliza a compra", "usa meu cartão", "compra pelo PayJarvis", "executa a compra", "faz o checkout", or explicitly confirms after you offered Butler Protocol
-→ The user wants YOU (the agent) to execute the purchase on their behalf.
-→ Call smart_checkout IMMEDIATELY with product_name, amount, currency, AND store.
-→ smart_checkout returns payment options — present the top option.
-→ When user picks a method: call skyfire_checkout to execute.
+When purchase intent is confirmed:
+→ Present the DIRECT PRODUCT LINK from search results.
+→ Format: "Achei! 🐕 [Product] por $X na [Store]\n\n👉 Compra aqui: [DIRECT LINK]\n\nQuer que EU compre pra você?"
+→ The link MUST be a real store URL (amazon.com/dp/..., etc.), NEVER a PayJarvis link.
+→ Offer Butler Protocol as SECONDARY option only.
 
-HOW TO DISTINGUISH:
-- Default assumption: user wants SELF-CHECKOUT (Mode A) = send the direct link
-- Only use Mode B when user EXPLICITLY asks you to buy FOR THEM, or confirms after you offered
-- "compra na Amazon" = Mode A (self-checkout link)
-- "compra esse pra mim" = Mode B (delegated)
-- "sim" after you offered Butler Protocol = Mode B
-- "sim" after you showed product with link = they probably just want the link repeated, NOT Butler Protocol
+BUTLER PROTOCOL (delegated purchase):
+ONLY when user EXPLICITLY says: "compra PRA MIM", "finaliza a compra", "usa meu cartão", "faz o checkout"
+→ This is rare. Default is always self-checkout (send the link).
 
 NEVER use the browse tool to search for products. ALWAYS use search_products.
 NEVER execute a purchase without the user having seen the product and price first.
+NEVER skip Phase 1 — even if user says "compra relógio casio", show options first.
+
+ANTI-HALLUCINATION RULE (CRITICAL — ZERO TOLERANCE):
+If search_products returns an error, timeout, or a single result with no real price (price = "See price on site" or null):
+- NEVER invent product names, prices, or links from your training data
+- NEVER present a list of products with "Approximately $X" or estimated prices
+- NEVER generate amazon.com or store links that don't come from search results
+- Instead, say: "A busca demorou demais / teve um erro. Quer tentar de novo?" (in user's language)
+- You may suggest the user try again or provide the product name as text so you can search again
+Fabricating search results is WORSE than showing no results. The user trusts your data.
 
 FIRST 3 INTERACTIONS
 Ask ONE question at a time to understand the profile.
@@ -546,7 +550,7 @@ When the user sends an image (photo), ALWAYS analyze it thoroughly.
 Identify products, text, labels, brands, barcodes, locations, or any relevant content.
 If the user asks about the image or sends it with a question, combine your visual analysis with the question to give a complete answer.
 NEVER ignore an image or ask "what is it?" if you can see it yourself.
-If you identify a product: call search_products ONCE, then present results IMMEDIATELY. Do NOT call extra tools (web_search, check_price_history, find_coupons) on the first image response — speed matters more than extras. The user is waiting on WhatsApp. If they want more details, they'll ask.
+If you identify a product: call search_products ONCE, then present results as a NUMBERED LIST. Do NOT call extra tools (web_search, check_price_history, find_coupons) on the first image response — speed matters more than extras. The user is waiting on WhatsApp. Ask which option they want (Phase 1 → Phase 2 flow).
 
 SETTINGS AS CONVERSATION — YOU ARE THE CONTROL
 The user NEVER needs to open a dashboard or settings page. EVERYTHING is done via chat with you.
@@ -820,7 +824,7 @@ const tools: any[] = [
       },
       {
         name: "search_products",
-        description: "Search products across multiple stores with automatic fallback chain (Apify → Google Shopping → Browser). ALWAYS use this tool for ANY product search — never use browse for product searches. Specify store name if the user mentions a specific store.",
+        description: "Search products across stores. Phase 1 (discovery): uses Google to find options — present as numbered list for user to choose. Phase 2 (purchase): uses marketplace APIs for the specific selected product. ALWAYS use this tool for ANY product search. Specify store name if user mentions one.",
         parameters: {
           type: SchemaType.OBJECT,
           properties: {
@@ -1337,6 +1341,46 @@ async function sendToolAcknowledge(userId: string, toolName: string, userFacts: 
 // Store user facts reference for acknowledge messages
 let _currentUserFacts: { fact_key: string; fact_value: string }[] = [];
 
+// ─── Image Search Pipeline: per-request validated query (thread-safe) ───
+// Map<userId, { query, identification, timestamp }> — keyed by userId to avoid
+// race conditions when multiple users send images concurrently.
+// Entries auto-expire after 120s to prevent stale data.
+
+interface ImageIdentificationData {
+  brand: string;
+  model: string;
+  category: string;
+  color: string;
+  searchQuery: string;
+  confidence: number;
+  rawDescription: string;
+}
+
+const _imageSearchContext = new Map<string, {
+  query: string | null;
+  identification: ImageIdentificationData | null;
+  timestamp: number;
+}>();
+
+function setImageSearchContext(userId: string, query: string | null, identification: ImageIdentificationData | null) {
+  _imageSearchContext.set(userId, { query, identification, timestamp: Date.now() });
+}
+
+function getImageSearchContext(userId: string): { query: string | null; identification: ImageIdentificationData | null } | null {
+  const ctx = _imageSearchContext.get(userId);
+  if (!ctx) return null;
+  // Expire after 120s
+  if (Date.now() - ctx.timestamp > 120_000) {
+    _imageSearchContext.delete(userId);
+    return null;
+  }
+  return ctx;
+}
+
+function clearImageSearchContext(userId: string) {
+  _imageSearchContext.delete(userId);
+}
+
 // ─── Tool Handler ──────────────────────────────────────
 
 async function handleTool(userId: string, name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -1507,6 +1551,11 @@ async function _handleToolInner(userId: string, name: string, args: Record<strin
       console.log(`[UNIFIED-SEARCH] Tool called: search_products { query: "${args.query}", store: "${args.platform || args.store || "any"}" }`);
       try {
         const { unifiedProductSearch } = await import("./search/unified-search.service.js");
+        const {
+          getSession, updateSession, transitionTo, detectDirectStore, hasActiveAPI,
+          getMarketplace,
+        } = await import("./shopping/shopping-session.service.js");
+
         const userRecord = await prisma.user.findFirst({
           where: { OR: [{ telegramChatId: userId }, { phone: userId.replace("whatsapp:", "") }] },
           select: { country: true },
@@ -1516,38 +1565,109 @@ async function _handleToolInner(userId: string, name: string, args: Record<strin
         // Accept store from "platform" or "store" param
         let storeParam = (args.store as string) || (args.platform as string);
 
-        // ─── Bug 3 fix: detect marketplace from query when Gemini doesn't pass store ───
+        // ─── Detect store from query when Gemini doesn't pass store param ───
         if (!storeParam || storeParam === "all") {
-          const query = (args.query as string || "").toLowerCase();
-          const marketplacePatterns: [RegExp, string][] = [
-            [/\b(na |no |on |from |at )?amazon\b/i, "amazon"],
-            [/\b(no |na |on |from |at )?mercado\s*livr[e]?\b/i, "mercadolivre"],
-            [/\b(no |na |on |from |at )?walmart\b/i, "walmart"],
-            [/\b(no |na |on |from |at )?ebay\b/i, "ebay"],
-            [/\b(no |na |on |from |at )?target\b/i, "target"],
-            [/\b(na |no |on |from |at )?best\s*buy\b/i, "bestbuy"],
-            [/\b(na |no |on |from |at )?mac[yY]'?s\b/i, "macys"],
-            [/\b(na |no |on |from |at )?jomashop\b/i, "jomashop"],
-            [/\b(na |no |on |from |at )?fragrance\s*net\b/i, "fragrancenet"],
-            [/\b(na |no |on |from |at )?sephora\b/i, "sephora"],
-          ];
-          for (const [pattern, storeName] of marketplacePatterns) {
-            if (pattern.test(query)) {
-              storeParam = storeName;
-              console.log(`[UNIFIED-SEARCH] Bug 3 fix: detected marketplace "${storeName}" from query "${query}"`);
-              break;
-            }
+          const queryText = (args.query as string || "");
+          const detectedStore = detectDirectStore(queryText);
+          if (detectedStore) {
+            storeParam = detectedStore;
+            console.log(`[DIRECT-STORE] Detected store "${detectedStore}" from query "${queryText}"`);
           }
         }
         const store = storeParam && storeParam !== "all" ? storeParam : undefined;
 
+        // ─── 2-PHASE ARCHITECTURE: determine search phase ───
+        const session = getSession(userId);
+        let searchPhase: "discovery" | "purchase" | undefined;
+
+        if (store && hasActiveAPI(store)) {
+          // DIRECT STORE: user named a store with active API → skip discovery, go direct
+          searchPhase = "purchase";
+          transitionTo(userId, "direct_store", { directStoreName: store, searchQuery: args.query as string });
+          const mp = getMarketplace(store);
+          console.log(`[DIRECT-STORE] Store="${mp?.name}", API active=${mp?.isActive}, type=${mp?.apiType}. Searching directly.`);
+        } else if (store && !hasActiveAPI(store)) {
+          // Store named but no API → use Google discovery, inform user
+          searchPhase = "discovery";
+          const mp = getMarketplace(store);
+          console.log(`[DIRECT-STORE] Store="${store}" has no active API (hasAPI=${mp?.hasAPI}, isActive=${mp?.isActive}). Falling back to Google discovery.`);
+          transitionTo(userId, "discovery", { searchQuery: args.query as string });
+        } else if (session.phase === "purchase" && session.selectedProduct) {
+          // User is in purchase phase — use marketplace APIs for the specific product
+          searchPhase = "purchase";
+          console.log(`[PHASE-2][PURCHASE] User in purchase phase, searching marketplaces for: "${args.query}"`);
+        } else {
+          // Default: discovery phase — Google only
+          searchPhase = "discovery";
+          transitionTo(userId, "discovery", { searchQuery: args.query as string });
+          console.log(`[PHASE-1][DISCOVERY] Query: "${args.query}", userId: ${userId}`);
+        }
+
+        // ─── IMG-SEARCH GATEWAY: validate and potentially override the query ───
+        let finalQuery = args.query as string;
+        const GENERIC_QUERY_RE = /^(genérico|generic|produto|product|item|unknown|object|thing|imagem|image|photo|foto|search|busca|find|procurar)$/i;
+        const GENERIC_WORDS = new Set(["genérico", "generic", "produto", "product", "item", "unknown", "object", "thing", "image", "photo", "foto", "search", "busca", "find"]);
+        const queryWords = (finalQuery || "").trim().split(/\s+/).filter((w: string) => w.length > 1);
+        const substantiveQueryWords = queryWords.filter(w => !GENERIC_WORDS.has(w.toLowerCase()));
+        const queryIsWeak = !finalQuery || substantiveQueryWords.length < 2 || GENERIC_QUERY_RE.test(finalQuery.trim());
+
+        // Retrieve per-user image context (thread-safe — no global race condition)
+        const imgCtx = getImageSearchContext(userId);
+
+        if (queryIsWeak) {
+          // Query from Gemini is bad — use the pre-identified validated query if available
+          if (imgCtx?.query) {
+            console.log(`[IMG-SEARCH][6-GATEWAY] Gemini query "${finalQuery}" is weak (${substantiveQueryWords.length} substantive words) — overriding with validated query: "${imgCtx.query}"`);
+            finalQuery = imgCtx.query;
+          } else if (imgCtx?.identification) {
+            // Try to build from identification fields
+            const id = imgCtx.identification;
+            const parts: string[] = [];
+            if (id.brand && id.brand.toLowerCase() !== "unknown") parts.push(id.brand);
+            if (id.model && id.model.toLowerCase() !== "unknown") parts.push(id.model);
+            if (id.category && id.category.toLowerCase() !== "unknown") parts.push(id.category);
+            if (id.color && id.color.toLowerCase() !== "unknown") parts.push(id.color);
+            if (parts.length >= 2) {
+              finalQuery = parts.join(" ");
+              console.log(`[IMG-SEARCH][6-GATEWAY] Built fallback query from identification fields: "${finalQuery}"`);
+            } else {
+              console.log(`[IMG-SEARCH][6-GATEWAY] No valid query available — search will proceed with weak query "${finalQuery}"`);
+            }
+          } else {
+            console.log(`[IMG-SEARCH][6-GATEWAY] No image context for userId=${userId} — search with original query "${finalQuery}"`);
+          }
+        } else if (imgCtx?.identification) {
+          // Query has enough words but check RELEVANCE against pre-identification
+          // If Gemini's query doesn't overlap at all with identified product, prefer our validated query
+          const id = imgCtx.identification;
+          const identBrand = (id.brand || "").toLowerCase();
+          const identCategory = (id.category || "").toLowerCase();
+          const queryLower = finalQuery.toLowerCase();
+          const brandMatch = identBrand === "unknown" || queryLower.includes(identBrand);
+          const categoryMatch = identCategory === "unknown" || queryLower.includes(identCategory);
+
+          if (!brandMatch && !categoryMatch && imgCtx.query) {
+            console.log(`[IMG-SEARCH][6-GATEWAY] Gemini query "${finalQuery}" has NO overlap with identification (brand="${id.brand}", category="${id.category}") — overriding with: "${imgCtx.query}"`);
+            finalQuery = imgCtx.query;
+          } else {
+            console.log(`[IMG-SEARCH][6-GATEWAY] Gemini query "${finalQuery}" passes validation (${substantiveQueryWords.length} substantive words, relevance OK)`);
+          }
+        } else {
+          console.log(`[IMG-SEARCH][6-GATEWAY] Gemini query "${finalQuery}" passes validation (${substantiveQueryWords.length} substantive words)`);
+        }
+
+        // Clear image context after use (prevent stale data affecting next non-image search)
+        clearImageSearchContext(userId);
+
         const searchStartMs = Date.now();
+        console.log(`[IMG-SEARCH][6-GOOGLE-API] Calling unifiedProductSearch with query: "${finalQuery}", store: "${store || "any"}", phase: "${searchPhase || "all"}"`);
         const result = await unifiedProductSearch({
-          query: args.query as string,
+          query: finalQuery,
           store,
           country,
           maxResults: Math.min((args.max_results as number) || 5, 10),
           userId,
+          phase: searchPhase,
         });
 
         // Log to commerce_search_logs (same as retail.routes.ts but for WhatsApp/direct flow)
@@ -1561,6 +1681,7 @@ async function _handleToolInner(userId: string, name: string, args: Record<strin
                 store: store || null,
                 country,
                 userId: userId || null,
+                phase: searchPhase || "all",
               },
               resultCount: result?.products?.length ?? 0,
               cached: !!(result as any)?.fromCache,
@@ -1568,6 +1689,24 @@ async function _handleToolInner(userId: string, name: string, args: Record<strin
             },
           });
         } catch { /* non-critical */ }
+
+        const phaseTag = searchPhase === "discovery" ? "[PHASE-1][RESULTS]"
+          : searchPhase === "purchase" ? "[PHASE-2][RESULTS]"
+          : "[IMG-SEARCH][7-GOOGLE-RESULTS]";
+        console.log(`${phaseTag} Search returned ${result?.products?.length ?? 0} results in ${Date.now() - searchStartMs}ms. Top: ${(result?.products?.slice(0, 3) || []).map((p: any) => p.title?.substring(0, 40)).join(" | ")}`);
+
+        // ─── ANTI-HALLUCINATION: if search returned 0 real products, stop immediately ───
+        if (!result.products || result.products.length === 0 || (result as any).searchFailed) {
+          console.warn(`[PHASE-1][FAILED] Search returned 0 results for "${finalQuery}". Returning anti-hallucination response.`);
+          return {
+            totalProducts: 0,
+            searchMethod: result.method,
+            methodsAttempted: result.methodsAttempted,
+            products: [],
+            searchFailed: true,
+            instruction: "The search returned NO results (timeout or error). Do NOT invent products, prices, or links. Tell the user: 'A busca não retornou resultados agora. Quer que eu tente de novo?' (in their language). You may suggest they describe the product differently. NEVER fabricate a product list.",
+          };
+        }
 
         const formatted = result.products.map((p, i) => ({
           rank: i + 1,
@@ -1580,11 +1719,25 @@ async function _handleToolInner(userId: string, name: string, args: Record<strin
           asin: p.asin,
         }));
 
+        // ─── Store results in ShoppingSession for selection tracking ───
+        if (searchPhase === "discovery" || searchPhase === undefined) {
+          const sessionResults = result.products.map((p, i) => ({
+            index: i + 1,
+            title: p.title,
+            price: p.price ? `${p.currency === "BRL" ? "R$" : "$"}${p.price.toFixed(2)}` : null,
+            store: p.store,
+            url: p.url,
+            imageUrl: p.imageUrl,
+            source: "google_search" as const,
+          }));
+          transitionTo(userId, "selection", { searchResults: sessionResults, searchResultsSortedBy: "price_asc", searchQuery: finalQuery });
+          console.log(`[PHASE-1][PRESENTED] Showed ${sessionResults.length} options to userId: ${userId}`);
+        }
+
         // ─── Deal Radar: auto-create shadow price alert for top result ───
         const topProduct = result.products[0];
         if (topProduct?.price && topProduct.price > 0) {
           try {
-            // Only create if no existing alert for similar query
             const existing = await prisma.priceAlert.findFirst({
               where: { userId, query: { contains: (args.query as string).substring(0, 20) }, active: true },
             });
@@ -1594,7 +1747,7 @@ async function _handleToolInner(userId: string, name: string, args: Record<strin
                   userId,
                   query: args.query as string,
                   store: `radar:${topProduct.store || "multi"}`,
-                  targetPrice: Math.round(topProduct.price * 0.9 * 100) / 100, // 10% below current
+                  targetPrice: Math.round(topProduct.price * 0.9 * 100) / 100,
                   currentPrice: topProduct.price,
                   currency: topProduct.currency || "USD",
                   country: (await prisma.user.findFirst({ where: { OR: [{ telegramChatId: userId }, { phone: userId.replace("whatsapp:", "") }] }, select: { country: true } }))?.country || "US",
@@ -1616,30 +1769,42 @@ async function _handleToolInner(userId: string, name: string, args: Record<strin
             );
             const couponResults = await Promise.race([
               Promise.all(couponPromises),
-              new Promise<never[]>((resolve) => setTimeout(() => resolve([]), 5000)), // 5s timeout
+              new Promise<never[]>((resolve) => setTimeout(() => resolve([]), 5000)),
             ]);
             coupons = (couponResults as { store: string; code: string; description: string }[][]).flat();
           }
         } catch { /* coupons are best-effort */ }
+
+        // ─── Build instruction based on phase ───
+        const noStoreAPI = store && !hasActiveAPI(store);
+        const phaseInstruction = searchPhase === "discovery"
+          ? `Present products as a NUMBERED LIST (1, 2, 3...) by price (cheapest first). Include: rank number, product name, price, store, and clickable link. ${coupons.length > 0 ? "Include coupons next to relevant products." : ""} After the list, ask the user: "Which one interests you? Tell me the number!" (in the user's language). Be CONCISE — max 1 line per product. Write ONE single message.`
+          : searchPhase === "purchase"
+            ? "Present the product details with price, store, and a direct purchase link. If the user has a connected account for this store, mention it. Be CONCISE."
+            : "Present products as a RANKED LIST by price (cheapest first). Include: rank number, product name, price, store, and clickable link. If coupons are present, show them next to the relevant product. Write ONE single response — NEVER split products and coupons into separate messages. Be CONCISE — max 1 line per product.";
 
         return {
           totalProducts: result.totalResults,
           searchMethod: result.method,
           methodsAttempted: result.methodsAttempted,
           products: formatted,
+          phase: searchPhase || "all",
           ...(coupons.length > 0 ? { coupons: coupons.slice(0, 5) } : {}),
-          ...((result as any).storeNotFound ? {
+          ...(noStoreAPI ? {
+            noDirectAPI: true,
+            instruction: `I don't have direct integration with "${store}". ${phaseInstruction} Mention that these results are from Google Search.`,
+          } : (result as any).storeNotFound ? {
             storeNotFound: true,
-            instruction: `The user asked for "${store}" but no results from that store were found. Show the results from other stores and tell the user: "Não achei na ${store}, mas encontrei em outras lojas:" (or equivalent in the user's language). Present as a RANKED LIST by price. Include clickable links.`,
+            instruction: `The user asked for "${store}" but no results from that store were found. Show the results from other stores and tell the user: "Não achei na ${store}, mas encontrei em outras lojas:" (or equivalent in the user's language). ${phaseInstruction}`,
           } : {
-            instruction: "Present products as a RANKED LIST by price (cheapest first). Include: rank number, product name, price, store, and clickable link. If coupons are present, show them next to the relevant product. Write ONE single response — NEVER split products and coupons into separate messages. Be CONCISE — max 1 line per product.",
+            instruction: phaseInstruction,
           }),
         };
       } catch (err) {
         console.error("[UNIFIED-SEARCH] Error:", err);
         return {
           error: `Product search failed: ${(err as Error).message}`,
-          fallback_instruction: "IMPORTANT: The search tool failed but you MUST still help the user. Use your training knowledge to provide: approximate price, known retailers (Amazon, Best Buy, Walmart, Mercado Livre), and direct URLs. Mark prices as approximate.",
+          fallback_instruction: "IMPORTANT: The search failed. Do NOT invent products, prices, or links. Tell the user: 'A busca teve um problema. Quer tentar de novo?' (in their language). You may ask the user to describe the product differently or try again in a moment. NEVER fabricate results.",
         };
       }
     }
@@ -3639,14 +3804,17 @@ export async function chatWithGemini(
       toolResult = validateToolResult(call.name, toolResult, userMessage);
       console.log(`[WA TOOL] ${call.name} =>`, JSON.stringify(toolResult).substring(0, 150));
 
-      // Inject strong fallback directive when search tools fail
-      if (SEARCH_TOOLS.has(call.name) && toolResult.error) {
+      // ─── CODE-LEVEL ANTI-HALLUCINATION: if a search tool failed/empty, return hardcoded message ───
+      // NEVER send failed search results back to Gemini — it will hallucinate products/prices.
+      // The LLM does NOT get to format the response when search fails. Period.
+      if (SEARCH_TOOLS.has(call.name) && (toolResult.error || toolResult.searchFailed || (Array.isArray(toolResult.products) && toolResult.products.length === 0))) {
         const args = call.args as Record<string, unknown>;
-        failedSearchQuery = (args.query || args.term || args.keyword || userMessage) as string;
-        toolResult = {
-          error: toolResult.error,
-          MANDATORY_FALLBACK: `The search tool "${call.name}" failed. You MUST respond using your training knowledge about "${failedSearchQuery}". Include: approximate price, where to buy (with direct URLs like amazon.com, bestbuy.com, etc), and key product details. Mark prices as "approximate price". NEVER say "não foi possível" or "I couldn't find" — give the user a USEFUL answer with your knowledge.`,
-        };
+        const failedQuery = (args.query || args.term || args.keyword || userMessage) as string;
+        const lang = userMessage.match(/[à-ú\u00C0-\u017F]/) ? "pt" : "en";
+        console.warn(`[ANTI-HALLUCINATION][CODE-BLOCK] Search "${call.name}" failed for "${failedQuery}". Returning hardcoded response — LLM bypassed.`);
+        return lang === "pt"
+          ? `A busca por "${failedQuery}" não retornou resultados agora. Quer que eu tente de novo? 🐕`
+          : `The search for "${failedQuery}" didn't return results right now. Want me to try again? 🐕`;
       }
 
       functionResponses.push({
@@ -3659,21 +3827,6 @@ export async function chatWithGemini(
       response = result.response;
     } catch (err) {
       console.error(`[WA CHAT] Error sending function response: ${(err as Error).message}`);
-
-      // Knowledge-based fallback when tool response also fails
-      if (failedSearchQuery) {
-        console.log(`[WA FALLBACK] Using knowledge fallback for: ${failedSearchQuery}`);
-        const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-        try {
-          const fallbackModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-          const fallbackResult = await fallbackModel.generateContent(
-            `The user asked: "${userMessage}". All search tools failed. Answer using your training knowledge. Include approximate prices, recommended retailers with direct URLs, and key details. Mark prices as approximate. Respond in the same language as the user's message. Be concise (max 3 lines).`
-          );
-          return fallbackResult.response.text() || "Erro ao processar resultados. Tente novamente.";
-        } catch {
-          return "Erro ao processar resultados. Tente novamente.";
-        }
-      }
       return "Erro ao processar resultados. Tente novamente.";
     }
   }
@@ -3684,6 +3837,182 @@ export async function chatWithGemini(
     return followUp.response.text() || "Pronto!";
   }
   return text || "Pronto!";
+}
+
+// ─── Image Search Pipeline: Structured Identification ─────────────
+// ProductIdentification is an alias for ImageIdentificationData (declared near the top of the file)
+type ProductIdentification = ImageIdentificationData;
+
+const IMAGE_SEARCH_REJECTED_TERMS = [
+  "genérico", "generic", "produto", "product", "item", "unknown",
+  "object", "thing", "stuff", "objeto", "coisa", "imagem", "image",
+  "photo", "foto", "picture", "search", "busca", "find", "procurar",
+];
+
+// Accessory/tool words that indicate the LLM described a related item, not the product itself
+const IMAGE_SEARCH_ACCESSORY_PATTERNS = [
+  /removal\s+(kit|tool)/i,
+  /repair\s+(kit|tool|set)/i,
+  /replacement\s+(band|strap|part|screen)/i,
+  /screen\s+protector/i,
+  /cleaning\s+(kit|cloth|set)/i,
+  /charger\s+(cable|adapter)/i,
+  /carrying\s+(case|bag|pouch)/i,
+];
+
+/**
+ * Validates and builds a search query from product identification.
+ * Returns null if identification is too weak → bot should ask the user.
+ */
+function validateAndBuildSearchQuery(identification: ProductIdentification): string | null {
+  // 1. Try the LLM-generated searchQuery first
+  let query = (identification.searchQuery || "").trim();
+
+  // Strip rejected-only queries
+  const queryWords = query.toLowerCase().split(/\s+/).filter(w => w.length > 1);
+  const substantiveWords = queryWords.filter(w => !IMAGE_SEARCH_REJECTED_TERMS.includes(w));
+
+  if (substantiveWords.length >= 3) {
+    // Check for accessory/tool patterns — LLM sometimes describes a related item, not the product
+    const isAccessory = IMAGE_SEARCH_ACCESSORY_PATTERNS.some(p => p.test(query));
+    if (isAccessory) {
+      console.warn(`[IMG-SEARCH][5-VALIDATED] REJECTED searchQuery "${query}" — matches accessory/tool pattern. Falling back to structured fields.`);
+      // Fall through to build from structured fields instead
+    } else {
+      console.log(`[IMG-SEARCH][5-VALIDATED] Using LLM searchQuery: "${query}" (${substantiveWords.length} substantive words)`);
+      return query;
+    }
+  }
+
+  // 2. Build from structured fields: brand + model + category + color
+  const parts: string[] = [];
+  if (identification.brand && identification.brand.toLowerCase() !== "unknown") parts.push(identification.brand);
+  if (identification.model && identification.model.toLowerCase() !== "unknown") parts.push(identification.model);
+  if (identification.category && identification.category.toLowerCase() !== "unknown") parts.push(identification.category);
+  if (identification.color && identification.color.toLowerCase() !== "unknown") parts.push(identification.color);
+
+  if (parts.length >= 2) {
+    const builtQuery = parts.join(" ");
+    console.log(`[IMG-SEARCH][5-VALIDATED] Built query from fields: "${builtQuery}"`);
+    return builtQuery;
+  }
+
+  // 3. Use rawDescription (first 8 substantive words)
+  if (identification.rawDescription && identification.rawDescription.length > 5) {
+    const descWords = identification.rawDescription
+      .split(/\s+/)
+      .filter(w => w.length > 2 && !IMAGE_SEARCH_REJECTED_TERMS.includes(w.toLowerCase()))
+      .slice(0, 8);
+    if (descWords.length >= 3) {
+      const descQuery = descWords.join(" ");
+      console.log(`[IMG-SEARCH][5-VALIDATED] Built query from rawDescription: "${descQuery}"`);
+      return descQuery;
+    }
+  }
+
+  // 4. EVERYTHING failed → return null (bot will ask the user)
+  console.log(`[IMG-SEARCH][5-VALIDATED] REJECTED — insufficient identification data. Will ask user.`);
+  return null;
+}
+
+const IDENTIFY_PRODUCT_PROMPT = `You are a product identification expert. Analyze this image and identify the MAIN product shown.
+
+Return ONLY a valid JSON object in this EXACT format — no markdown, no code fences, no explanation:
+{"brand":"...","model":"...","category":"...","color":"...","searchQuery":"...","confidence":0.0,"rawDescription":"..."}
+
+Field rules:
+- brand: visible brand name, or "unknown" if not visible
+- model: specific model name/number, or "unknown"
+- category: product type (watch, headphone, shoe, sneaker, perfume, phone, laptop, bag, sunglasses, etc.)
+- color: primary color(s)
+- searchQuery: a Google Shopping search query with at least 4 descriptive words to find THIS EXACT PRODUCT for purchase. Include brand + model + category + distinguishing features. The query must describe the PRODUCT ITSELF, NOT accessories, tools, or repair kits related to it. NEVER use words like "generic", "genérico", "removal kit", "repair tool", "replacement band".
+- confidence: 0.0 to 1.0 (how sure you are about the identification)
+- rawDescription: brief visual description of the product as seen in the image
+
+CRITICAL RULES:
+1. searchQuery must have AT LEAST 4 words
+2. searchQuery must describe the product the user would want to BUY, not tools/accessories to maintain it
+3. If you see a watch, the searchQuery should be for BUYING that watch, not for watch tools
+4. If you see a phone, the searchQuery should be for BUYING that phone, not phone cases or screen protectors
+5. NEVER use "generic", "genérico", "product", "item", "unknown", "image", "photo" in searchQuery
+6. If the image is NOT a product (landscape, person, meme, etc.), set confidence to 0.0
+
+Examples:
+
+Photo of a Casio G-Shock watch:
+{"brand":"Casio","model":"G-Shock GA-2100","category":"watch","color":"black","searchQuery":"Casio G-Shock GA-2100 black watch price","confidence":0.85,"rawDescription":"Black digital-analog watch with octagonal bezel, Casio G-Shock branding visible"}
+
+Photo of white sneakers with no visible brand:
+{"brand":"unknown","model":"unknown","category":"sneaker","color":"white","searchQuery":"white chunky platform sneaker minimal design buy","confidence":0.4,"rawDescription":"White chunky sole sneaker with minimal design, no visible branding"}
+
+Photo of a perfume bottle:
+{"brand":"Dior","model":"Sauvage","category":"perfume","color":"blue","searchQuery":"Dior Sauvage eau de toilette perfume buy","confidence":0.9,"rawDescription":"Blue gradient glass perfume bottle with Dior Sauvage label"}`;
+
+/**
+ * Pre-identification step: uses Gemini vision to identify the product
+ * with structured JSON output BEFORE the main tool-calling pipeline.
+ * Returns null if identification fails after retries.
+ */
+async function identifyProductFromImage(
+  imageBase64: string,
+  imageMimeType: string,
+  caption: string,
+): Promise<ProductIdentification | null> {
+  if (!GEMINI_API_KEY) return null;
+
+  const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+
+  const parts = [
+    { inlineData: { mimeType: imageMimeType, data: imageBase64 } },
+    { text: caption
+        ? `${IDENTIFY_PRODUCT_PROMPT}\n\nThe user also said: "${caption}"`
+        : IDENTIFY_PRODUCT_PROMPT },
+  ];
+
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      console.log(`[IMG-SEARCH][2-LLM-SENT] Sending image to LLM for identification (attempt ${attempt})...`);
+      const result = await Promise.race([
+        model.generateContent(parts),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Identification timeout")), 10_000)
+        ),
+      ]);
+
+      const rawText = result.response.text().trim();
+      console.log(`[IMG-SEARCH][3-LLM-RAW] Raw LLM response: ${rawText.substring(0, 500)}`);
+
+      // Parse JSON — handle potential markdown code blocks
+      let jsonStr = rawText;
+      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) jsonStr = jsonMatch[0];
+
+      const parsed = JSON.parse(jsonStr) as ProductIdentification;
+
+      // Validate required fields exist
+      if (!parsed.category && !parsed.rawDescription && !parsed.searchQuery) {
+        console.warn(`[IMG-SEARCH][3-LLM-RAW] Parsed JSON has no useful fields, retrying...`);
+        continue;
+      }
+
+      // Defaults for missing fields
+      parsed.brand = parsed.brand || "unknown";
+      parsed.model = parsed.model || "unknown";
+      parsed.category = parsed.category || "unknown";
+      parsed.color = parsed.color || "unknown";
+      parsed.searchQuery = parsed.searchQuery || "";
+      parsed.confidence = typeof parsed.confidence === "number" ? parsed.confidence : 0.5;
+      parsed.rawDescription = parsed.rawDescription || "";
+
+      console.log(`[IMG-SEARCH][4-PARSED] Parsed identification: ${JSON.stringify(parsed)}`);
+      return parsed;
+    } catch (err) {
+      console.warn(`[IMG-SEARCH][3-LLM-RAW] Attempt ${attempt} failed: ${(err as Error).message}`);
+      if (attempt === 2) return null;
+    }
+  }
+  return null;
 }
 
 // ─── Gemini Chat with Image (multimodal) ─────────────
@@ -3714,12 +4043,46 @@ export async function chatWithGeminiMultimodal(
   const PRODUCT_INTENT_RE = /\b(compra|buy|purchase|price|preço|preco|quanto custa|how much|busca|search|procur|find|quero|want|achar|onde|where|cheapest|barato|melhor preço|best price|deal|oferta|desconto|discount)\b/i;
   const hasProductIntent = PRODUCT_INTENT_RE.test(userMessage || "");
 
+  console.log(`[IMG-SEARCH][1-RECEIVED] Image received, userId: ${userId}, caption: "${(userMessage || "").substring(0, 80)}", hasProductIntent: ${hasProductIntent}`);
+
+  // ─── PRE-IDENTIFICATION: Structured product identification ───────
+  // Run a dedicated vision call to identify the product BEFORE the main pipeline.
+  // This gives us structured data to inject into the context AND to validate queries.
+  let preIdentification: ProductIdentification | null = null;
+  let validatedQuery: string | null = null;
+
+  // Always try to identify — even without explicit product intent, the image might be a product
+  try {
+    preIdentification = await identifyProductFromImage(imageBase64, imageMimeType, userMessage || "");
+    if (preIdentification) {
+      validatedQuery = validateAndBuildSearchQuery(preIdentification);
+
+      // Low confidence: if < 0.3 and no explicit product intent, don't force search
+      if (preIdentification.confidence < 0.3 && !hasProductIntent) {
+        console.log(`[IMG-SEARCH][5-VALIDATED] Low confidence (${preIdentification.confidence}) and no product intent — skipping forced search`);
+        validatedQuery = null;
+      }
+    }
+  } catch (err) {
+    console.warn(`[IMG-SEARCH][2-LLM-SENT] Pre-identification failed: ${(err as Error).message}`);
+  }
+
+  // Store validated query per-userId so search_products handler can use it (thread-safe)
+  setImageSearchContext(userId, validatedQuery, preIdentification);
+
   const contextTools2 = getToolsForContext(userMessage);
+
+  // Build enhanced message with product identification context
+  let enhancedMessage = userMessage || "Analyze this image and tell me how I can help.";
+  if (preIdentification && validatedQuery) {
+    enhancedMessage = `${userMessage || "Find this product"}\n\n[PRODUCT IDENTIFIED FROM IMAGE: brand="${preIdentification.brand}", model="${preIdentification.model}", category="${preIdentification.category}", color="${preIdentification.color}". USE THIS SEARCH QUERY for search_products: "${validatedQuery}"]`;
+  }
+
   const model = genAI.getGenerativeModel({
     model: "gemini-2.5-flash",
     systemInstruction: systemPrompt,
     tools: contextTools2,
-    ...(hasProductIntent ? {
+    ...((hasProductIntent || validatedQuery) ? {
       toolConfig: {
         functionCallingConfig: {
           mode: FunctionCallingMode.ANY,
@@ -3728,13 +4091,13 @@ export async function chatWithGeminiMultimodal(
     } : {}),
   });
 
-  if (hasProductIntent) {
-    console.log(`[WA IMAGE] Product intent detected in caption, forcing tool calling mode`);
+  if (hasProductIntent || validatedQuery) {
+    console.log(`[IMG-SEARCH][5-VALIDATED] Forcing tool calling mode (intent=${hasProductIntent}, validatedQuery="${validatedQuery}")`);
   }
 
   const parts: ({ inlineData: { mimeType: string; data: string } } | { text: string })[] = [
     { inlineData: { mimeType: imageMimeType, data: imageBase64 } },
-    { text: userMessage || "Analyze this image and tell me how I can help." },
+    { text: enhancedMessage },
   ];
 
   let chatSession = model.startChat({ history });
@@ -3804,6 +4167,14 @@ export async function chatWithGeminiMultimodal(
       toolResult = JSON.parse(JSON.stringify(toolResult));
       const toolResultStr = JSON.stringify(toolResult).substring(0, 500);
       console.log(`[WA IMAGE TOOL] ${call.name} =>`, toolResultStr.substring(0, 150));
+
+      // ─── CODE-LEVEL ANTI-HALLUCINATION (image pipeline): hardcoded response, LLM bypassed ───
+      const IMG_SEARCH_TOOLS = new Set(["search_products", "amazon_search", "search_products_latam", "search_products_global", "compare_prices"]);
+      if (IMG_SEARCH_TOOLS.has(call.name) && (toolResult.error || (toolResult as any).searchFailed || (Array.isArray((toolResult as any).products) && (toolResult as any).products.length === 0))) {
+        console.warn(`[ANTI-HALLUCINATION][IMG-CODE-BLOCK] Search "${call.name}" failed in image pipeline. Returning hardcoded response — LLM bypassed.`);
+        return "A busca por esse produto não retornou resultados agora. Me descreve o que você viu na imagem que eu tento de outro jeito! 🐕";
+      }
+
       collectedToolResults.push({ name: call.name, result: toolResultStr });
       functionResponses.push({
         functionResponse: { name: call.name, response: toolResult },
@@ -3857,32 +4228,39 @@ export async function chatWithGeminiMultimodal(
 
   // ─── Post-hoc product search fallback ─────────────────────
   // When the model analyzes an image but doesn't call search_products,
-  // detect if a product was identified and force a search
+  // use the pre-identification data (already validated) instead of making another LLM call
   if (iterations === 0) {
     let textSoFar = lastGoodText || "";
     try { textSoFar = response.text() || textSoFar; } catch { /* function-call-only response */ }
-    const combinedText = `${userMessage || ""} ${textSoFar}`.toLowerCase();
 
-    // Broad product signals: caption has buy intent OR model response mentions product-like terms
+    // Use pre-identification if available, or fall back to signal detection
+    const hasPreIdQuery = !!validatedQuery;
+    const combinedText = `${userMessage || ""} ${textSoFar}`.toLowerCase();
     const PRODUCT_SIGNALS_RE = /\b(compra|buy|purchase|price|preço|preco|quanto|how much|busca|search|procur|find|quero|want|product|produto|perfume|cologne|fragrance|phone|laptop|shoe|tênis|sneaker|headphone|watch|relógio|câmera|camera|tablet|tv|monitor|speaker|earbuds|cosmetic|makeup|skincare|creme|loção|shampoo|supplement|vitamin)\b/i;
 
-    if (PRODUCT_SIGNALS_RE.test(combinedText) && textSoFar.length > 10) {
-      console.log(`[WA IMAGE] 0 tool iterations but product signals detected. Running post-hoc search...`);
+    if ((hasPreIdQuery || PRODUCT_SIGNALS_RE.test(combinedText)) && (textSoFar.length > 10 || hasPreIdQuery)) {
+      console.log(`[IMG-SEARCH][POST-HOC] 0 tool iterations. Pre-identified query: "${validatedQuery || "none"}". Running post-hoc search...`);
 
       try {
         const elapsed = Date.now() - startTime;
-        if (elapsed < MULTIMODAL_TIMEOUT_MS - 15_000) { // Need at least 15s remaining
-          // Extract product name from model's visual analysis
-          const extractModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-          const extractResult = await extractModel.generateContent(
-            `Extract ONLY the product name from this text for an e-commerce search query. Return ONLY the product name (brand + model), nothing else. No quotes, no explanation.\n\nUser said: "${userMessage}"\nImage analysis: "${textSoFar.substring(0, 500)}"`
-          );
-          const productQuery = extractResult.response.text().trim().replace(/^["']|["']$/g, "");
+        if (elapsed < MULTIMODAL_TIMEOUT_MS - 15_000) {
+          // Prefer the pre-identified validated query; fall back to LLM extraction only if needed
+          let productQuery = validatedQuery;
+          if (!productQuery) {
+            const extractModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+            const extractResult = await extractModel.generateContent(
+              `Extract ONLY the product name from this text for an e-commerce search query. Return ONLY the product name (brand + model), nothing else. No quotes, no explanation.\n\nUser said: "${userMessage}"\nImage analysis: "${textSoFar.substring(0, 500)}"`
+            );
+            productQuery = extractResult.response.text().trim().replace(/^["']|["']$/g, "");
+          }
 
           if (productQuery && productQuery.length > 2 && productQuery.length < 150) {
-            console.log(`[WA IMAGE] Post-hoc search query: "${productQuery}"`);
+            console.log(`[IMG-SEARCH][POST-HOC] Post-hoc search query: "${productQuery}"`);
 
-            // Run the actual product search
+            // Re-set image context before calling handleTool so the gateway has it
+            // (it may have been cleared by a prior tool call, or never consumed)
+            setImageSearchContext(userId, productQuery, preIdentification);
+
             const searchResult = await Promise.race([
               handleTool(userId, "search_products", { query: productQuery, max_results: 5 }),
               new Promise<Record<string, unknown>>((_, reject) =>
@@ -3890,23 +4268,21 @@ export async function chatWithGeminiMultimodal(
               ),
             ]);
 
-            // Send search results back to the model for a combined response
             const searchJson = JSON.stringify(searchResult).substring(0, 4000);
             const finalResult = await chatSession.sendMessage(
-              `I searched for "${productQuery}" and found these results:\n${searchJson}\n\nPresent these search results to the user alongside your image analysis. Include prices and links. Be concise — the user is on WhatsApp.`
+              `I searched for "${productQuery}" and found these results:\n${searchJson}\n\nPresent these search results to the user alongside your image analysis. Include product names, prices, and links. Be concise — the user is on WhatsApp.`
             );
 
             const finalText = finalResult.response.text();
             if (finalText) {
               const duration = Date.now() - startTime;
-              console.log(`[WA IMAGE] Completed with post-hoc search in ${duration}ms`);
+              console.log(`[IMG-SEARCH][8-SENT] Completed with post-hoc search in ${duration}ms`);
               return finalText;
             }
           }
         }
       } catch (err) {
-        console.error(`[WA IMAGE] Post-hoc search failed: ${(err as Error).message}`);
-        // Fall through to return the original text response
+        console.error(`[IMG-SEARCH][POST-HOC] Post-hoc search failed: ${(err as Error).message}`);
       }
     }
   }
@@ -3916,7 +4292,7 @@ export async function chatWithGeminiMultimodal(
     text = response.text();
   } catch { /* response.text() throws if response has only function calls */ }
   const duration = Date.now() - startTime;
-  console.log(`[WA IMAGE] Completed in ${duration}ms (${iterations} tool iterations)`);
+  console.log(`[IMG-SEARCH][8-SENT] Completed in ${duration}ms (${iterations} tool iterations, text=${text.length} chars)`);
   return text || lastGoodText || "Estou com dificuldade pra analisar a imagem agora. Pode me descrever o produto ou mandar o link? 🐕";
 }
 
@@ -4116,6 +4492,8 @@ export async function processWhatsAppImageMessage(
     const response = await chatWithGeminiMultimodal(history, caption, imageBase64, mimeType, userId, userFacts);
     await saveMessage(userId, "user", `[photo] ${caption || "image sent"}`);
     await saveMessage(userId, "model", response);
+
+    console.log(`[IMG-SEARCH][8-SENT] Final response sent to user ${userId} (${response.length} chars): "${response.substring(0, 120)}..."`);
 
     // Extract facts in background
     extractAndSaveFacts(userId, caption || "image sent", response).catch((err) =>
