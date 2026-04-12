@@ -4141,16 +4141,26 @@ export async function chatWithGeminiMultimodal(
     if (initialText) lastGoodText = initialText;
   } catch { /* text() throws if response has only function calls — ignore */ }
 
-  // Function calling loop (max 8 iterations, with total timeout)
+  // Function calling loop (max 4 iterations — reduced from 8 to prevent Gemini tool-call loops)
+  // Bug: Gemini with FunctionCallingMode.ANY calls tools obsessively (search, price_history,
+  // find_coupons x6) burning all 8 iterations without ever generating text (text=0 chars).
   let iterations = 0;
-  while (response.functionCalls() && response.functionCalls()!.length > 0 && iterations < 8) {
+  const seenToolCalls = new Map<string, number>(); // track repeated tool calls
+  let hasSearchResults = false; // track if we already got product results
+  while (response.functionCalls() && response.functionCalls()!.length > 0 && iterations < 4) {
     iterations++;
 
     // Check total timeout before starting a new tool iteration
     const elapsed = Date.now() - startTime;
     if (elapsed > MULTIMODAL_TIMEOUT_MS) {
       console.warn(`[WA IMAGE] Total timeout exceeded (${elapsed}ms, ${iterations} iters). Returning partial.`);
-      return lastGoodText || "Identifiquei o produto na imagem mas a busca demorou demais. Me diz o nome do produto que eu busco rapidinho! 🐕";
+      break; // break instead of return — let the summary fallback handle it
+    }
+
+    // If we already have search results and Gemini keeps calling non-search tools, break
+    if (hasSearchResults && iterations > 2) {
+      console.log(`[WA IMAGE] Already have search results after ${iterations} iters. Breaking loop to generate summary.`);
+      break;
     }
 
     const functionCalls = response.functionCalls()!;
@@ -4182,12 +4192,22 @@ export async function chatWithGeminiMultimodal(
       const toolResultStr = JSON.stringify(toolResult).substring(0, 500);
       console.log(`[WA IMAGE TOOL] ${call.name} =>`, toolResultStr.substring(0, 150));
 
+      // ─── Track repeated tool calls to detect Gemini loops ───
+      const callCount = (seenToolCalls.get(call.name) || 0) + 1;
+      seenToolCalls.set(call.name, callCount);
+      if (callCount > 2) {
+        console.warn(`[WA IMAGE] Skipping repeated tool call: ${call.name} (${callCount}th call). Gemini is looping.`);
+        toolResult = { error: `Tool ${call.name} already called ${callCount - 1} times. Stop calling it.`, _skipped: true };
+      }
+
+      // Track if search returned real products
+      if (call.name === "search_products" && !toolResult.error && Array.isArray((toolResult as any).products) && (toolResult as any).products.length > 0) {
+        hasSearchResults = true;
+      }
+
       // ─── CODE-LEVEL ANTI-HALLUCINATION (image pipeline): hardcoded response, LLM bypassed ───
-      // If search failed BUT we have a caption with text, fall back to text-only search (Phase 1)
-      // instead of asking the user to describe what they already described.
       const IMG_SEARCH_TOOLS = new Set(["search_products", "amazon_search", "search_products_latam", "search_products_global", "compare_prices"]);
       if (IMG_SEARCH_TOOLS.has(call.name) && (toolResult.error || (toolResult as any).searchFailed || (Array.isArray((toolResult as any).products) && (toolResult as any).products.length === 0))) {
-        // If user sent a caption with the image, use it as a text-only search query
         if (userMessage && userMessage.trim().length > 3) {
           console.warn(`[ANTI-HALLUCINATION][IMG-CODE-BLOCK] Search "${call.name}" failed but caption exists: "${userMessage.substring(0, 80)}". Falling back to text-only Phase 1 search.`);
           return chatWithGemini(history, userMessage, userId, userFacts);
@@ -4218,29 +4238,28 @@ export async function chatWithGeminiMultimodal(
 
   // ─── FunctionCallingMode.ANY fix: force text summary ─────────────────────
   // When tool calling was forced (ANY mode), the model never produces text —
-  // only function calls. After exhausting iterations, we need to ask for a
-  // text summary of the collected tool results.
+  // only function calls. After exhausting iterations, we MUST generate a summary.
+  // Previously this had a time guard (elapsed < 40s) that was always exceeded
+  // because Gemini burned all iterations on repeated tool calls (find_coupons x6).
+  // With max 4 iterations + loop breaker, we always have time for summary.
   if (iterations > 0 && !lastGoodText && collectedToolResults.length > 0) {
     try {
-      const elapsed = Date.now() - startTime;
-      if (elapsed < MULTIMODAL_TIMEOUT_MS - 10_000) {
-        console.log(`[WA IMAGE] No text after ${iterations} tool iterations (ANY mode). Requesting summary...`);
-        // Create a new model instance WITHOUT FunctionCallingMode.ANY
-        const summaryModel = genAI.getGenerativeModel({
-          model: "gemini-2.5-flash",
-          systemInstruction: buildSystemPrompt(userFacts),
-        });
-        const toolSummary = collectedToolResults
-          .map(t => `${t.name}: ${t.result}`)
-          .join("\n");
-        const summaryResult = await summaryModel.generateContent(
-          `The user sent a photo with this caption: "${userMessage || ""}"\n\nI analyzed the image and called these tools:\n${toolSummary.substring(0, 6000)}\n\nBased on these tool results, write a helpful WhatsApp response for the user. Include product names, prices, links, and any deals found. Be concise — this is WhatsApp. Use the user's language (match the caption language).`
-        );
-        const summaryText = summaryResult.response.text();
-        if (summaryText) {
-          lastGoodText = summaryText;
-          console.log(`[WA IMAGE] Summary generated (${summaryText.length} chars)`);
-        }
+      console.log(`[WA IMAGE] No text after ${iterations} tool iterations (ANY mode). Requesting summary...`);
+      // Create a new model instance WITHOUT FunctionCallingMode.ANY
+      const summaryModel = genAI.getGenerativeModel({
+        model: "gemini-2.5-flash",
+        systemInstruction: buildSystemPrompt(userFacts),
+      });
+      const toolSummary = collectedToolResults
+        .map(t => `${t.name}: ${t.result}`)
+        .join("\n");
+      const summaryResult = await summaryModel.generateContent(
+        `The user sent a photo with this caption: "${userMessage || ""}"\n\nI analyzed the image and called these tools:\n${toolSummary.substring(0, 6000)}\n\nBased on these tool results, write a helpful WhatsApp response for the user. Include product names, prices, links, and any deals found. Be concise — this is WhatsApp. Use the user's language (match the caption language).`
+      );
+      const summaryText = summaryResult.response.text();
+      if (summaryText) {
+        lastGoodText = summaryText;
+        console.log(`[WA IMAGE] Summary generated (${summaryText.length} chars)`);
       }
     } catch (err) {
       console.error(`[WA IMAGE] Summary generation failed: ${(err as Error).message}`);
