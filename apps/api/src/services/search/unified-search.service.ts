@@ -97,28 +97,26 @@ export async function unifiedProductSearch(opts: SearchOptions): Promise<Unified
 
   // ─── Build sources array ───────────────────────────
   // 2-PHASE ARCHITECTURE:
-  //   discovery = Google only (SerpAPI Google Shopping + Gemini Grounding)
-  //   purchase  = Marketplace APIs only (Walmart, eBay, ML, Apify, Browser)
+  //   discovery = Google Search ONLY (Gemini Grounding) — returns results from ALL stores
+  //   purchase  = Marketplace APIs (Walmart, eBay, ML, Apify, Browser)
   //   undefined = all sources (legacy/backward compat)
   type Source = { name: string; fn: () => Promise<UnifiedProduct[]>; priority: number };
   const sources: Source[] = [];
 
-  // ── GOOGLE SOURCES (Phase 1: Discovery + legacy) ──
-  if (!isPurchase) {
-    // SerpAPI Google Shopping — fastest, covers 100+ stores
+  // ── PHASE 1: GOOGLE SEARCH (one source, one call) ──
+  // Google Search already returns results from Amazon, Walmart, Best Buy, Target,
+  // Mercado Livre, etc. No need for SerpAPI intermediary or Apify (Amazon-only).
+  if (isDiscovery) {
+    if (GEMINI_API_KEY) {
+      sources.push({ name: "google", fn: () => withTimeout(searchGeminiGrounding(storeQuery, maxResults), TIMEOUT.grounding), priority: 1 });
+    }
+  } else if (!isPurchase) {
+    // Legacy (no phase specified): use all Google sources for backward compat
     if (SERPAPI_KEY) {
       sources.push({ name: "serpapi", fn: () => withTimeout(searchSerpApi(storeQuery, country, maxResults), TIMEOUT.serpapi), priority: 1 });
     }
-
-    // Google Search Grounding — free, works well for general queries
     if (GEMINI_API_KEY) {
       sources.push({ name: "grounding", fn: () => withTimeout(searchGeminiGrounding(storeQuery, maxResults), TIMEOUT.grounding), priority: store ? 4 : 2 });
-    }
-
-    // Apify as FALLBACK in discovery — low priority so Google sources win if they work,
-    // but prevents total failure when SerpAPI is rate-limited (429) and grounding times out
-    if (isDiscovery) {
-      sources.push({ name: "apify", fn: () => withTimeout(searchApify(query, country, maxResults, userId), TIMEOUT.apify), priority: 5 });
     }
   }
 
@@ -152,7 +150,7 @@ export async function unifiedProductSearch(opts: SearchOptions): Promise<Unified
   }
 
   if (isDiscovery) {
-    console.log(`[PHASE-1][DISCOVERY] Google-only search: ${sources.map(s => s.name).join(", ")} for query="${query}"`);
+    console.log(`[PHASE-1][DISCOVERY] Google Search: query="${query}"`);
   } else if (isPurchase) {
     console.log(`[PHASE-2][PURCHASE] Marketplace search: ${sources.map(s => s.name).join(", ")} for query="${query}"`);
   }
@@ -449,7 +447,7 @@ async function searchGeminiGrounding(query: string, maxResults: number): Promise
     tools: [{ googleSearch: {} } as any],
   });
 
-  const prompt = `Find "${query}" for sale online RIGHT NOW. Return JSON array, max ${maxResults} products. Format: [{"title":"...","price":299.99,"currency":"USD","url":"https://direct-product-link","store":"Best Buy","rating":4.5}]. ONLY the JSON array, nothing else. Include real product page URLs, not search pages.`;
+  const prompt = `Search Google Shopping for "${query}". Find products for sale RIGHT NOW from DIFFERENT stores (Amazon, Walmart, Best Buy, Target, eBay, etc). Return JSON array, max ${maxResults} products from at least 3 different stores if possible. Format: [{"title":"...","price":299.99,"currency":"USD","url":"https://direct-product-link","store":"Amazon","rating":4.5}]. ONLY the JSON array, nothing else. Rules: real product page URLs (not search pages), real current prices, multiple stores for price comparison.`;
 
   const result = await model.generateContent(prompt);
   const text = result.response.text();
