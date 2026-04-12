@@ -23,7 +23,7 @@
     "@payjarvis/database": "*",
     "@payjarvis/types": "*",
     "@types/qrcode": "^1.5.6",
-    "apify-client": "^2.22.3",
+
     "dotenv": "^17.3.1",
     "fastify": "^5.0.0",
     "googleapis": "^144.0.0",

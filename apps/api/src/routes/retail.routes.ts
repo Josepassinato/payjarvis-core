@@ -33,7 +33,7 @@ import {
 import * as cvs from "../services/pharmacy/cvs-client.js";
 import * as walgreens from "../services/pharmacy/walgreens-client.js";
 import { unifiedProductSearch } from "../services/search/unified-search.service.js";
-import { searchFlightsSerpApi, searchHotelsSerpApi, searchEventsSerpApi } from "../services/search/serpapi-travel.service.js";
+
 import { findCoupons, estimateSavings } from "../services/shopping/coupons.service.js";
 import { checkPriceHistory, recordPrice } from "../services/shopping/price-history.service.js";
 import { getProductReviews } from "../services/shopping/reviews.service.js";
@@ -43,48 +43,6 @@ import {
 } from "../services/subscriptions/subscription-manager.service.js";
 
 export async function retailRoutes(app: FastifyInstance) {
-  // ── SerpAPI Flights ─────────────────────────────────
-  app.post("/api/serpapi/flights", async (request, reply) => {
-    const body = request.body as { from?: string; to?: string; date?: string; returnDate?: string; passengers?: number };
-    if (!body?.from || !body?.to || !body?.date) {
-      return reply.status(400).send({ success: false, error: "from, to, and date are required" });
-    }
-    try {
-      const result = await searchFlightsSerpApi({ from: body.from!, to: body.to!, date: body.date!, returnDate: body.returnDate, passengers: body.passengers });
-      return reply.send({ success: true, data: result });
-    } catch (err) {
-      return reply.status(500).send({ success: false, error: (err as Error).message });
-    }
-  });
-
-  // ── SerpAPI Hotels ──────────────────────────────────
-  app.post("/api/serpapi/hotels", async (request, reply) => {
-    const body = request.body as { location?: string; checkIn?: string; checkOut?: string; guests?: number };
-    if (!body?.location || !body?.checkIn || !body?.checkOut) {
-      return reply.status(400).send({ success: false, error: "location, checkIn, and checkOut are required" });
-    }
-    try {
-      const result = await searchHotelsSerpApi({ location: body.location!, checkIn: body.checkIn!, checkOut: body.checkOut!, guests: body.guests });
-      return reply.send({ success: true, data: result });
-    } catch (err) {
-      return reply.status(500).send({ success: false, error: (err as Error).message });
-    }
-  });
-
-  // ── SerpAPI Events ──────────────────────────────────
-  app.post("/api/serpapi/events", async (request, reply) => {
-    const body = request.body as { query?: string; location?: string };
-    if (!body?.query) {
-      return reply.status(400).send({ success: false, error: "query is required" });
-    }
-    try {
-      const result = await searchEventsSerpApi({ query: body.query!, location: body.location });
-      return reply.send({ success: true, data: result });
-    } catch (err) {
-      return reply.status(500).send({ success: false, error: (err as Error).message });
-    }
-  });
-
   // ── Unified Product Search (fallback chain) ───────────
   app.post("/api/retail/unified-search", async (request, reply) => {
     const body = request.body as {

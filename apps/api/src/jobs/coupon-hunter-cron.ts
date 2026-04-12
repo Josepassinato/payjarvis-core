@@ -1,16 +1,14 @@
 /**
  * Coupon Hunter Cron — Automated deal monitoring with 3 layers
  *
- * Layer 1 (APIs):      every 5 min  — SerpAPI, CouponAPI, LinkMyDeals
- * Layer 2 (Scraping):  every 15 min — Pelando, Promobit, Slickdeals
+ * Layer 1 (APIs):      every 30 min — CouponAPI, LinkMyDeals
+ * Layer 2 (Scraping):  every 15 min — Pelando, Promobit, Slickdeals (via Playwright/Browser Agent)
  * Layer 3 (Social):    every 30 min — Twitter/X, RSS
  * Wish List Matching:  every 2 min  — match new deals → push notifications
  */
 
 import cron from "node-cron";
 import {
-  searchDealsViaSerpApi,
-  searchCouponCodesSerpApi,
   searchCouponApi,
   searchLinkMyDeals,
   scrapePelando,
@@ -52,35 +50,14 @@ const TRENDING_BR = [
 const POPULAR_STORES_US = ["amazon", "walmart", "target", "bestbuy", "costco", "macys", "ebay"];
 const POPULAR_STORES_BR = ["amazon", "magazineluiza", "mercadolivre", "americanas", "kabum", "casasbahia"];
 
-// ─── Layer 1: API Sources (every 5 min) ───
-cron.schedule("*/5 * * * *", async () => {
+// ─── Layer 1: API Sources (every 30 min) ───
+cron.schedule("*/30 * * * *", async () => {
   console.log("[COUPON-HUNTER] Layer 1 (APIs) starting...");
 
   try {
-    // Pick 2 random queries per country per run (to spread API usage)
-    const usQueries = shuffle(TRENDING_US).slice(0, 2);
-    const brQueries = shuffle(TRENDING_BR).slice(0, 2);
-
     const allDeals = [];
 
-    // SerpAPI Shopping deals
-    for (const q of usQueries) {
-      const deals = await searchDealsViaSerpApi(q, "US");
-      allDeals.push(...deals);
-    }
-    for (const q of brQueries) {
-      const deals = await searchDealsViaSerpApi(q, "BR");
-      allDeals.push(...deals);
-    }
-
-    // Coupon codes for popular stores (1 random store per country)
-    const usStore = shuffle(POPULAR_STORES_US)[0];
-    const brStore = shuffle(POPULAR_STORES_BR)[0];
-    const usCodes = await searchCouponCodesSerpApi(usStore, "US");
-    const brCodes = await searchCouponCodesSerpApi(brStore, "BR");
-    allDeals.push(...usCodes, ...brCodes);
-
-    // Future: CouponAPI + LinkMyDeals
+    // CouponAPI + LinkMyDeals
     const couponApiDeals = await searchCouponApi("US");
     const linkMyDeals = await searchLinkMyDeals("US");
     allDeals.push(...couponApiDeals, ...linkMyDeals);
@@ -162,6 +139,6 @@ function shuffle<T>(arr: T[]): T[] {
   return [...arr].sort(() => Math.random() - 0.5);
 }
 
-console.log("[Cron] Coupon Hunter: L1 every 5m, L2 every 15m, L3 every 30m, Wishlist every 2m");
+console.log("[Cron] Coupon Hunter: L1 every 30m, L2 every 15m, L3 every 30m, Wishlist every 2m");
 
 export {};

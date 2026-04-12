@@ -1,12 +1,12 @@
 /**
- * Commerce Service: Hotels (SerpAPI primary, Amadeus fallback)
+ * Commerce Service: Hotels (Amadeus + Gemini Grounding)
  *
- * Primary: SerpAPI Google Hotels — real prices, booking links, ratings
+ * Primary: Gemini Grounding (Google Search) — real prices, booking links
  * Fallback: Amadeus Hotel List → Hotel Offers → Offer Details
  * Auth: OAuth2 client_credentials with token caching and 401 retry (Amadeus)
  */
 
-import { searchHotelsSerpApi } from "../search/serpapi-travel.service.js";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const BASE = process.env.AMADEUS_ENV === "production"
   ? "https://api.amadeus.com"
@@ -172,48 +172,62 @@ export async function searchHotels(params: HotelSearchParams): Promise<{
   const location = params.city || "";
   console.log(`[HOTELS] Searching ${location}, ${params.checkIn} to ${params.checkOut}`);
 
-  // ─── Try SerpAPI first (real prices + booking links) ───
-  try {
-    const serpResult = await searchHotelsSerpApi({
-      location,
-      checkIn: params.checkIn,
-      checkOut: params.checkOut,
-      guests: params.adults || 1,
-      maxResults: 5,
-    });
+  // ─── Try Gemini Grounding first (real prices + booking links) ───
+  const GEMINI_KEY = process.env.GEMINI_API_KEY || "";
+  if (GEMINI_KEY) {
+    try {
+      const genAI = new GoogleGenerativeAI(GEMINI_KEY);
+      const model = genAI.getGenerativeModel({
+        model: "gemini-2.5-flash",
+        tools: [{ googleSearch: {} } as any],
+      });
 
-    if (serpResult.hotels.length > 0) {
       const nights = daysBetween(params.checkIn, params.checkOut);
-      const results: HotelResult[] = serpResult.hotels.map((h) => ({
-        name: h.name,
-        hotelId: "",
-        stars: h.rating ? String(Math.round(h.rating / 2)) : "N/A",
-        price: h.price ? `${h.currency} ${(h.price * nights).toFixed(2)}` : "N/A",
-        pricePerNight: h.price ? `${h.currency} ${h.price.toFixed(2)}` : "N/A",
-        priceNumeric: h.price || 0,
-        totalPrice: h.price ? h.price * nights : 0,
-        currency: h.currency,
-        rating: h.rating ? String(h.rating) : "N/A",
-        roomType: h.amenities.slice(0, 3).join(", ") || "Standard",
-        cancellation: "",
-        offerId: "",
-        nights,
-        bookingLink: h.link || "",
-        address: h.address || "",
-        reviewCount: h.reviews || 0,
-      }));
+      const guests = params.adults || 1;
+      const prompt = `Search for hotels in "${location}" checking in ${params.checkIn} and checking out ${params.checkOut} for ${guests} adult(s). Return ONLY a JSON array of max 5 hotels: [{"name":"Hotel Name","price":150,"currency":"USD","rating":4.5,"address":"123 Main St","reviews":500,"amenities":["WiFi","Pool"],"bookingLink":"https://..."}]. Price should be per night. Use real current data. ONLY JSON, no markdown.`;
 
-      // Filter by maxPrice per night if specified
-      const filtered = params.maxPrice
-        ? results.filter((r) => r.priceNumeric > 0 && r.priceNumeric <= params.maxPrice!)
-        : results.filter((r) => r.priceNumeric > 0);
+      const result = await model.generateContent(prompt);
+      let text: string;
+      try { text = result.response.text(); } catch { text = result.response.candidates?.[0]?.content?.parts?.[0]?.text || ""; }
 
-      filtered.sort((a, b) => a.priceNumeric - b.priceNumeric);
-      console.log(`[HOTELS] SerpAPI returned ${filtered.length} results for ${location}`);
-      return { source: "serpapi", mock: false, results: filtered.slice(0, 5) };
+      if (text) {
+        const cleaned = text.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+        const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]) as any[];
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            const results: HotelResult[] = parsed.slice(0, 5).map((h: any) => ({
+              name: h.name || "Hotel",
+              hotelId: "",
+              stars: h.rating ? String(Math.round(h.rating / 2)) : "N/A",
+              price: h.price ? `${h.currency || "USD"} ${(h.price * nights).toFixed(2)}` : "N/A",
+              pricePerNight: h.price ? `${h.currency || "USD"} ${h.price.toFixed(2)}` : "N/A",
+              priceNumeric: h.price || 0,
+              totalPrice: h.price ? h.price * nights : 0,
+              currency: h.currency || "USD",
+              rating: h.rating ? String(h.rating) : "N/A",
+              roomType: (h.amenities || []).slice(0, 3).join(", ") || "Standard",
+              cancellation: "",
+              offerId: "",
+              nights,
+              bookingLink: h.bookingLink || h.link || "",
+              address: h.address || "",
+              reviewCount: h.reviews || 0,
+            }));
+
+            const filtered = params.maxPrice
+              ? results.filter((r) => r.priceNumeric > 0 && r.priceNumeric <= params.maxPrice!)
+              : results.filter((r) => r.priceNumeric > 0);
+
+            filtered.sort((a, b) => a.priceNumeric - b.priceNumeric);
+            console.log(`[HOTELS] Gemini returned ${filtered.length} results for ${location}`);
+            return { source: "gemini", mock: false, results: filtered.slice(0, 5) };
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("[HOTELS] Gemini failed, trying Amadeus:", err instanceof Error ? err.message : err);
     }
-  } catch (err) {
-    console.warn("[HOTELS] SerpAPI failed, trying Amadeus:", err instanceof Error ? err.message : err);
   }
 
   // ─── Fallback: Amadeus API ───

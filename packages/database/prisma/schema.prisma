@@ -1110,7 +1110,7 @@ model FraudAlert {
   @@map("fraud_alerts")
 }
 
-// ─── Apify Usage Logs (Billing) ───
+// ─── Apify Usage Logs (DEPRECATED — kept for migration compatibility) ───
 
 model ApifyUsageLog {
   id             String   @id @default(cuid())
@@ -1783,9 +1783,9 @@ model CouponDeal {
   category      String?   @db.VarChar(50)
   productUrl    String?
   imageUrl      String?
-  urgency       String    @default("NORMAL") @db.VarChar(10) // URGENT, NORMAL, ALWAYS_ACTIVE
+  urgency       String    @default("NORMAL") @db.VarChar(20) // URGENT, NORMAL, ALWAYS_ACTIVE
   urgencyReason String?   // "Limited stock", "Expires in 2h"
-  source        String    @db.VarChar(50) // serpapi, couponapi, linkmydeals, pelando, promobit, slickdeals, twitter, rss
+  source        String    @db.VarChar(50) // gemini_search, couponapi, linkmydeals, pelando, promobit, slickdeals, twitter, rss
   sourceId      String?   @db.VarChar(500) // external deal ID for dedup
   expiresAt     DateTime?
   verified      Boolean   @default(false)

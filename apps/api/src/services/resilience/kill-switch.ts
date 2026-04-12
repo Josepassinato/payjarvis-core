@@ -47,7 +47,7 @@ export async function reviveService(service: string): Promise<void> {
 // ─── Status ───
 
 export async function getKillSwitchStatus(): Promise<Record<string, { killedAt: string; reason: string } | null>> {
-  const services = ["all", "whatsapp", "telegram", "voice", "search", "apify", "browserbase", "payments", "engagement"];
+  const services = ["all", "whatsapp", "telegram", "voice", "search", "browserbase", "payments", "engagement"];
   const result: Record<string, { killedAt: string; reason: string } | null> = {};
 
   for (const svc of services) {

@@ -1,9 +1,9 @@
 /**
  * Coupon Hunter Service — 3-layer deal monitoring system
  *
- * Layer 1: APIs (SerpAPI, future CouponAPI/LinkMyDeals) — every 5 min
+ * Layer 1: APIs (CouponAPI, LinkMyDeals) — every 30 min
  * Layer 2: Playwright scraping (Pelando, Promobit, Slickdeals) — every 15 min
- * Layer 3: Social/RSS (X/Twitter via SerpAPI, RSS feeds) — every 30 min
+ * Layer 3: Social/RSS (via Gemini Grounding) — every 30 min
  *
  * Urgency classification via Gemini:
  *   URGENT → push immediately to matching wish list users
@@ -15,9 +15,8 @@ import { prisma } from "@payjarvis/database";
 import { redisGet, redisSet, redisSetNX } from "../redis.js";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
-// ─── Config ───
+// ─── Config ─���─
 
-const SERPAPI_KEY = process.env.SERPAPI_KEY || "";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const COUPONAPI_KEY = process.env.COUPONAPI_KEY || ""; // future
 const LINKMYDEALS_KEY = process.env.LINKMYDEALS_KEY || ""; // future
@@ -50,126 +49,6 @@ export interface CouponDealInput {
 }
 
 // ─── LAYER 1: API Sources ───
-
-/**
- * Search coupons via SerpAPI Google Shopping deals
- */
-export async function searchDealsViaSerpApi(
-  query: string,
-  country: "US" | "BR" = "US"
-): Promise<CouponDealInput[]> {
-  if (!SERPAPI_KEY) {
-    console.warn("[COUPON-HUNTER] SERPAPI_KEY not set, skipping API layer");
-    return [];
-  }
-
-  const gl = country === "BR" ? "br" : "us";
-  const hl = country === "BR" ? "pt" : "en";
-  const deals: CouponDealInput[] = [];
-
-  try {
-    // Google Shopping deals
-    const shoppingUrl = `https://serpapi.com/search.json?engine=google_shopping&q=${encodeURIComponent(query + " deal coupon")}&gl=${gl}&hl=${hl}&api_key=${SERPAPI_KEY}&num=10`;
-    const res = await fetch(shoppingUrl, { signal: AbortSignal.timeout(15000) });
-    if (!res.ok) throw new Error(`SerpAPI HTTP ${res.status}`);
-    const data = await res.json() as any;
-
-    const results = data.shopping_results ?? [];
-    for (const r of results) {
-      if (!r.title || !r.price) continue;
-
-      const price = parsePrice(r.extracted_price ?? r.price);
-      if (!price || price <= 0) continue;
-
-      const oldPrice = r.old_price ? parsePrice(r.old_price) : null;
-      const store = r.source || r.merchant?.name || "Unknown";
-
-      deals.push({
-        store,
-        title: r.title.substring(0, 200),
-        description: oldPrice
-          ? `${r.title} — ${formatCurrency(price, country === "BR" ? "BRL" : "USD")} (was ${formatCurrency(oldPrice, country === "BR" ? "BRL" : "USD")})`
-          : `${r.title} — ${formatCurrency(price, country === "BR" ? "BRL" : "USD")}`,
-        discountType: "deal",
-        discountValue: oldPrice ? Math.round(((oldPrice - price) / oldPrice) * 100) : undefined,
-        originalPrice: oldPrice ?? undefined,
-        dealPrice: price,
-        currency: country === "BR" ? "BRL" : "USD",
-        country,
-        category: inferCategory(r.title),
-        productUrl: r.link || r.product_link || undefined,
-        imageUrl: r.thumbnail || undefined,
-        source: "serpapi_shopping",
-        sourceId: (r.product_id || `serp_${hashString(r.title + store)}`).substring(0, 490),
-        verified: false,
-      });
-    }
-
-    console.log(`[COUPON-HUNTER] SerpAPI found ${deals.length} deals for "${query}" (${country})`);
-  } catch (err) {
-    console.error("[COUPON-HUNTER] SerpAPI search failed:", (err as Error).message);
-  }
-
-  return deals.slice(0, MAX_DEALS_PER_RUN);
-}
-
-/**
- * Search coupon codes via SerpAPI Google organic (same as existing coupons.service but returns CouponDealInput)
- */
-export async function searchCouponCodesSerpApi(
-  store: string,
-  country: "US" | "BR" = "US"
-): Promise<CouponDealInput[]> {
-  if (!SERPAPI_KEY) return [];
-
-  const now = new Date();
-  const month = now.toLocaleString("en-US", { month: "long" });
-  const year = now.getFullYear();
-  const query = country === "BR"
-    ? `${store} cupom desconto ${month} ${year}`
-    : `${store} coupon code ${month} ${year}`;
-
-  const gl = country === "BR" ? "br" : "us";
-
-  try {
-    const res = await fetch(
-      `https://serpapi.com/search.json?engine=google&q=${encodeURIComponent(query)}&gl=${gl}&api_key=${SERPAPI_KEY}&num=10`,
-      { signal: AbortSignal.timeout(10000) }
-    );
-    if (!res.ok) throw new Error(`SerpAPI HTTP ${res.status}`);
-    const data = await res.json() as any;
-
-    const deals: CouponDealInput[] = [];
-    const results = data.organic_results ?? [];
-
-    for (const r of results) {
-      const snippet = (r.snippet || "") + " " + (r.title || "");
-      const codes = extractCouponCodes(snippet);
-
-      for (const extracted of codes) {
-        deals.push({
-          store: store.toLowerCase(),
-          title: `${store} coupon: ${extracted.code}`,
-          code: extracted.code,
-          description: extracted.description || `Coupon for ${store}`,
-          discountType: extracted.discountType,
-          discountValue: extracted.discountValue ?? undefined,
-          currency: country === "BR" ? "BRL" : "USD",
-          country,
-          source: "serpapi_organic",
-          sourceId: `code_${hashString(extracted.code + store)}`,
-          verified: false,
-        });
-      }
-    }
-
-    console.log(`[COUPON-HUNTER] Found ${deals.length} coupon codes for "${store}" (${country})`);
-    return deals;
-  } catch (err) {
-    console.error(`[COUPON-HUNTER] Coupon code search failed for ${store}:`, (err as Error).message);
-    return [];
-  }
-}
 
 /**
  * Future: CouponAPI.org integration
@@ -243,140 +122,87 @@ export async function searchLinkMyDeals(country: "US" | "BR" = "US"): Promise<Co
   }
 }
 
-// ─── LAYER 2: Playwright Scraping (stubs — called from cron) ───
+// ─── LAYER 2: Deal Site Scraping (via Gemini Grounding) ───
+
+async function searchDealsViaGemini(site: string, query: string, country: "US" | "BR", source: string, maxResults: number = 10): Promise<CouponDealInput[]> {
+  if (!GEMINI_API_KEY) return [];
+
+  try {
+    const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+    const model = genAI.getGenerativeModel({
+      model: "gemini-2.5-flash",
+      tools: [{ googleSearch: {} } as any],
+    });
+
+    const prompt = `Search "${site} ${query}" for today's deals. Return ONLY a JSON array of max ${maxResults} deals: [{"store":"Store","title":"Deal title","description":"Brief description","price":29.99,"originalPrice":49.99,"url":"https://..."}]. ONLY JSON, no markdown.`;
+
+    const result = await model.generateContent(prompt);
+    let text: string;
+    try { text = result.response.text(); } catch { text = result.response.candidates?.[0]?.content?.parts?.[0]?.text || ""; }
+    if (!text) return [];
+
+    const cleaned = text.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+    const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) return [];
+
+    const parsed = JSON.parse(jsonMatch[0]) as any[];
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed.slice(0, maxResults).map((r: any) => ({
+      store: r.store || extractStoreFromTitle(r.title || ""),
+      title: (r.title || "").substring(0, 200),
+      description: r.description || r.title || "",
+      discountType: "deal" as const,
+      discountValue: r.originalPrice && r.price ? Math.round(((r.originalPrice - r.price) / r.originalPrice) * 100) : undefined,
+      originalPrice: r.originalPrice ?? undefined,
+      dealPrice: r.price ?? undefined,
+      currency: country === "BR" ? "BRL" : "USD",
+      country,
+      productUrl: r.url || undefined,
+      source,
+      sourceId: `${source}_${hashString(r.title || r.url || "")}`,
+      verified: false,
+    }));
+  } catch (err) {
+    console.error(`[COUPON-HUNTER] ${source} search failed:`, (err as Error).message);
+    return [];
+  }
+}
 
 /**
  * Scrape Pelando.com.br hot deals
  */
 export async function scrapePelando(): Promise<CouponDealInput[]> {
-  try {
-    // Use SerpAPI as a proxy to scrape Pelando (avoids needing Playwright in API process)
-    const res = await fetch(
-      `https://serpapi.com/search.json?engine=google&q=site:pelando.com.br+cupom&gl=br&hl=pt&api_key=${SERPAPI_KEY}&num=10&tbs=qdr:d`,
-      { signal: AbortSignal.timeout(15000) }
-    );
-    if (!res.ok) return [];
-    const data = await res.json() as any;
-    const results = data.organic_results ?? [];
-
-    return results.map((r: any) => ({
-      store: extractStoreFromTitle(r.title || ""),
-      title: (r.title || "").substring(0, 200),
-      description: r.snippet || r.title || "",
-      discountType: "deal" as const,
-      currency: "BRL",
-      country: "BR" as const,
-      productUrl: r.link || undefined,
-      source: "pelando",
-      sourceId: `pelando_${hashString(r.link || r.title)}`,
-      verified: false,
-    })).slice(0, 20);
-  } catch (err) {
-    console.error("[COUPON-HUNTER] Pelando scrape failed:", (err as Error).message);
-    return [];
-  }
+  return searchDealsViaGemini("site:pelando.com.br", "cupom promoção hoje", "BR", "pelando", 20);
 }
 
 /**
  * Scrape Promobit.com.br hot deals
  */
 export async function scrapePromobit(): Promise<CouponDealInput[]> {
-  try {
-    const res = await fetch(
-      `https://serpapi.com/search.json?engine=google&q=site:promobit.com.br+promocao&gl=br&hl=pt&api_key=${SERPAPI_KEY}&num=10&tbs=qdr:d`,
-      { signal: AbortSignal.timeout(15000) }
-    );
-    if (!res.ok) return [];
-    const data = await res.json() as any;
-    const results = data.organic_results ?? [];
-
-    return results.map((r: any) => ({
-      store: extractStoreFromTitle(r.title || ""),
-      title: (r.title || "").substring(0, 200),
-      description: r.snippet || r.title || "",
-      discountType: "deal" as const,
-      currency: "BRL",
-      country: "BR" as const,
-      productUrl: r.link || undefined,
-      source: "promobit",
-      sourceId: `promobit_${hashString(r.link || r.title)}`,
-      verified: false,
-    })).slice(0, 20);
-  } catch (err) {
-    console.error("[COUPON-HUNTER] Promobit scrape failed:", (err as Error).message);
-    return [];
-  }
+  return searchDealsViaGemini("site:promobit.com.br", "promoção hoje", "BR", "promobit", 20);
 }
 
 /**
  * Scrape Slickdeals frontpage deals
  */
 export async function scrapeSlickdeals(): Promise<CouponDealInput[]> {
-  try {
-    const res = await fetch(
-      `https://serpapi.com/search.json?engine=google&q=site:slickdeals.net+frontpage+deal&gl=us&hl=en&api_key=${SERPAPI_KEY}&num=10&tbs=qdr:d`,
-      { signal: AbortSignal.timeout(15000) }
-    );
-    if (!res.ok) return [];
-    const data = await res.json() as any;
-    const results = data.organic_results ?? [];
-
-    return results.map((r: any) => ({
-      store: extractStoreFromTitle(r.title || ""),
-      title: (r.title || "").substring(0, 200),
-      description: r.snippet || r.title || "",
-      discountType: "deal" as const,
-      currency: "USD",
-      country: "US" as const,
-      productUrl: r.link || undefined,
-      source: "slickdeals",
-      sourceId: `slick_${hashString(r.link || r.title)}`,
-      verified: false,
-    })).slice(0, 20);
-  } catch (err) {
-    console.error("[COUPON-HUNTER] Slickdeals scrape failed:", (err as Error).message);
-    return [];
-  }
+  return searchDealsViaGemini("site:slickdeals.net", "frontpage deal today", "US", "slickdeals", 20);
 }
 
 // ─── LAYER 3: Social / RSS ───
 
 /**
- * Search social media for deal mentions
+ * Search social media for deal mentions via Gemini Grounding
  */
 export async function searchSocialDeals(country: "US" | "BR" = "US"): Promise<CouponDealInput[]> {
-  if (!SERPAPI_KEY) return [];
+  if (!GEMINI_API_KEY) return [];
 
   const query = country === "BR"
-    ? "#cupom OR #desconto OR #promocao OR #oferta"
-    : "#deal OR #coupon OR #promo OR #discount";
+    ? "cupom desconto promoção oferta twitter"
+    : "deal coupon promo discount twitter";
 
-  try {
-    // Use SerpAPI Google search with Twitter filter
-    const res = await fetch(
-      `https://serpapi.com/search.json?engine=google&q=${encodeURIComponent(query)}+site:twitter.com&api_key=${SERPAPI_KEY}&num=10&tbs=qdr:h`,
-      { signal: AbortSignal.timeout(15000) }
-    );
-    if (!res.ok) return [];
-    const data = await res.json() as any;
-    const results = data.organic_results ?? [];
-
-    return results.map((r: any) => ({
-      store: extractStoreFromTitle(r.title || r.snippet || ""),
-      title: (r.title || "").substring(0, 200),
-      description: r.snippet || r.title || "",
-      discountType: "deal" as const,
-      currency: country === "BR" ? "BRL" : "USD",
-      country,
-      productUrl: r.link || undefined,
-      source: "twitter",
-      sourceId: `tw_${hashString(r.link || r.title)}`,
-      verified: false,
-    })).slice(0, 10);
-  } catch (err) {
-    console.error("[COUPON-HUNTER] Social search failed:", (err as Error).message);
-    return [];
-  }
+  return searchDealsViaGemini("site:twitter.com OR site:x.com", query, country, "twitter", 10);
 }
 
 // ─── Urgency Classifier (Gemini) ───
@@ -661,13 +487,9 @@ export async function searchCoupons(
     return dbDeals.map(formatDealForApi);
   }
 
-  // 2. If not enough in DB, search live
+  // 2. If not enough in DB, search live via Gemini Grounding
   const query = store || category || "best deals";
-  const liveDeals = await searchDealsViaSerpApi(query, country);
-  if (store) {
-    const codes = await searchCouponCodesSerpApi(store, country);
-    liveDeals.push(...codes);
-  }
+  const liveDeals = await searchDealsViaGemini("", `${query} deal coupon`, country, "gemini_search", 20);
 
   // Save and return
   if (liveDeals.length > 0) {

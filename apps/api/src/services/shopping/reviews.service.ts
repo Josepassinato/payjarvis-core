@@ -2,7 +2,7 @@
  * Reviews Service — AI-summarized product reviews.
  *
  * Sources:
- *   1. SerpAPI product reviews (Google Shopping / Amazon reviews)
+ *   1. Gemini Grounding (Google Search) for review data
  *   2. Gemini summarization of raw reviews
  *
  * Output: concise 3-line summary with rating, pros, cons, recommendation.
@@ -10,8 +10,8 @@
  */
 
 import { redisGet, redisSet } from "../redis.js";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
-const SERPAPI_KEY = process.env.SERPAPI_KEY || "";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const REVIEW_CACHE_TTL = 604800; // 7 days
 
@@ -58,97 +58,48 @@ export async function getProductReviews(
   return summary;
 }
 
-// ─── Fetch Reviews via SerpAPI ───
+// ─── Fetch Reviews via Gemini Grounding (Google Search) ───
 
 interface RawReview { title: string; body: string; rating: number; source: string }
 interface RawReviewData { reviews: RawReview[]; overallRating: number | null; totalCount: number | null }
 
 async function fetchReviews(productName: string, store?: string, asin?: string): Promise<RawReviewData | null> {
-  if (!SERPAPI_KEY) return null;
+  if (!GEMINI_API_KEY) return null;
 
   try {
-    // Strategy 1: Amazon product reviews via SerpAPI (if ASIN)
-    if (asin) {
-      const reviews = await fetchAmazonReviews(asin);
-      if (reviews && reviews.reviews.length > 0) return reviews;
-    }
+    const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+    const model = genAI.getGenerativeModel({
+      model: "gemini-2.5-flash",
+      tools: [{ googleSearch: {} } as any],
+    });
 
-    // Strategy 2: Google Shopping product reviews
-    const query = store ? `${productName} ${store} reviews` : `${productName} reviews`;
-    const res = await fetch(
-      `https://serpapi.com/search.json?engine=google&q=${encodeURIComponent(query)}&api_key=${SERPAPI_KEY}&num=5`,
-      { signal: AbortSignal.timeout(10000) }
-    );
-    if (!res.ok) return null;
-    const data = await res.json() as any;
+    const searchTerm = asin ? `Amazon ${asin} reviews` : store ? `${productName} ${store} reviews` : `${productName} reviews`;
+    const prompt = `Search for "${searchTerm}" and return a JSON object with review data. Format: {"overallRating": 4.5, "totalCount": 1234, "reviews": [{"title":"Review title","body":"Review summary text","rating":5,"source":"amazon"}]}. Max 5 reviews. Only real data from search results. ONLY the JSON, no markdown.`;
 
-    // Extract reviews from organic results
-    const reviews: RawReview[] = [];
-    let overallRating: number | null = null;
-    let totalCount: number | null = null;
+    const result = await model.generateContent(prompt);
+    let text: string;
+    try { text = result.response.text(); } catch { text = result.response.candidates?.[0]?.content?.parts?.[0]?.text || ""; }
+    if (!text) return null;
 
-    // Check for rich snippets with ratings
-    if (data.knowledge_graph?.rating) {
-      overallRating = parseFloat(data.knowledge_graph.rating);
-      totalCount = parseInt(data.knowledge_graph.reviews || "0", 10) || null;
-    }
+    const cleaned = text.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return null;
 
-    // Extract review-like content from snippets
-    for (const r of (data.organic_results ?? []).slice(0, 5)) {
-      const snippet = r.snippet || "";
-      if (snippet.length > 30) {
-        // Try to extract rating from snippet
-        const ratingMatch = snippet.match(/(\d(?:\.\d)?)\s*(?:out of|\/)\s*5/i);
-        const rating = ratingMatch ? parseFloat(ratingMatch[1]) : 0;
-        reviews.push({
-          title: r.title || "",
-          body: snippet,
-          rating,
-          source: "google",
-        });
-      }
-    }
+    const parsed = JSON.parse(jsonMatch[0]);
+    const reviews: RawReview[] = (parsed.reviews ?? []).slice(0, 5).map((r: any) => ({
+      title: r.title || "",
+      body: r.body || r.snippet || "",
+      rating: typeof r.rating === "number" ? r.rating : 0,
+      source: r.source || "google",
+    }));
 
-    return { reviews, overallRating, totalCount };
+    return {
+      reviews,
+      overallRating: typeof parsed.overallRating === "number" ? parsed.overallRating : null,
+      totalCount: typeof parsed.totalCount === "number" ? parsed.totalCount : null,
+    };
   } catch (err) {
     console.error("[REVIEWS] Fetch failed:", (err as Error).message);
-    return null;
-  }
-}
-
-async function fetchAmazonReviews(asin: string): Promise<RawReviewData | null> {
-  try {
-    const res = await fetch(
-      `https://serpapi.com/search.json?engine=google&q=amazon+${asin}+reviews&api_key=${SERPAPI_KEY}&num=10`,
-      { signal: AbortSignal.timeout(10000) }
-    );
-    if (!res.ok) return null;
-    const data = await res.json() as any;
-
-    const reviews: RawReview[] = [];
-    let overallRating: number | null = null;
-    let totalCount: number | null = null;
-
-    for (const r of (data.organic_results ?? []).slice(0, 10)) {
-      const snippet = r.snippet || "";
-      const ratingMatch = snippet.match(/(\d(?:\.\d)?)\s*(?:out of|\/)\s*5/i);
-      const countMatch = snippet.match(/([\d,]+)\s*(?:ratings?|reviews?)/i);
-
-      if (ratingMatch && !overallRating) overallRating = parseFloat(ratingMatch[1]);
-      if (countMatch && !totalCount) totalCount = parseInt(countMatch[1].replace(/,/g, ""), 10);
-
-      if (snippet.length > 30) {
-        reviews.push({
-          title: r.title || "",
-          body: snippet,
-          rating: ratingMatch ? parseFloat(ratingMatch[1]) : 0,
-          source: "amazon",
-        });
-      }
-    }
-
-    return { reviews, overallRating, totalCount };
-  } catch {
     return null;
   }
 }

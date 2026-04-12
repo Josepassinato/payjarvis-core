@@ -3,8 +3,7 @@
  *
  * Sources:
  *   1. Internal price_history table (every search logs price)
- *   2. CamelCamelCamel via SerpAPI (Amazon US ASIN lookup)
- *   3. Google Shopping price trends via SerpAPI
+ *   2. Future: CamelCamelCamel via Playwright (Amazon US ASIN lookup)
  *
  * Indicators:
  *   🟢 "Great price!" — below 30-day average
@@ -14,8 +13,6 @@
 
 import { prisma } from "@payjarvis/database";
 import { redisGet, redisSet } from "../redis.js";
-
-const SERPAPI_KEY = process.env.SERPAPI_KEY || "";
 
 export interface PriceHistoryResult {
   indicator: "great" | "normal" | "high";
@@ -128,22 +125,7 @@ export async function checkPriceHistory(
     }
   }
 
-  // 2. If no internal data and we have ASIN, try CamelCamelCamel via SerpAPI
-  if (dataPoints < 3 && asin && SERPAPI_KEY) {
-    const camelData = await fetchCamelData(asin);
-    if (camelData) {
-      if (camelData.lowest !== null) {
-        lowestEver = lowestEver !== null ? Math.min(lowestEver, camelData.lowest) : camelData.lowest;
-        lowestStore = "Amazon (historical)";
-      }
-      if (camelData.avg !== null && avg30d === null) {
-        avg30d = camelData.avg;
-        dataPoints = Math.max(dataPoints, 10); // Camel has lots of data
-      }
-    }
-  }
-
-  // 3. Determine indicator
+  // 2. Determine indicator
   const { indicator, emoji, recommendation, recommendationPt } = evaluatePrice(
     currentPrice, avg30d, lowestEver
   );
@@ -198,47 +180,6 @@ function evaluatePrice(
     recommendation: `Price is ${pctAbove}% above average — consider waiting for a sale.`,
     recommendationPt: `Preço ${pctAbove}% acima da média — sugiro esperar uma promoção.`,
   };
-}
-
-// ─── CamelCamelCamel via SerpAPI ───
-
-async function fetchCamelData(asin: string): Promise<{ lowest: number | null; avg: number | null } | null> {
-  const cacheKey = `camel:${asin}`;
-  const cached = await redisGet(cacheKey);
-  if (cached) return JSON.parse(cached);
-
-  try {
-    // Search for CamelCamelCamel price info via Google
-    const query = `camelcamelcamel ${asin} price history`;
-    const res = await fetch(
-      `https://serpapi.com/search.json?engine=google&q=${encodeURIComponent(query)}&api_key=${SERPAPI_KEY}&num=3`,
-      { signal: AbortSignal.timeout(8000) }
-    );
-    if (!res.ok) return null;
-    const data = await res.json() as any;
-
-    // Try to extract price info from snippets
-    let lowest: number | null = null;
-    let avg: number | null = null;
-
-    for (const r of (data.organic_results ?? [])) {
-      const snippet = r.snippet || "";
-
-      // Look for "Lowest: $XXX" or "lowest price: $XXX"
-      const lowestMatch = snippet.match(/lowest[^$]*\$(\d+(?:\.\d{2})?)/i);
-      if (lowestMatch && !lowest) lowest = parseFloat(lowestMatch[1]);
-
-      // Look for "Average: $XXX"
-      const avgMatch = snippet.match(/average[^$]*\$(\d+(?:\.\d{2})?)/i);
-      if (avgMatch && !avg) avg = parseFloat(avgMatch[1]);
-    }
-
-    const result = { lowest, avg };
-    await redisSet(cacheKey, JSON.stringify(result), 86400); // 24h cache
-    return result;
-  } catch {
-    return null;
-  }
 }
 
 function normalizeId(id: string): string {

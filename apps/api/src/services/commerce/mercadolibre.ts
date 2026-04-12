@@ -7,8 +7,8 @@
  *
  * Search priority:
  *   1. Gemini Grounding (Google Search) — bypasses datacenter IP blocks
- *   2. Apify scraper — residential proxies
- *   3. Direct ML API — may work from non-datacenter IPs
+ *   2. Direct ML API — may work from non-datacenter IPs
+ *   3. Future: Playwright scraper for stores without API
  */
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
@@ -131,11 +131,6 @@ async function searchMeliViaGemini(query: string, limit: number): Promise<MeliPr
   });
 }
 
-// ─── Fallback: Apify Scraper (residential proxies) ───────────────
-
-const APIFY_ML_ACTOR = "viralanalyzer/mercadolivre-scraper";
-const APIFY_ML_TIMEOUT = 45; // seconds
-
 export async function searchMeliProducts(params: MeliSearchParams): Promise<{
   source: string;
   mock: boolean;
@@ -155,55 +150,12 @@ export async function searchMeliProducts(params: MeliSearchParams): Promise<{
       console.log(`[MELI] Gemini OK: ${geminiResults.length} products for "${params.query}"`);
       return { source: "mercadolibre_gemini", mock: false, results: geminiResults };
     }
-    console.warn("[MELI] Gemini returned 0 results, trying Apify...");
+    console.warn("[MELI] Gemini returned 0 results, trying direct API...");
   } catch (err) {
     console.error("[MELI] Gemini grounding error:", err instanceof Error ? err.message : err);
   }
 
-  // Fallback 1: Apify scraper (uses residential proxies, bypasses 403)
-  const apifyToken = process.env.APIFY_API_KEY;
-  if (apifyToken) {
-    try {
-      console.log(`[MELI] Apify scraper: q="${params.query}" limit=${limit}`);
-      const res = await fetch(
-        `https://api.apify.com/v2/acts/${APIFY_ML_ACTOR}/run-sync-get-dataset-items?token=${apifyToken}&timeout=${APIFY_ML_TIMEOUT}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ searchQuery: params.query, maxItems: Math.min(limit, 10) }),
-          signal: AbortSignal.timeout(50000),
-        },
-      );
-
-      if (res.ok) {
-        const items = await res.json() as any[];
-        if (Array.isArray(items) && items.length > 0) {
-          const results: MeliProduct[] = items.slice(0, limit).map((item: any) => ({
-            id: item.product_id || "",
-            title: item.title || "",
-            price: item.price ?? 0,
-            currency: item.currency || "BRL",
-            thumbnail: item.thumbnail || "",
-            permalink: item.url || "",
-            condition: item.condition === "Novo" ? "Novo" : item.condition || "N/A",
-            freeShipping: item.shipping?.free_shipping ?? false,
-            sellerName: item.seller?.nickname || "Vendedor",
-            sellerReputation: "N/A",
-            availableQuantity: 0,
-            rating: item.average_rating ?? null,
-            reviewCount: item.reviews_count ?? null,
-          }));
-          console.log(`[MELI] Apify OK: ${results.length} products for "${params.query}"`);
-          return { source: "mercadolibre_apify", mock: false, results };
-        }
-      }
-      console.warn(`[MELI] Apify returned no results or HTTP ${res.status}`);
-    } catch (err) {
-      console.error("[MELI] Apify scraper error:", err instanceof Error ? err.message : err);
-    }
-  }
-
-  // Fallback 2: direct ML API (may work from non-datacenter IPs)
+  // Fallback: direct ML API (may work from non-datacenter IPs)
   const siteId = params.siteId || resolveSiteId(params.country || 'brasil');
   try {
     const query: Record<string, string> = {

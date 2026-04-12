@@ -5,13 +5,13 @@
  * Each service has its own breaker. Auto-resets after 60s.
  *
  * Usage:
- *   const cb = getBreaker("apify");
- *   if (!cb.isAllowed()) throw new Error("Circuit open for apify");
- *   try { const result = await callApify(); cb.recordSuccess(); return result; }
+ *   const cb = getBreaker("gemini");
+ *   if (!cb.isAllowed()) throw new Error("Circuit open for gemini");
+ *   try { const result = await callGemini(); cb.recordSuccess(); return result; }
  *   catch (err) { cb.recordFailure(); throw err; }
  *
  * Or use the wrapper:
- *   const result = await withCircuitBreaker("apify", () => callApify());
+ *   const result = await withCircuitBreaker("gemini", () => callGemini());
  */
 
 import { redisGet, redisSet, redisIncr, redisDel } from "../redis.js";
@@ -148,8 +148,6 @@ export function getAllBreakerStates(): Record<string, BreakerState> {
 // ─── Known Services ───
 
 export const SERVICES = [
-  "apify",
-  "serpapi",
   "gemini",
   "elevenlabs",
   "twilio",

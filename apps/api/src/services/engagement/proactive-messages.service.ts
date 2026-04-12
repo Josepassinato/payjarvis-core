@@ -191,52 +191,42 @@ async function getWeather(lat: number, lon: number, _cityName?: string): Promise
     return result;
   } catch (err) {
     console.error("[WEATHER] Open-Meteo failed:", (err as Error).message);
-    // Fallback: SerpAPI weather
-    try {
-      const serpKey = process.env.SERPAPI_KEY;
-      if (serpKey) {
-        const res = await fetch(`https://serpapi.com/search.json?engine=google&q=weather+${lat.toFixed(2)},${lon.toFixed(2)}&api_key=${serpKey}`, { signal: AbortSignal.timeout(8000) });
-        const data = await res.json() as any;
-        const answer = data.answer_box;
-        if (answer?.temperature) {
-          const tempF = parseInt(answer.temperature, 10);
-          const tempC = Math.round((tempF - 32) * 5 / 9);
-          const condition = answer.weather || "Unknown";
-          const condLower = condition.toLowerCase();
-          const emoji = condLower.includes("sun") || condLower.includes("clear") ? "☀️"
-            : condLower.includes("cloud") ? "☁️" : condLower.includes("rain") ? "🌧️"
-            : condLower.includes("storm") || condLower.includes("thunder") ? "⛈️"
-            : condLower.includes("snow") ? "❄️" : condLower.includes("fog") ? "🌫️" : "🌤️";
-          const rainNext12h = condLower.includes("rain") || condLower.includes("storm") || condLower.includes("shower");
-          const result: WeatherResult = { tempC, tempF, condition, conditionPt: condition, emoji, rainNext12h, maxTempC: tempC, minTempC: tempC };
-          await redisSet(cacheKey, JSON.stringify(result), 1800);
-          console.log(`[WEATHER] SerpAPI fallback OK: ${tempF}°F, ${condition}`);
-          return result;
-        }
-      }
-    } catch { /* both failed */ }
     return { tempC: 0, tempF: 0, condition: "unavailable", conditionPt: "indisponível", emoji: "🌤️", rainNext12h: false, maxTempC: 0, minTempC: 0 };
   }
 }
 
-// ─── News (SerpAPI — returns multiple headlines with snippets) ───
+// ─── News (Gemini Grounding — returns multiple headlines with snippets) ───
 
 interface NewsItem { title: string; snippet: string }
 
 async function getTopNewsItems(topic: string, count: number = 3): Promise<NewsItem[]> {
-  const key = process.env.SERPAPI_KEY;
-  if (!key) return [];
+  const geminiKey = process.env.GEMINI_API_KEY;
+  if (!geminiKey) return [];
 
   const cacheKey = `news_items:${topic}`;
   const cached = await redisGet(cacheKey);
   if (cached) return JSON.parse(cached);
 
   try {
-    const res = await fetch(
-      `https://serpapi.com/search.json?engine=google_news&q=${encodeURIComponent(topic)}&api_key=${key}&num=${count}`
-    );
-    const data = await res.json() as any;
-    const items: NewsItem[] = (data.news_results ?? []).slice(0, count).map((r: any) => ({
+    const { GoogleGenerativeAI } = await import("@google/generative-ai");
+    const genAI = new GoogleGenerativeAI(geminiKey);
+    const model = genAI.getGenerativeModel({
+      model: "gemini-2.5-flash",
+      tools: [{ googleSearch: {} } as any],
+    });
+
+    const prompt = `Search for the latest news about "${topic}". Return ONLY a JSON array of the top ${count} headlines: [{"title":"Headline","snippet":"Brief description"}]. ONLY JSON, no markdown.`;
+    const result = await model.generateContent(prompt);
+    let text: string;
+    try { text = result.response.text(); } catch { text = result.response.candidates?.[0]?.content?.parts?.[0]?.text || ""; }
+    if (!text) return [];
+
+    const cleaned = text.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+    const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) return [];
+
+    const parsed = JSON.parse(jsonMatch[0]) as any[];
+    const items: NewsItem[] = (parsed ?? []).slice(0, count).map((r: any) => ({
       title: r.title ?? "",
       snippet: r.snippet ?? "",
     })).filter((i: NewsItem) => i.title);

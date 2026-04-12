@@ -1,14 +1,14 @@
 /**
  * Grocery Service — Search supermarket products with location awareness
  *
- * US stores: Publix, Walmart, Target (via SerpAPI + retail-service)
- * BR stores: Carrefour, Pão de Açúcar, Rappi, iFood (via SerpAPI)
+ * US stores: Publix, Walmart, Target (via Gemini Grounding + retail-service)
+ * BR stores: Carrefour, Pão de Açúcar, Rappi, iFood (via Gemini Grounding)
  *
  * Reuses existing infrastructure:
- * - SerpAPI Google Shopping with grocery filters
- * - SerpAPI Walmart dedicated engine
+ * - Gemini Grounding (Google Search) with grocery filters
  * - Publix service (browser-agent)
  * - Price history tracking
+ * - Future: Playwright for stores without official APIs
  */
 
 import { prisma } from "@payjarvis/database";
@@ -51,7 +51,7 @@ type GroceryRegion = "us" | "br";
 
 // ─── Config ──────────────────────────────────────────────
 
-const SERPAPI_KEY = process.env.SERPAPI_KEY || "";
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const TIMEOUT_MS = 8000;
 
 const US_GROCERY_STORES = ["Publix", "Walmart", "Target", "Costco", "Whole Foods", "Kroger"];
@@ -115,89 +115,60 @@ function translateGroceryQuery(query: string, region: GroceryRegion): string {
   return query; // Return as-is if no translation found
 }
 
-// ─── SerpAPI Grocery Search ─────────────────────────────
+// ─── Gemini Grounding Grocery Search ─────────────────────
 
-async function searchSerpApiGrocery(
+async function searchGeminiGrocery(
   query: string,
   store: string | null,
   region: GroceryRegion,
   maxResults: number,
   city?: string,
 ): Promise<GroceryItem[]> {
-  if (!SERPAPI_KEY) return [];
+  if (!GEMINI_API_KEY) return [];
 
-  // Translate PT terms when searching US stores
   const translatedQuery = translateGroceryQuery(query, region);
+  const storeFilter = store ? ` at ${store}` : "";
+  const cityFilter = city ? ` in ${city}` : "";
+  const regionContext = region === "br" ? "Brazil supermarket delivery" : "US grocery";
 
-  // Build query with grocery context
-  const storeFilter = store ? ` ${store}` : "";
-  const cityFilter = region === "br" && city ? ` ${city}` : "";
-  const regionFilter = region === "br" ? " supermercado delivery" : " grocery";
-  const fullQuery = `${translatedQuery}${storeFilter}${regionFilter}${cityFilter}`;
+  try {
+    const { GoogleGenerativeAI } = await import("@google/generative-ai");
+    const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+    const model = genAI.getGenerativeModel({
+      model: "gemini-2.5-flash",
+      tools: [{ googleSearch: {} } as any],
+    });
 
-  const params = new URLSearchParams({
-    engine: "google_shopping",
-    q: fullQuery,
-    api_key: SERPAPI_KEY,
-    gl: region === "br" ? "br" : "us",
-    hl: region === "br" ? "pt" : "en",
-    num: String(maxResults),
-  });
+    const prompt = `Search for "${translatedQuery}" grocery products${storeFilter}${cityFilter} (${regionContext}). Return ONLY a JSON array of max ${maxResults} products currently available: [{"name":"Product Name","brand":"Brand","price":4.99,"unitPrice":"$0.25/oz","store":"Store Name","available":true,"url":"https://...","onSale":false,"savings":null}]. Use real current prices. ONLY JSON, no markdown.`;
 
-  const res = await fetch(`https://serpapi.com/search.json?${params}`, {
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  });
+    const result = await model.generateContent(prompt);
+    let text: string;
+    try { text = result.response.text(); } catch { text = result.response.candidates?.[0]?.content?.parts?.[0]?.text || ""; }
+    if (!text) return [];
 
-  if (!res.ok) throw new Error(`SerpAPI Grocery ${res.status}`);
-  const data = await res.json() as any;
-  const results = data.shopping_results || [];
+    const cleaned = text.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+    const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) return [];
 
-  return results.slice(0, maxResults).map((item: any) => ({
-    name: item.title || "",
-    brand: extractBrand(item.title || ""),
-    price: item.extracted_price || null,
-    unitPrice: item.unit_price || null,
-    store: item.source || store || "Online",
-    available: true,
-    imageUrl: item.thumbnail || null,
-    url: item.link || item.product_link || "",
-    onSale: !!(item.old_price && item.extracted_price && item.old_price > item.extracted_price),
-    savings: item.old_price && item.extracted_price ? Math.round((item.old_price - item.extracted_price) * 100) / 100 : null,
-  }));
-}
+    const parsed = JSON.parse(jsonMatch[0]) as any[];
+    if (!Array.isArray(parsed)) return [];
 
-/** Search Walmart grocery specifically via dedicated SerpAPI engine */
-async function searchWalmartGrocery(query: string, maxResults: number): Promise<GroceryItem[]> {
-  if (!SERPAPI_KEY) return [];
-
-  const params = new URLSearchParams({
-    engine: "walmart",
-    query: `${query} grocery food`,
-    api_key: SERPAPI_KEY,
-  });
-
-  const res = await fetch(`https://serpapi.com/search.json?${params}`, {
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  });
-
-  if (!res.ok) throw new Error(`SerpAPI Walmart Grocery ${res.status}`);
-  const data = await res.json() as any;
-  const results = data.organic_results || [];
-
-  return results.slice(0, maxResults).map((item: any) => ({
-    name: item.title || "",
-    brand: extractBrand(item.title || ""),
-    price: item.primary_offer?.offer_price || null,
-    unitPrice: item.price_per_unit?.unit ? `$${item.price_per_unit.price}/${item.price_per_unit.unit}` : null,
-    store: "Walmart",
-    available: item.in_stock !== false,
-    imageUrl: item.thumbnail || null,
-    url: item.product_page_url || "",
-    onSale: !!(item.primary_offer?.was_price),
-    savings: item.primary_offer?.was_price && item.primary_offer?.offer_price
-      ? Math.round((item.primary_offer.was_price - item.primary_offer.offer_price) * 100) / 100
-      : null,
-  }));
+    return parsed.slice(0, maxResults).map((item: any) => ({
+      name: item.name || item.title || "",
+      brand: item.brand || extractBrand(item.name || ""),
+      price: typeof item.price === "number" ? item.price : null,
+      unitPrice: item.unitPrice || null,
+      store: item.store || store || "Online",
+      available: item.available !== false,
+      imageUrl: item.imageUrl || null,
+      url: item.url || "",
+      onSale: item.onSale === true,
+      savings: typeof item.savings === "number" ? item.savings : null,
+    }));
+  } catch (err) {
+    console.error(`[GROCERY] Gemini search failed:`, (err as Error).message);
+    return [];
+  }
 }
 
 function extractBrand(title: string): string | null {
@@ -239,25 +210,21 @@ export async function searchGrocery(opts: {
 
   if (store) {
     // User specified a store — search only that store
-    if (store.toLowerCase().includes("walmart")) {
-      sources.push({ name: "Walmart", fn: () => searchWalmartGrocery(query, maxResults) });
-    }
-    sources.push({ name: store, fn: () => searchSerpApiGrocery(query, store, region, maxResults) });
+    sources.push({ name: store, fn: () => searchGeminiGrocery(query, store, region, maxResults) });
   } else {
     // Search multiple stores in parallel
     if (region === "us") {
-      const usQuery = translateGroceryQuery(query, region);
-      sources.push({ name: "Walmart", fn: () => searchWalmartGrocery(usQuery, maxResults) });
-      sources.push({ name: "Google Grocery", fn: () => searchSerpApiGrocery(query, null, region, maxResults) });
-      sources.push({ name: "Publix", fn: () => searchSerpApiGrocery(query, "Publix", region, 3) });
-      sources.push({ name: "Target", fn: () => searchSerpApiGrocery(query, "Target grocery", region, 3) });
+      sources.push({ name: "Walmart", fn: () => searchGeminiGrocery(query, "Walmart", region, maxResults) });
+      sources.push({ name: "Google Grocery", fn: () => searchGeminiGrocery(query, null, region, maxResults) });
+      sources.push({ name: "Publix", fn: () => searchGeminiGrocery(query, "Publix", region, 3) });
+      sources.push({ name: "Target", fn: () => searchGeminiGrocery(query, "Target grocery", region, 3) });
     } else {
-      // Brazil — search site-specific and aggregators
+      // Brazil — search store-specific and aggregators
       const city = opts.city || "";
-      sources.push({ name: "Carrefour", fn: () => searchSerpApiGrocery(query, "site:mercado.carrefour.com.br", region, 3, city) });
-      sources.push({ name: "Pão de Açúcar", fn: () => searchSerpApiGrocery(query, "site:paodeacucar.com", region, 3, city) });
-      sources.push({ name: "Rappi", fn: () => searchSerpApiGrocery(query, "Rappi mercado", region, 3, city) });
-      sources.push({ name: "Google BR", fn: () => searchSerpApiGrocery(query, null, region, maxResults, city) });
+      sources.push({ name: "Carrefour", fn: () => searchGeminiGrocery(query, "Carrefour", region, 3, city) });
+      sources.push({ name: "Pão de Açúcar", fn: () => searchGeminiGrocery(query, "Pão de Açúcar", region, 3, city) });
+      sources.push({ name: "Rappi", fn: () => searchGeminiGrocery(query, "Rappi", region, 3, city) });
+      sources.push({ name: "Google BR", fn: () => searchGeminiGrocery(query, null, region, maxResults, city) });
     }
   }
 

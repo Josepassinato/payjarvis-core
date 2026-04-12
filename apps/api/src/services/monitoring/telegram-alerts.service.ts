@@ -172,7 +172,7 @@ export async function getHealthSummary(): Promise<string> {
 
 export async function getMetricsSummary(): Promise<string> {
   const bucket = Math.floor(Date.now() / 300_000);
-  const services = ["gemini", "apify", "serpapi", "twilio", "elevenlabs", "amadeus", "yelp"];
+  const services = ["gemini", "twilio", "elevenlabs", "amadeus", "yelp"];
   let summary = "📈 <b>Metrics (last 5 min)</b>\n\n";
 
   for (const svc of services) {

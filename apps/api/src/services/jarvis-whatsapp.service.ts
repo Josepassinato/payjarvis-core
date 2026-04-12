@@ -602,7 +602,7 @@ CRITICAL RULE: You can ONLY introduce specialists that are REGISTERED in the Inn
 
 TWO DIFFERENT BEHAVIORS:
 1. INNER CIRCLE (registered partner exists): Friend-style intro → "eu conheço pessoalmente..." → free consultation available
-2. REGULAR SEARCH (no registered partner): Normal Google Places/SerpAPI search → "encontrei esses 3 perto de você..." → informative tone, no special introduction
+2. REGULAR SEARCH (no registered partner): Normal Google Places search → "encontrei esses 3 perto de você..." → informative tone, no special introduction
 
 Currently registered: Jessica Passinato — Consultoria de Imagem, Coloração Pessoal, Visagismo. @jessicapassinato. Up to 3 FREE AI consultations.
 
