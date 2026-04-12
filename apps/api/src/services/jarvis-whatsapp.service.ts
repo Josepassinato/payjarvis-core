@@ -1685,8 +1685,8 @@ async function _handleToolInner(userId: string, name: string, args: Record<strin
           console.log(`[IMG-SEARCH][6-GATEWAY] Gemini query "${finalQuery}" passes validation (${substantiveQueryWords.length} substantive words)`);
         }
 
-        // Clear image context after use (prevent stale data affecting next non-image search)
-        clearImageSearchContext(userId);
+        // NOTE: do NOT clear image context here — it's needed by the text merge (<30s)
+        // when photo and text arrive as separate messages. TTL (120s) handles expiry.
 
         const searchStartMs = Date.now();
         console.log(`[IMG-SEARCH][6-GOOGLE-API] Calling unifiedProductSearch with query: "${finalQuery}", store: "${store || "any"}", phase: "${searchPhase || "all"}"`);
@@ -3891,6 +3891,9 @@ const IMAGE_SEARCH_REJECTED_TERMS = [
 ];
 
 // Accessory/tool words that indicate the LLM described a related item, not the product itself
+// These patterns are for SEARCH QUERY validation only — reject queries that describe
+// accessories instead of the main product. Must be specific to avoid false positives
+// (e.g. "diver watch grey strap" is a WATCH, not a strap).
 const IMAGE_SEARCH_ACCESSORY_PATTERNS = [
   /removal\s+(kit|tool)/i,
   /repair\s+(kit|tool|set)/i,
@@ -3899,12 +3902,6 @@ const IMAGE_SEARCH_ACCESSORY_PATTERNS = [
   /cleaning\s+(kit|cloth|set)/i,
   /charger\s+(cable|adapter)/i,
   /carrying\s+(case|bag|pouch)/i,
-  /watch\s+(strap|band|buckle|clasp)/i,
-  /\b(strap|band|pulseira|correa)\b.*\b(watch|relógio|relogio)\b/i,
-  /\b(watch|relógio|relogio)\b.*\b(strap|band|pulseira|correa)\b/i,
-  /polyurethane\s+(watch\s+)?strap/i,
-  /silicone\s+(watch\s+)?band/i,
-  /leather\s+(watch\s+)?strap/i,
 ];
 
 /**
@@ -5017,6 +5014,7 @@ Save my number as "Sniffer" in your contacts and you're set! 🐕`;
 
   // 3. Determine tier: standard vs premium
   let userTier = "free";
+  let usePremium = false; // set after tier check; disabled when image merge active
   if (resolvedUserId) {
     try {
       const user = await prisma.user.findUnique({
@@ -5026,6 +5024,7 @@ Save my number as "Sniffer" in your contacts and you're set! 🐕`;
       userTier = user?.planType || "free";
     } catch { /* default free */ }
   }
+  usePremium = userTier === "premium";
 
   // 4. Process message
   try {
@@ -5088,13 +5087,15 @@ Save my number as "Sniffer" in your contacts and you're set! 🐕`;
           // Rewrite the text to include image context, so chatWithGemini searches correctly
           text = `${text} (I just sent a photo of this product: ${imgDesc}. Search for: ${mergedQuery})`;
           clearImageSearchContext(userId);
+          // Force standard pipeline — premium (OpenClaw) doesn't have anti-hallucination guards
+          usePremium = false;
         }
       }
     }
 
     let response: string;
 
-    if (userTier === "premium") {
+    if (usePremium) {
       // ═══ PREMIUM PIPELINE ═══
       // Call OpenClaw premium endpoint (runs adaptive agent layers)
       console.log(`[WA PREMIUM] Processing for ${userId}`);
