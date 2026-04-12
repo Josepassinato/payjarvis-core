@@ -4067,6 +4067,16 @@ export async function chatWithGeminiMultimodal(
     console.warn(`[IMG-SEARCH][2-LLM-SENT] Pre-identification failed: ${(err as Error).message}`);
   }
 
+  // ─── CAPTION FALLBACK: if image identification failed but user sent text, use it as query ───
+  // "Procura este relógio Casio" is a perfectly good search query even without image analysis.
+  if (!validatedQuery && userMessage && hasProductIntent) {
+    validatedQuery = userMessage
+      .replace(/\b(procura|busca|compra|acha|find|buy|search|get)\s*(este|esta|esse|essa|isso|isto|this|that|me|pra mim|for me)\b/gi, "")
+      .replace(/\b(para|pra|for)\s*(eu|me|mim)\s*(comprar|buy|purchase)?\b/gi, "")
+      .trim() || userMessage;
+    console.log(`[IMG-SEARCH][CAPTION-FALLBACK] Image identification failed but caption has product intent. Using caption as query: "${validatedQuery}"`);
+  }
+
   // Store validated query per-userId so search_products handler can use it (thread-safe)
   setImageSearchContext(userId, validatedQuery, preIdentification);
 
@@ -4076,6 +4086,9 @@ export async function chatWithGeminiMultimodal(
   let enhancedMessage = userMessage || "Analyze this image and tell me how I can help.";
   if (preIdentification && validatedQuery) {
     enhancedMessage = `${userMessage || "Find this product"}\n\n[PRODUCT IDENTIFIED FROM IMAGE: brand="${preIdentification.brand}", model="${preIdentification.model}", category="${preIdentification.category}", color="${preIdentification.color}". USE THIS SEARCH QUERY for search_products: "${validatedQuery}"]`;
+  } else if (validatedQuery && !preIdentification) {
+    // Caption fallback: no image identification but we have a query from the caption
+    enhancedMessage = `${userMessage}\n\n[IMAGE IDENTIFICATION FAILED. USE THIS TEXT AS SEARCH QUERY for search_products: "${validatedQuery}". Search for this product NOW.]`;
   }
 
   const model = genAI.getGenerativeModel({
@@ -4169,9 +4182,16 @@ export async function chatWithGeminiMultimodal(
       console.log(`[WA IMAGE TOOL] ${call.name} =>`, toolResultStr.substring(0, 150));
 
       // ─── CODE-LEVEL ANTI-HALLUCINATION (image pipeline): hardcoded response, LLM bypassed ───
+      // If search failed BUT we have a caption with text, fall back to text-only search (Phase 1)
+      // instead of asking the user to describe what they already described.
       const IMG_SEARCH_TOOLS = new Set(["search_products", "amazon_search", "search_products_latam", "search_products_global", "compare_prices"]);
       if (IMG_SEARCH_TOOLS.has(call.name) && (toolResult.error || (toolResult as any).searchFailed || (Array.isArray((toolResult as any).products) && (toolResult as any).products.length === 0))) {
-        console.warn(`[ANTI-HALLUCINATION][IMG-CODE-BLOCK] Search "${call.name}" failed in image pipeline. Returning hardcoded response — LLM bypassed.`);
+        // If user sent a caption with the image, use it as a text-only search query
+        if (userMessage && userMessage.trim().length > 3) {
+          console.warn(`[ANTI-HALLUCINATION][IMG-CODE-BLOCK] Search "${call.name}" failed but caption exists: "${userMessage.substring(0, 80)}". Falling back to text-only Phase 1 search.`);
+          return chatWithGemini(history, userMessage, userId, userFacts);
+        }
+        console.warn(`[ANTI-HALLUCINATION][IMG-CODE-BLOCK] Search "${call.name}" failed, no caption. Returning hardcoded response — LLM bypassed.`);
         return "A busca por esse produto não retornou resultados agora. Me descreve o que você viu na imagem que eu tento de outro jeito! 🐕";
       }
 
