@@ -120,38 +120,54 @@ export async function unifiedProductSearch(opts: SearchOptions): Promise<Unified
     }
   }
 
-  // ── MARKETPLACE SOURCES (Phase 2: Purchase + legacy + direct_store) ──
+  // ── PHASE 2: MARKETPLACE / STORE-SPECIFIC SOURCES ──
+  // When user asks for a specific store (e.g. "busca na Best Buy"), prioritize
+  // that store's dedicated source. Otherwise, use all marketplace APIs.
   if (!isDiscovery) {
-    // SerpAPI Walmart — dedicated engine for Walmart
-    const isWalmart = store && store.toLowerCase().includes("walmart");
-    if (SERPAPI_KEY && isWalmart) {
-      sources.push({ name: "serpapi_walmart", fn: () => withTimeout(searchSerpApiWalmart(query, maxResults), TIMEOUT.serpapi), priority: 1 });
-    }
+    const storeLower = (store || "").toLowerCase();
+    const isAmazon = storeLower.includes("amazon");
+    const isWalmart = storeLower.includes("walmart");
+    const isEbay = storeLower.includes("ebay");
+    const isMercadoLivre = storeLower.includes("mercado") || storeLower.includes("ml");
 
-    // SerpAPI eBay — dedicated engine for eBay
-    const isEbay = store && store.toLowerCase().includes("ebay");
-    if (SERPAPI_KEY && isEbay) {
-      sources.push({ name: "serpapi_ebay", fn: () => withTimeout(searchSerpApiEbay(query, maxResults), TIMEOUT.serpapi), priority: 1 });
-    }
-
-    // Mercado Livre — Brazil only, free
-    if (isBrazil) {
-      sources.push({ name: "mercadolivre", fn: () => withTimeout(searchMercadoLivre(query, maxResults), TIMEOUT.mercadoLivre), priority: 1 });
-    }
-
-    // Apify — Amazon, paid but reliable
-    const isAmazon = store && store.toLowerCase().includes("amazon");
-    sources.push({ name: "apify", fn: () => withTimeout(searchApify(query, country, maxResults, userId), TIMEOUT.apify), priority: isAmazon ? 1 : 3 });
-
-    // Browser Agent — last resort, slow
     if (store) {
-      sources.push({ name: "browser", fn: () => withTimeout(searchBrowserAgent(query, store, maxResults), TIMEOUT.browserAgent), priority: 5 });
+      // ── SPECIFIC STORE requested ──
+      // Use the best source for that store, with Browser Agent as fallback
+
+      if (isAmazon) {
+        sources.push({ name: "apify", fn: () => withTimeout(searchApify(query, country, maxResults, userId), TIMEOUT.apify), priority: 1 });
+      } else if (isWalmart && SERPAPI_KEY) {
+        sources.push({ name: "serpapi_walmart", fn: () => withTimeout(searchSerpApiWalmart(query, maxResults), TIMEOUT.serpapi), priority: 1 });
+      } else if (isEbay && SERPAPI_KEY) {
+        sources.push({ name: "serpapi_ebay", fn: () => withTimeout(searchSerpApiEbay(query, maxResults), TIMEOUT.serpapi), priority: 1 });
+      } else if (isMercadoLivre) {
+        sources.push({ name: "mercadolivre", fn: () => withTimeout(searchMercadoLivre(query, maxResults), TIMEOUT.mercadoLivre), priority: 1 });
+      }
+
+      // Browser Agent for ANY store (Best Buy, Target, Macy's, etc.) — has URL mappings
+      sources.push({ name: "browser", fn: () => withTimeout(searchBrowserAgent(query, store, maxResults), TIMEOUT.browserAgent), priority: sources.length > 0 ? 3 : 1 });
+
+      // Google Grounding as safety net — will include results from that store if available
+      if (GEMINI_API_KEY) {
+        sources.push({ name: "google", fn: () => withTimeout(searchGeminiGrounding(`${query} ${store}`, maxResults), TIMEOUT.grounding), priority: 4 });
+      }
+
+      console.log(`[PHASE-2][STORE] Searching "${store}" specifically: ${sources.map(s => s.name).join(", ")}`);
+    } else {
+      // ── NO SPECIFIC STORE — use all marketplace APIs ──
+      if (SERPAPI_KEY) {
+        sources.push({ name: "serpapi_walmart", fn: () => withTimeout(searchSerpApiWalmart(query, maxResults), TIMEOUT.serpapi), priority: 2 });
+      }
+      if (isBrazil) {
+        sources.push({ name: "mercadolivre", fn: () => withTimeout(searchMercadoLivre(query, maxResults), TIMEOUT.mercadoLivre), priority: 1 });
+      }
+      sources.push({ name: "apify", fn: () => withTimeout(searchApify(query, country, maxResults, userId), TIMEOUT.apify), priority: 2 });
     }
   }
 
   if (isDiscovery) {
     console.log(`[PHASE-1][DISCOVERY] Google Search: query="${query}"`);
-  } else if (isPurchase) {
+  } else if (isPurchase && !store) {
     console.log(`[PHASE-2][PURCHASE] Marketplace search: ${sources.map(s => s.name).join(", ")} for query="${query}"`);
   }
 
