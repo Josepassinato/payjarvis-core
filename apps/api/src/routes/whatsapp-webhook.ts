@@ -15,7 +15,7 @@
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { prisma } from "@payjarvis/database";
-import { processWhatsAppMessage, processWhatsAppImageMessage } from "../services/jarvis-whatsapp.service.js";
+import { processWhatsAppMessage, processWhatsAppImageMessage, isImageResponseSuppressed } from "../services/jarvis-whatsapp.service.js";
 import twilio from "twilio";
 const { validateRequest } = twilio;
 import { sendWhatsAppMessage, sendWhatsAppAudio, sendWhatsAppDocument, sendWhatsAppReaction, getTwilioCredentials } from "../services/twilio-whatsapp.service.js";
@@ -804,13 +804,18 @@ async function processImageMessage(
   }
 
   if (responseText) {
-    responseText = responseText.replace(/\[FORMAT:(TEXT|AUDIO)\]\s*/gi, '').trim();
-    console.log(`[DEBUG-IMG] 4. Sending response to WhatsApp (${responseText.length} chars)...`);
-    try {
-      await sendWhatsAppMessage(from, responseText, botNumber);
-      console.log(`[DEBUG-IMG] 5. Response SENT to ${from} (total ${Date.now() - imgStart}ms)`);
-    } catch (sendErr) {
-      console.error(`[DEBUG-IMG] SEND FAILED: ${(sendErr as Error).message}`);
+    // Check if the text handler already merged image context + text and will deliver the answer
+    if (isImageResponseSuppressed(from)) {
+      console.log(`[DEBUG-IMG] 4. SUPPRESSED — text handler already merged image+text and will respond. Skipping image response.`);
+    } else {
+      responseText = responseText.replace(/\[FORMAT:(TEXT|AUDIO)\]\s*/gi, '').trim();
+      console.log(`[DEBUG-IMG] 4. Sending response to WhatsApp (${responseText.length} chars)...`);
+      try {
+        await sendWhatsAppMessage(from, responseText, botNumber);
+        console.log(`[DEBUG-IMG] 5. Response SENT to ${from} (total ${Date.now() - imgStart}ms)`);
+      } catch (sendErr) {
+        console.error(`[DEBUG-IMG] SEND FAILED: ${(sendErr as Error).message}`);
+      }
     }
   } else {
     console.error(`[DEBUG-IMG] NO RESPONSE TEXT! Pipeline returned empty/null.`);

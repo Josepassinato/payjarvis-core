@@ -1381,6 +1381,26 @@ function clearImageSearchContext(userId: string) {
   _imageSearchContext.delete(userId);
 }
 
+// ─── Image response suppression: when text merge handles the query, suppress the image pipeline response ───
+const _suppressImageResponse = new Map<string, number>();
+
+export function suppressImageResponse(userId: string) {
+  _suppressImageResponse.set(userId, Date.now());
+  console.log(`[IMG-SUPPRESS] Set for ${userId} — image pipeline response will be suppressed`);
+}
+
+export function isImageResponseSuppressed(userId: string): boolean {
+  const ts = _suppressImageResponse.get(userId);
+  if (!ts) return false;
+  // Expire after 90s
+  if (Date.now() - ts > 90_000) {
+    _suppressImageResponse.delete(userId);
+    return false;
+  }
+  _suppressImageResponse.delete(userId); // consume the flag
+  return true;
+}
+
 // ─── Tool Handler ──────────────────────────────────────
 
 async function handleTool(userId: string, name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -1580,7 +1600,16 @@ async function _handleToolInner(userId: string, name: string, args: Record<strin
         const session = getSession(userId);
         let searchPhase: "discovery" | "purchase" | undefined;
 
-        if (store && hasActiveAPI(store)) {
+        // Image pipeline override: Gemini often passes store:"amazon" but Phase 1 should
+        // always be discovery (Google Search, multi-store). Only go direct-store if the
+        // USER explicitly asked for a specific store, not when Gemini assumes one.
+        const imgCtxForPhase = getImageSearchContext(userId);
+        const isFromImagePipeline = !!imgCtxForPhase;
+        if (isFromImagePipeline && store) {
+          console.log(`[PHASE-OVERRIDE] Image pipeline detected — ignoring Gemini's store="${store}", forcing discovery phase for multi-store results`);
+        }
+
+        if (store && hasActiveAPI(store) && !isFromImagePipeline) {
           // DIRECT STORE: user named a store with active API → skip discovery, go direct
           searchPhase = "purchase";
           transitionTo(userId, "direct_store", { directStoreName: store, searchQuery: args.query as string });
@@ -1708,7 +1737,19 @@ async function _handleToolInner(userId: string, name: string, args: Record<strin
           };
         }
 
-        const formatted = result.products.map((p, i) => ({
+        // ─── Filter out accessories/straps from results (they're not the product the user wants) ───
+        const ACCESSORY_TITLE_RE = /\b(watch\s*(strap|band)|strap\s*for|band\s*for|pulseira|correa|buckle|clasp|screen\s*protector|tempered\s*glass|case\s*cover|charger\s*(cable|dock)|cleaning\s*kit)\b/i;
+        const filteredProducts = result.products.filter(p => {
+          if (ACCESSORY_TITLE_RE.test(p.title)) {
+            console.log(`[SEARCH-FILTER] Removed accessory from results: "${p.title.substring(0, 60)}"`);
+            return false;
+          }
+          return true;
+        });
+        // Use filtered if we still have results, otherwise fall back to unfiltered
+        const productsToFormat = filteredProducts.length > 0 ? filteredProducts : result.products;
+
+        const formatted = productsToFormat.map((p, i) => ({
           rank: i + 1,
           title: p.title,
           price: p.price ? `${p.currency === "BRL" ? "R$" : "$"}${p.price.toFixed(2)}${p.isApproximate ? " ~" : ""}` : "See price on site",
@@ -3858,6 +3899,12 @@ const IMAGE_SEARCH_ACCESSORY_PATTERNS = [
   /cleaning\s+(kit|cloth|set)/i,
   /charger\s+(cable|adapter)/i,
   /carrying\s+(case|bag|pouch)/i,
+  /watch\s+(strap|band|buckle|clasp)/i,
+  /\b(strap|band|pulseira|correa)\b.*\b(watch|relógio|relogio)\b/i,
+  /\b(watch|relógio|relogio)\b.*\b(strap|band|pulseira|correa)\b/i,
+  /polyurethane\s+(watch\s+)?strap/i,
+  /silicone\s+(watch\s+)?band/i,
+  /leather\s+(watch\s+)?strap/i,
 ];
 
 /**
@@ -5036,6 +5083,8 @@ Save my number as "Sniffer" in your contacts and you're set! 🐕`;
           const newWords = text.split(/\s+/).filter(w => w.length > 2 && !imgLower.includes(w.toLowerCase()));
           const mergedQuery = newWords.length > 0 ? `${newWords.join(" ")} ${imgDesc}` : `${text} ${imgDesc}`;
           console.log(`[IMG-CONTEXT-MERGE] Text "${text}" arrived ${imgAge}ms after image. Merged query: "${mergedQuery}"`);
+          // Suppress the image pipeline response — this text handler will deliver the answer
+          suppressImageResponse(userId);
           // Rewrite the text to include image context, so chatWithGemini searches correctly
           text = `${text} (I just sent a photo of this product: ${imgDesc}. Search for: ${mergedQuery})`;
           clearImageSearchContext(userId);
