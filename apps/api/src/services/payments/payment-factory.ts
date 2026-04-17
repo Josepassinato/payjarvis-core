@@ -3,12 +3,14 @@ import { StripeProvider } from "./providers/stripe.provider.js";
 import { PayPalProvider } from "./providers/paypal.provider.js";
 import { SkyfirePaymentProvider } from "./providers/skyfire.provider.js";
 import { MercadoPagoProvider } from "./providers/mercadopago.provider.js";
+import { CelcoinProvider } from "./providers/celcoin.provider.js";
 
 const providers: Record<string, BasePaymentProvider> = {
   stripe: new StripeProvider(),
   paypal: new PayPalProvider(),
   skyfire: new SkyfirePaymentProvider(),
   mercadopago: new MercadoPagoProvider(),
+  celcoin: new CelcoinProvider(),
 };
 
 export function getPaymentProvider(name: string): BasePaymentProvider {

@@ -81,6 +81,8 @@ import { adminInnerCircleRoutes } from "./routes/admin/admin-inner-circle.js";
 import { adminGrowthRoutes } from "./routes/admin/admin-growth.js";
 import { adminSniffershopRoutes } from "./routes/admin/admin-sniffershop.js";
 import { mastercardRoutes } from "./routes/mastercard.routes.js";
+import { railRoutes } from "./routes/rail.routes.js";
+import { celcoinRoutes } from "./routes/celcoin.routes.js";
 import { visaRoutes } from "./routes/visa.routes.js";
 import { shoppingConfigRoutes } from "./routes/shopping-config.js";
 import { shoppingPlannerRoutes } from "./routes/shopping-planner.routes.js";
@@ -318,6 +320,8 @@ await app.register(subscriptionRoutes);
 
 // Mastercard — Buyer Payment Agent + MDES Token Requestor
 await app.register(mastercardRoutes);
+await app.register(railRoutes);
+await app.register(celcoinRoutes);
 
 // Visa — Click to Pay (Secure Remote Commerce) SDK config + checkout
 await app.register(visaRoutes);
