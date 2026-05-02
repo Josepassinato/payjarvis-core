@@ -197,9 +197,9 @@ export async function whatsappWebhookRoutes(app: FastifyInstance) {
       const profileName = body.ProfileName || "";
       const messageSid = body.MessageSid || "";
 
-      // ─── Auto-detect language from Jarvis number contacted ───
-      // BR number (+551150395940) → Portuguese, all others → English (unless user has saved preference)
-      const isBrNumber = botNumber.includes("+5511");
+      // ─── Auto-detect language from USER number (BR sender single, hotfix 2026-04-29) ───
+      // Antes: bot tinha 2 números (BR/US). Agora só US. Inferimos PT pelo telefone do USER.
+      const isBrNumber = from.startsWith("whatsapp:+55");
       if (isBrNumber) {
         // Set PT-BR as default for users contacting via BR number (async, non-blocking)
         (async () => {
@@ -243,6 +243,14 @@ export async function whatsappWebhookRoutes(app: FastifyInstance) {
           return reply.status(403).send({ error: "Invalid signature" });
         }
       }
+
+      // ─── ACK rápido com ampulheta animada ──────────────────────────────
+      // Envia GIF de ampulheta como sinal "estou trabalhando" antes de processar.
+      // Fire-and-forget pra não atrasar a resposta 200 ao Twilio.
+      const HOURGLASS_URL = `${BASE_URL}/public/loading-hourglass.gif`;
+      sendWhatsAppDocument(from, HOURGLASS_URL).catch(err => {
+        request.log.debug({ err: err?.message, from }, "[WhatsApp] hourglass ack failed (non-blocking)");
+      });
 
       const isAudio = numMedia > 0 && mediaContentType0.startsWith("audio/");
       const isImage = numMedia > 0 && mediaContentType0.startsWith("image/");

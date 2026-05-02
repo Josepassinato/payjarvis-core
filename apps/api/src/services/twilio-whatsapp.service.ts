@@ -12,7 +12,7 @@ import Twilio from "twilio";
 const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID || "";
 const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN || "";
 const FROM_NUMBER = process.env.TWILIO_WHATSAPP_NUMBER || "whatsapp:+17547145921";
-const FROM_NUMBER_BR = process.env.TWILIO_WHATSAPP_NUMBER_BR || "whatsapp:+551150395940";
+const FROM_NUMBER_BR = process.env.TWILIO_WHATSAPP_NUMBER_BR || "whatsapp:+17547145921";
 const WELCOME_TEMPLATE_SID = process.env.TWILIO_WELCOME_TEMPLATE_SID || "";
 const REFERRAL_TEMPLATE_SID = process.env.TWILIO_REFERRAL_TEMPLATE_SID || "";
 
@@ -44,7 +44,7 @@ function getClient() {
  * Split a long message into chunks that fit Twilio's 1600-char WhatsApp limit.
  * Splits on paragraph breaks first, then sentence boundaries, then hard-cuts.
  */
-function splitMessage(text: string, maxLen = 3800): string[] {
+function splitMessage(text: string, maxLen = 1500): string[] {
   if (text.length <= maxLen) return [text];
 
   const chunks: string[] = [];
