@@ -15,9 +15,13 @@ dist/
 .env.*.local
 .env.production
 .env.development
+.env.bak*
+.env.backup*
 **/.env
 **/.env.local
 **/.env.production
+**/.env.bak*
+**/.env.backup*
 !.env.example
 !**/.env.example
 
