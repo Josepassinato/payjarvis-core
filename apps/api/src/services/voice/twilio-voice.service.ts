@@ -35,6 +35,8 @@ import { redisSet, redisGet } from "../redis.js";
 const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID || "";
 const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN || "";
 const DEFAULT_FROM = process.env.TWILIO_VOICE_NUMBER || process.env.TWILIO_WHATSAPP_NUMBER?.replace("whatsapp:", "") || "+17547145921";
+const BR_FROM = process.env.TWILIO_VOICE_NUMBER_BR || "+551150395940";
+const US_FROM = "+17547145921";
 const BASE_URL = process.env.PAYJARVIS_PUBLIC_URL || "https://www.payjarvis.com";
 const INTERNAL_SECRET = process.env.INTERNAL_SECRET || "";
 const XAI_API_KEY = process.env.XAI_API_KEY || "";
@@ -857,8 +859,9 @@ export async function makeCall(params: {
   // Rate limit check
   await checkRateLimit(userId);
 
-  // Resolve caller ID
-  const fromNumber = await resolveCallerId(userId);
+  // Resolve caller ID (smart routing by destination country)
+  const destinationNumber = cleanNumber.startsWith("+") ? cleanNumber : `+${cleanNumber}`;
+  const fromNumber = await resolveCallerId(userId, destinationNumber);
 
   // Generate call ID
   const callId = `vc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -1503,7 +1506,8 @@ export async function startCallerIdVerification(userId: string, phoneNumber: str
   };
 }
 
-async function resolveCallerId(userId: string): Promise<string> {
+async function resolveCallerId(userId: string, destinationNumber?: string): Promise<string> {
+  // 1. User's verified caller ID takes priority
   try {
     const cleanPhone = userId.replace("whatsapp:", "");
     const rows = await prisma.$queryRaw<{ verifiedCallerId: string | null }[]>`
@@ -1515,8 +1519,15 @@ async function resolveCallerId(userId: string): Promise<string> {
       return rows[0].verifiedCallerId;
     }
   } catch {
-    // Column may not exist yet — fall through to default
+    // Column may not exist yet — fall through to smart routing
   }
+
+  // 2. Smart routing by destination country — local number improves answer rate
+  if (destinationNumber) {
+    if (destinationNumber.startsWith("+55")) return BR_FROM;
+    if (destinationNumber.startsWith("+1")) return US_FROM;
+  }
+
   return DEFAULT_FROM;
 }
 

@@ -91,7 +91,7 @@ export async function sendTelegramNotification(
 
     if (!res.ok) {
       const err = await res.text();
-      console.error("[Notification] Telegram API error:", err);
+      console.error(`[Notification] Telegram API error (chatId=${chatId}):`, err);
       return false;
     }
     return true;

@@ -345,7 +345,7 @@ YOUR TOOLS:
 - SHOPPING (core): search_products (100+ stores), compare_prices, amazon_search, find_stores, find_coupons, check_price_history, get_product_reviews
 - PRICE MONITORING: set_price_alert (checks every 6h), get_price_alerts
 - SUBSCRIPTIONS: scan_my_subscriptions, cancel_my_subscription, subscription_report
-- PAYMENTS: manage_payment_methods, smart_checkout, skyfire_setup_wallet, skyfire_checkout, skyfire_my_purchases, skyfire_spending, skyfire_set_limits. Card data = bank-grade encryption. Double confirm >$100, triple >$500.
+- PAYMENTS: manage_payment_methods, smart_checkout (checks wallet + returns canExecutePurchase flag — only Amazon has automated checkout, all other stores return a direct link for the user to buy themselves). Card data = bank-grade encryption. Double confirm >$100, triple >$500.
 - TRACKING: track_package (USPS, FedEx, DHL, UPS, Correios)
 - VISION: Analyze images — photo of product → find best price immediately
 - VOICE: Audio transcribed automatically. Respond naturally.
@@ -1115,6 +1115,49 @@ const tools: any[] = [
         },
       },
       // REMOVED: skyfire_setup_wallet, smart_checkout, skyfire_checkout, skyfire_my_purchases, skyfire_spending, skyfire_set_limits — handlers preserved for reactivation
+      // ─── Generic Store Checkout ──────────────────────────
+      {
+        name: "store_start_checkout",
+        description: "Start a checkout on ANY non-Amazon US store (Nike, Walmart, Target, etc.) via AI browser automation. Navigates to product URL, adds to cart, fills shipping, returns screenshot for user confirmation. Use when smart_checkout returns canExecutePurchase=true for a non-Amazon store.",
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            product_url: { type: SchemaType.STRING, description: "Direct URL to the product page" },
+            product_name: { type: SchemaType.STRING, description: "Product name" },
+            price: { type: SchemaType.NUMBER, description: "Expected price" },
+            store: { type: SchemaType.STRING, description: "Store name (e.g. 'Nike', 'Walmart')" },
+            size: { type: SchemaType.STRING, description: "Size to select" },
+            color: { type: SchemaType.STRING, description: "Color to select" },
+            quantity: { type: SchemaType.NUMBER, description: "Quantity (default 1)" },
+          },
+          required: ["product_url", "product_name", "price", "store"],
+        },
+      },
+      {
+        name: "store_confirm_order",
+        description: "Confirm and place an order on a non-Amazon store. Use ONLY after store_start_checkout succeeds AND user gives EXPLICIT confirmation after reviewing the checkout screenshot.",
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            bb_session_id: { type: SchemaType.STRING, description: "Session ID from store_start_checkout" },
+            expected_total: { type: SchemaType.NUMBER, description: "Total the user confirmed" },
+            product_name: { type: SchemaType.STRING, description: "Product name for log" },
+            store: { type: SchemaType.STRING, description: "Store name" },
+          },
+          required: ["bb_session_id", "expected_total"],
+        },
+      },
+      {
+        name: "store_cancel_checkout",
+        description: "Cancel an in-progress store checkout session.",
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            bb_session_id: { type: SchemaType.STRING, description: "Session ID to cancel" },
+          },
+          required: ["bb_session_id"],
+        },
+      },
       // ─── Opção B: tools migrated from OpenClaw for WhatsApp parity ───
       // REMOVED: search_events (Ticketmaster CHANGE_ME key) — handler preserved for reactivation
       {
@@ -3122,18 +3165,15 @@ async function _handleToolInner(userId: string, name: string, args: Record<strin
             ? "⚠️ This is over $100. Please confirm you want to proceed."
             : null;
 
-        // Build store-aware routing hints for the LLM
-        const routingHints: Record<string, string> = {
-          amazon: "For Amazon purchases, prefer the user's connected Amazon account (Playwright checkout). If unavailable, offer PayPal or credit card.",
-          mercadolivre: "For Mercado Livre, prefer Mercado Pago (PIX with 5% discount, card installments up to 12x, or balance). If unavailable, send the direct ML product link.",
-          us_store: "For US stores, prefer PayPal. If unavailable, offer credit card or PayJarvis Wallet.",
-          br_store: "For Brazilian stores, prefer Mercado Pago or PIX. If unavailable, offer credit card.",
-          unknown: "Offer the user's default payment method first. If no default, show all available options.",
-        };
+        // Determine checkout capability
+        const productUrl = (args.product_url as string) || null;
+        const isAmazonCheckout = storeType === "amazon" && result.options.some((o: any) => o.provider === "AMAZON" && o.canPay);
+        const isGenericCheckout = !isAmazonCheckout && productUrl && (storeType === "us_store" || storeType === "unknown") && productUrl.startsWith("http");
+        const canExecutePurchase = isAmazonCheckout || isGenericCheckout;
 
         return {
           product: productName,
-          productUrl: args.product_url || null,
+          productUrl,
           amount,
           currency,
           store: store || null,
@@ -3141,19 +3181,84 @@ async function _handleToolInner(userId: string, name: string, args: Record<strin
           options: result.options,
           message: result.message,
           hasValidOption: result.hasValidOption,
+          canExecutePurchase,
+          checkoutMethod: isAmazonCheckout ? "amazon" : isGenericCheckout ? "generic" : "link_only",
           safeguard,
-          routingHint: routingHints[storeType] || routingHints.unknown,
-          instructions: result.hasValidOption
-            ? "Present the payment options sorted by relevance (first option is the best match for this store). If only ONE option is viable, suggest it directly without listing. For amounts > $100, ask for explicit confirmation. For > $500, BLOCK and warn."
-            : storeType === "amazon"
-              ? "User has no Amazon account connected. Suggest connecting via: 'Quer conectar sua conta Amazon? Leva 1 minuto e eu compro direto pra você!'"
-              : storeType === "mercadolivre" || storeType === "br_store"
-                ? "User has no payment method for Brazilian stores. Suggest: Mercado Pago, PIX, or send the direct product link so they can buy on the site."
-                : "User has no payment method. Suggest adding PayPal (quickest), credit card, or Amazon account.",
+          instructions: isAmazonCheckout
+            ? "You CAN complete this purchase via Amazon checkout. For amounts > $100, ask for confirmation. For > $500, BLOCK."
+            : isGenericCheckout
+              ? `You CAN complete this purchase via AI-powered browser checkout. Call store_start_checkout with product_url="${productUrl}", product_name="${productName}", price=${amount}, store="${store}". This navigates to the store, adds to cart, fills shipping, and returns a screenshot for user to confirm BEFORE placing the order.`
+              : storeType === "amazon"
+                ? "User has no Amazon account connected. Suggest connecting via: 'Quer conectar sua conta Amazon? Leva 1 minuto e eu compro direto pra você!'"
+                : result.hasValidOption
+                  ? `Automated checkout not available (no product URL). Send direct link: ${productUrl || "[link do produto]"}.`
+                  : `No payment method and no automated checkout. Send link: ${productUrl || "[link do produto]"} and suggest adding PayPal.`,
         };
       } catch (err) {
         console.error("[SMART-CHECKOUT] Error:", (err as Error).message);
         return { error: `Smart checkout failed: ${(err as Error).message}` };
+      }
+    }
+
+    // ─── Generic Store Checkout ────────────────────────────
+    case "store_start_checkout": {
+      const productUrl = args.product_url as string;
+      const productName = args.product_name as string;
+      const price = args.price as number;
+      const store = args.store as string;
+      console.log(`[GENERIC-CHECKOUT] Tool: store_start_checkout { store: "${store}", product: "${productName}", price: $${price} }`);
+
+      try {
+        const { startGenericCheckout } = await import("./generic-checkout.service.js");
+        const result = await startGenericCheckout({
+          userId,
+          productUrl,
+          productName,
+          price,
+          store,
+          size: args.size as string | undefined,
+          color: args.color as string | undefined,
+          quantity: (args.quantity as number) || 1,
+        });
+
+        if (result.screenshotUrl) {
+          (result as any).instructions = `Show the checkout screenshot to the user: ${result.screenshotUrl}\n` +
+            `Tell them: "Here's your checkout. Product: ${result.summary?.productName || productName}, Total: ${result.summary?.totalDisplay || "$" + price}. Confirm to place the order."\n` +
+            `Wait for EXPLICIT confirmation before calling store_confirm_order with bb_session_id="${result.bbSessionId}".`;
+        }
+
+        return { ...result };
+      } catch (err) {
+        console.error("[GENERIC-CHECKOUT] Error:", (err as Error).message);
+        return { error: `Store checkout failed: ${(err as Error).message}` };
+      }
+    }
+
+    case "store_confirm_order": {
+      const bbSessionId = args.bb_session_id as string;
+      const expectedTotal = args.expected_total as number;
+      console.log(`[GENERIC-CHECKOUT] Tool: store_confirm_order { session: "${bbSessionId?.slice(0, 8)}", total: $${expectedTotal} }`);
+
+      try {
+        const { confirmGenericOrder } = await import("./generic-checkout.service.js");
+        const confirmResult = await confirmGenericOrder(bbSessionId, expectedTotal);
+        return { ...confirmResult };
+      } catch (err) {
+        console.error("[GENERIC-CHECKOUT] Confirm error:", (err as Error).message);
+        return { error: `Order confirmation failed: ${(err as Error).message}` };
+      }
+    }
+
+    case "store_cancel_checkout": {
+      const bbSessionId = args.bb_session_id as string;
+      console.log(`[GENERIC-CHECKOUT] Tool: store_cancel_checkout { session: "${bbSessionId?.slice(0, 8)}" }`);
+
+      try {
+        const { cancelGenericCheckout } = await import("./generic-checkout.service.js");
+        await cancelGenericCheckout(bbSessionId);
+        return { success: true, message: "Checkout cancelled" };
+      } catch (err) {
+        return { error: `Cancel failed: ${(err as Error).message}` };
       }
     }
 
@@ -3583,7 +3688,7 @@ async function _handleToolInner(userId: string, name: string, args: Record<strin
 // ─── Share / Referral for WhatsApp ──────────────────────
 
 const WA_NUMBER_US = "17547145921";
-const WA_NUMBER_BR = "551150395940";
+const WA_NUMBER_BR = "17547145921";
 const PUBLIC_BASE = process.env.WEB_URL || "https://www.payjarvis.com";
 
 async function generateShareForWhatsApp(userId: string, channel: string | null): Promise<Record<string, unknown>> {

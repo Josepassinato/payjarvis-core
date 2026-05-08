@@ -58,6 +58,7 @@ import { weatherRoutes } from "./routes/weather.js";
 import { sportsRoutes } from "./routes/sports.js";
 import { vaultRoutes } from "./routes/vault.js";
 import { checkoutRoutes } from "./routes/checkout.js";
+import { genericCheckoutApiRoutes } from "./routes/generic-checkout.js";
 import { storeRoutes } from "./routes/stores.js";
 import { botShareRoutes } from "./routes/bot-share.js";
 import { onboardingBotRoutes } from "./routes/onboarding-bot.js";
@@ -283,6 +284,9 @@ await app.register(vaultRoutes);
 
 // Amazon Checkout — real purchases via authenticated sessions
 await app.register(checkoutRoutes);
+
+// Generic Store Checkout — AI-powered checkout for any US store
+await app.register(genericCheckoutApiRoutes);
 
 // Connected Stores — universal store management (Browserbase Contexts)
 await app.register(storeRoutes);

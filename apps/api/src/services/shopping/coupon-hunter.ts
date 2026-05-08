@@ -231,10 +231,40 @@ ${batch.map((d, i) => `${i}. ${d.title} | ${d.description} | Store: ${d.store} |
     const result = await model.generateContent(prompt);
     const text = result.response.text();
 
-    // Extract JSON from response
+    // Extract JSON from response — robust parser (Gemini às vezes retorna JSON malformado)
     const jsonMatch = text.match(/\[[\s\S]*\]/);
+    let classifications: { index: number; urgency: string; reason: string }[] | null = null;
     if (jsonMatch) {
-      const classifications = JSON.parse(jsonMatch[0]) as { index: number; urgency: string; reason: string }[];
+      try {
+        classifications = JSON.parse(jsonMatch[0]);
+      } catch (parseErr) {
+        // Fallback 1: tenta limpar trailing commas e citações de fancy quotes
+        try {
+          const cleaned = jsonMatch[0]
+            .replace(/,\s*([\]}])/g, "$1") // remove trailing commas
+            .replace(/[“”]/g, '"') // smart quotes → ASCII
+            .replace(/[‘’]/g, "'");
+          classifications = JSON.parse(cleaned);
+          console.warn("[COUPON-HUNTER] Gemini JSON recovered after cleanup");
+        } catch {
+          // Fallback 2: extrai item-a-item via regex (best-effort)
+          const items: { index: number; urgency: string; reason: string }[] = [];
+          const re = /\{\s*"index"\s*:\s*(\d+)\s*,\s*"urgency"\s*:\s*"([A-Z_]+)"\s*,\s*"reason"\s*:\s*"([^"]*)"/g;
+          let m: RegExpExecArray | null;
+          while ((m = re.exec(jsonMatch[0])) !== null) {
+            items.push({ index: parseInt(m[1], 10), urgency: m[2], reason: m[3] });
+          }
+          if (items.length > 0) {
+            classifications = items;
+            console.warn(`[COUPON-HUNTER] Gemini JSON recovered via regex: ${items.length} items`);
+          } else {
+            console.error("[COUPON-HUNTER] Gemini JSON unrecoverable, raw:", jsonMatch[0].slice(0, 300));
+          }
+        }
+      }
+    }
+
+    if (classifications) {
       for (const c of classifications) {
         if (c.index >= 0 && c.index < batch.length) {
           const deal = batch[c.index];

@@ -969,7 +969,7 @@ Rules: Return ONLY the JSON, no explanation, no markdown fences. If a field is n
               if (channel === "telegram") {
                 link = `https://t.me/${botUsername}?start=${code}`;
               } else if (channel === "whatsapp_br") {
-                link = `https://wa.me/551150395940?text=${encodeURIComponent("START " + code)}`;
+                link = `https://wa.me/17547145921?text=${encodeURIComponent("START " + code)}`;
               } else {
                 link = `https://wa.me/17547145921?text=${encodeURIComponent("START " + code)}`;
               }

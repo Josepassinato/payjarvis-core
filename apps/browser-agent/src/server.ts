@@ -1064,6 +1064,14 @@ await app.register(storeActionRoutes);
 import { bbCheckoutRoutes } from "./routes/bb-checkout.js";
 await app.register(bbCheckoutRoutes);
 
+// Generic store checkout routes
+import { genericCheckoutRoutes } from "./routes/generic-checkout.js";
+await app.register(genericCheckoutRoutes);
+
+// ─── Amazon search via Browserbase ───────────────────
+import { amazonSearchBbRoutes } from "./routes/amazon-search-bb.js";
+await app.register(amazonSearchBbRoutes);
+
 // ─── Fill Form endpoint ─────────────────────────────
 
 app.post("/fill-form", async (request, reply) => {
