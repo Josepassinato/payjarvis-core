@@ -609,7 +609,7 @@ payjarvis/
 ### Option A: Docker Compose (recommended)
 
 ```bash
-git clone https://github.com/Josepassinato/Payjarvis.git
+git clone https://github.com/Josepassinato/payjarvis-core.git
 cd Payjarvis
 cp .env.example .env
 # Edit .env with your credentials
@@ -624,7 +624,7 @@ Services:
 ### Option B: Local Development
 
 ```bash
-git clone https://github.com/Josepassinato/Payjarvis.git
+git clone https://github.com/Josepassinato/payjarvis-core.git
 cd Payjarvis
 
 # Start PostgreSQL + Redis via Docker (or use your own)
