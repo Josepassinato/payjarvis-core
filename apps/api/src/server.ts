@@ -88,8 +88,6 @@ import { visaRoutes } from "./routes/visa.routes.js";
 import { shoppingConfigRoutes } from "./routes/shopping-config.js";
 import { shoppingPlannerRoutes } from "./routes/shopping-planner.routes.js";
 import { webChatRoutes } from "./routes/web-chat.js";
-import { voiceRoutes } from "./routes/voice.js";
-import { voiceAgentRoutes } from "./routes/voice-agent.js";
 import { recordingRoutes } from "./routes/recordings.js";
 import { engagementRoutes } from "./routes/engagement.js";
 import { butlerRoutes } from "./routes/butler.js";
@@ -339,12 +337,6 @@ await app.register(shoppingPlannerRoutes);
 // Web Chat — PWA chat interface (same Jarvis pipeline as WhatsApp/Telegram)
 await app.register(webChatRoutes);
 
-// Voice Calls — Twilio outbound calls, AI conversations
-await app.register(voiceRoutes);
-
-// Voice Agent — Grok Voice Agent (realtime AI calls) + MCP endpoint
-await app.register(voiceAgentRoutes);
-
 // Call Recordings — Twilio webhook, admin listing, user recordings
 await app.register(recordingRoutes);
 
@@ -435,47 +427,7 @@ try {
   console.log(`PayJarvis API listening on port ${port}`);
   startTimeoutChecker();
 
-  // ─── WebSocket upgrade for Grok Voice Agent MediaStream ───
-  // Twilio sends audio via WebSocket to /api/voice/agent/stream/:callId
-  // We handle the HTTP upgrade manually since Fastify doesn't natively support WS
-  const { WebSocketServer } = await import("ws");
-  const { handleMediaStream } = await import("./services/voice/grok-voice-agent.service.js");
-
-  const voiceAgentWss = new WebSocketServer({ noServer: true });
-
-  voiceAgentWss.on("connection", async (ws, req) => {
-    const url = req.url || "";
-    const match = url.match(/\/api\/voice\/agent\/stream\/([^/?]+)/);
-    const callId = match?.[1];
-    if (!callId) {
-      console.warn("[VOICE-AGENT-WS] No callId in URL, closing");
-      ws.close();
-      return;
-    }
-    try {
-      await handleMediaStream(ws, callId);
-    } catch (err) {
-      console.error(`[VOICE-AGENT-WS] Error handling stream for ${callId}:`, (err as Error).message);
-      ws.close();
-    }
-  });
-
-  // Attach to Fastify's underlying HTTP server
-  const httpServer = app.server;
-  httpServer.on("upgrade", (request, socket, head) => {
-    const url = request.url || "";
-    if (url.startsWith("/api/voice/agent/stream/")) {
-      voiceAgentWss.handleUpgrade(request, socket, head, (ws) => {
-        voiceAgentWss.emit("connection", ws, request);
-      });
-    }
-    // Other upgrade requests are ignored (handled by other middleware if any)
-  });
-
-  // Seed call playbooks (idempotent — upserts)
-  import("./services/voice/call-playbooks.service.js")
-    .then(m => m.seedPlaybooks())
-    .catch(err => console.error("[PLAYBOOK] Seed failed:", err.message));
+  // Phone-call runtime lives in Sniffer. PayJarvis stays on governance/audit.
 } catch (err) {
   app.log.error(err);
   process.exit(1);

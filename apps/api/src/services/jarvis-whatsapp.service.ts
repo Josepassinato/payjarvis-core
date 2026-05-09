@@ -2552,8 +2552,9 @@ async function _handleToolInner(userId: string, name: string, args: Record<strin
 
     case "make_phone_call": {
       console.log(`[VOICE] make_phone_call for userId=${userId}: ${args.phone_number} → ${args.objective}`);
-      const VOICE_API_URL = process.env.API_URL || "http://localhost:3001";
+      const VOICE_API_URL = process.env.SNIFFER_VOICE_API_URL || process.env.SNIFFER_API_URL || "http://localhost:3021";
       const VOICE_SECRET = process.env.INTERNAL_SECRET || "";
+      const VOICE_API_KEY = process.env.SNIFFER_VOICE_API_KEY || process.env.PAYJARVIS_API_KEY || "";
       try {
         let phoneNumber = args.phone_number as string | undefined;
         const contactName = (args.business_name as string) || "";
@@ -2561,7 +2562,7 @@ async function _handleToolInner(userId: string, name: string, args: Record<strin
         // Auto-lookup contact if name provided and no phone number
         if (!phoneNumber && contactName) {
           const lookupRes = await fetch(`${VOICE_API_URL}/api/voice/contacts/lookup?userId=${encodeURIComponent(userId)}&name=${encodeURIComponent(contactName)}`, {
-            headers: { "x-internal-secret": VOICE_SECRET },
+            headers: { "x-internal-secret": VOICE_SECRET, "x-bot-api-key": VOICE_API_KEY },
           });
           if (lookupRes.ok) {
             const lookupData = await lookupRes.json() as { success: boolean; contact?: { phone: string; name: string } };
@@ -2584,7 +2585,7 @@ async function _handleToolInner(userId: string, name: string, args: Record<strin
           try {
             await fetch(`${VOICE_API_URL}/api/voice/contacts`, {
               method: "POST",
-              headers: { "Content-Type": "application/json", "x-internal-secret": VOICE_SECRET },
+              headers: { "Content-Type": "application/json", "x-internal-secret": VOICE_SECRET, "x-bot-api-key": VOICE_API_KEY },
               body: JSON.stringify({ userId, name: contactName, phone: phoneNumber }),
             });
             console.log(`[VOICE] Auto-saved contact: ${contactName} → ${phoneNumber}`);
@@ -2594,7 +2595,7 @@ async function _handleToolInner(userId: string, name: string, args: Record<strin
         const channel = userId.startsWith("whatsapp:") ? "whatsapp" : "telegram";
         const res = await fetch(`${VOICE_API_URL}/api/voice/call`, {
           method: "POST",
-          headers: { "Content-Type": "application/json", "x-internal-secret": VOICE_SECRET },
+          headers: { "Content-Type": "application/json", "x-internal-secret": VOICE_SECRET, "x-bot-api-key": VOICE_API_KEY },
           body: JSON.stringify({
             userId,
             to: phoneNumber,
@@ -2617,12 +2618,13 @@ async function _handleToolInner(userId: string, name: string, args: Record<strin
 
     case "verify_caller_id": {
       console.log(`[VOICE] verify_caller_id for userId=${userId}: ${args.phone_number}`);
-      const VOICE_API_URL = process.env.API_URL || "http://localhost:3001";
+      const VOICE_API_URL = process.env.SNIFFER_VOICE_API_URL || process.env.SNIFFER_API_URL || "http://localhost:3021";
       const VOICE_SECRET = process.env.INTERNAL_SECRET || "";
+      const VOICE_API_KEY = process.env.SNIFFER_VOICE_API_KEY || process.env.PAYJARVIS_API_KEY || "";
       try {
         const res = await fetch(`${VOICE_API_URL}/api/voice/verify-caller`, {
           method: "POST",
-          headers: { "Content-Type": "application/json", "x-internal-secret": VOICE_SECRET },
+          headers: { "Content-Type": "application/json", "x-internal-secret": VOICE_SECRET, "x-bot-api-key": VOICE_API_KEY },
           body: JSON.stringify({
             userId,
             phoneNumber: args.phone_number as string,
@@ -2645,8 +2647,9 @@ async function _handleToolInner(userId: string, name: string, args: Record<strin
 
     case "call_user": {
       console.log(`[VOICE] call_user for userId=${userId}: ${args.reason}`);
-      const VOICE_API_URL = process.env.API_URL || "http://localhost:3001";
+      const VOICE_API_URL = process.env.SNIFFER_VOICE_API_URL || process.env.SNIFFER_API_URL || "http://localhost:3021";
       const VOICE_SECRET = process.env.INTERNAL_SECRET || "";
+      const VOICE_API_KEY = process.env.SNIFFER_VOICE_API_KEY || process.env.PAYJARVIS_API_KEY || "";
       try {
         // Resolve user phone number
         const cleanPhone = userId.replace("whatsapp:", "");
@@ -2667,7 +2670,7 @@ async function _handleToolInner(userId: string, name: string, args: Record<strin
         const channel = userId.startsWith("whatsapp:") ? "whatsapp" : "telegram";
         const res = await fetch(`${VOICE_API_URL}/api/voice/call`, {
           method: "POST",
-          headers: { "Content-Type": "application/json", "x-internal-secret": VOICE_SECRET },
+          headers: { "Content-Type": "application/json", "x-internal-secret": VOICE_SECRET, "x-bot-api-key": VOICE_API_KEY },
           body: JSON.stringify({
             userId,
             to: userPhone.startsWith("+") ? userPhone : `+${userPhone}`,
@@ -2690,11 +2693,12 @@ async function _handleToolInner(userId: string, name: string, args: Record<strin
 
     case "list_contacts": {
       console.log(`[VOICE] list_contacts for userId=${userId}`);
-      const VOICE_API_URL = process.env.API_URL || "http://localhost:3001";
+      const VOICE_API_URL = process.env.SNIFFER_VOICE_API_URL || process.env.SNIFFER_API_URL || "http://localhost:3021";
       const VOICE_SECRET = process.env.INTERNAL_SECRET || "";
+      const VOICE_API_KEY = process.env.SNIFFER_VOICE_API_KEY || process.env.PAYJARVIS_API_KEY || "";
       try {
         const res = await fetch(`${VOICE_API_URL}/api/voice/contacts?userId=${encodeURIComponent(userId)}`, {
-          headers: { "x-internal-secret": VOICE_SECRET },
+          headers: { "x-internal-secret": VOICE_SECRET, "x-bot-api-key": VOICE_API_KEY },
         });
         const result = await res.json() as { success: boolean; contacts?: Array<{ name: string; phone: string; relationship: string | null }> };
         if (result.success && result.contacts) {
@@ -2711,12 +2715,13 @@ async function _handleToolInner(userId: string, name: string, args: Record<strin
 
     case "delete_contact": {
       console.log(`[VOICE] delete_contact for userId=${userId}: ${args.name}`);
-      const VOICE_API_URL = process.env.API_URL || "http://localhost:3001";
+      const VOICE_API_URL = process.env.SNIFFER_VOICE_API_URL || process.env.SNIFFER_API_URL || "http://localhost:3021";
       const VOICE_SECRET = process.env.INTERNAL_SECRET || "";
+      const VOICE_API_KEY = process.env.SNIFFER_VOICE_API_KEY || process.env.PAYJARVIS_API_KEY || "";
       try {
         const res = await fetch(`${VOICE_API_URL}/api/voice/contacts/${encodeURIComponent(args.name as string)}?userId=${encodeURIComponent(userId)}`, {
           method: "DELETE",
-          headers: { "x-internal-secret": VOICE_SECRET },
+          headers: { "x-internal-secret": VOICE_SECRET, "x-bot-api-key": VOICE_API_KEY },
         });
         const result = await res.json() as { success: boolean; message?: string };
         return result;
@@ -2727,13 +2732,14 @@ async function _handleToolInner(userId: string, name: string, args: Record<strin
 
     case "update_contact": {
       console.log(`[VOICE] update_contact for userId=${userId}: ${args.name} → ${args.phone}`);
-      const VOICE_API_URL = process.env.API_URL || "http://localhost:3001";
+      const VOICE_API_URL = process.env.SNIFFER_VOICE_API_URL || process.env.SNIFFER_API_URL || "http://localhost:3021";
       const VOICE_SECRET = process.env.INTERNAL_SECRET || "";
+      const VOICE_API_KEY = process.env.SNIFFER_VOICE_API_KEY || process.env.PAYJARVIS_API_KEY || "";
       try {
         // Save with new phone (upsert behavior)
         const res = await fetch(`${VOICE_API_URL}/api/voice/contacts`, {
           method: "POST",
-          headers: { "Content-Type": "application/json", "x-internal-secret": VOICE_SECRET },
+          headers: { "Content-Type": "application/json", "x-internal-secret": VOICE_SECRET, "x-bot-api-key": VOICE_API_KEY },
           body: JSON.stringify({ userId, name: args.name as string, phone: args.phone as string }),
         });
         const result = await res.json() as { success: boolean };
