@@ -31,6 +31,7 @@ const SEARCH_URLS: Record<string, (query: string) => string> = {
   target: (q) => `https://www.target.com/s?searchTerm=${encodeURIComponent(q)}`,
   bestbuy: (q) => `https://www.bestbuy.com/site/searchpage.jsp?st=${encodeURIComponent(q)}`,
   ebay: (q) => `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(q)}`,
+  shopify: (q) => `/search?q=${encodeURIComponent(q)}`,
 };
 
 // ─── Add to cart selectors per store ─────────────────
@@ -41,9 +42,15 @@ const ADD_TO_CART_SELECTORS: Record<string, string> = {
   target: "[data-test='orderPickupButton'], [data-test='shipItButton']",
   bestbuy: ".add-to-cart-button, button[data-button-state='ADD_TO_CART']",
   ebay: "#atcBtn_btn_1, a[data-testid='x-atc-action']",
+  shopify: "form[action*='/cart/add'] button[type='submit'], button[name='add'], [data-add-to-cart], .product-form__submit",
 };
 
 const DEFAULT_ADD_SELECTOR = "button:has-text('Add to Cart'), button:has-text('Add to Bag'), button:has-text('Add to cart')";
+const LOGIN_REQUIRED_FOR_CART = new Set(["amazon", "walmart", "target", "bestbuy"]);
+
+function normalizeStoreUrl(storeUrl: string): string {
+  return storeUrl.replace(/\/$/, "");
+}
 
 export async function storeActionRoutes(app: FastifyInstance) {
 
@@ -146,9 +153,12 @@ export async function storeActionRoutes(app: FastifyInstance) {
 
     const maxResults = body.maxResults ?? 5;
     const searchUrlBuilder = SEARCH_URLS[body.store];
-    const searchUrl = searchUrlBuilder
+    const searchPath = searchUrlBuilder
       ? searchUrlBuilder(body.query)
-      : `${body.storeUrl}/search?q=${encodeURIComponent(body.query)}`;
+      : `/search?q=${encodeURIComponent(body.query)}`;
+    const searchUrl = searchPath.startsWith("http")
+      ? searchPath
+      : `${normalizeStoreUrl(body.storeUrl)}${searchPath.startsWith("/") ? searchPath : `/${searchPath}`}`;
 
     let browser, page;
     try {
@@ -190,12 +200,23 @@ export async function storeActionRoutes(app: FastifyInstance) {
           }).filter((p) => p.title);
         }
 
+        if (store === "shopify") {
+          const items = Array.from(document.querySelectorAll(".grid__item, .card-wrapper, .product-card, [class*='product-card'], li[class*='grid']"));
+          return items.slice(0, max).map((item) => {
+            const title = item.querySelector(".card__heading, .product-card__title, .full-unstyled-link, h2, h3")?.textContent?.trim() ?? null;
+            const price = item.querySelector(".price, .price-item, [class*='price']")?.textContent?.trim() ?? null;
+            const link = (item.querySelector("a[href*='/products/'], a[href*='/product/']") as HTMLAnchorElement)?.href ?? null;
+            const image = (item.querySelector("img") as HTMLImageElement)?.src ?? null;
+            return { title, price, link, image, asin: null, rating: null, isPrime: false };
+          }).filter((p) => p.title && p.link);
+        }
+
         // Generic extraction
-        const items = Array.from(document.querySelectorAll("[data-item-id], [data-product-id], article, .product-card, .s-result-item"));
+        const items = Array.from(document.querySelectorAll("[data-item-id], [data-product-id], article, .product-card, .s-result-item, .grid__item, .card-wrapper"));
         return items.slice(0, max).map((item) => {
-          const title = item.querySelector("h2, h3, [data-automation-id='product-title'], .product-title")?.textContent?.trim() ?? null;
-          const price = item.querySelector("[data-automation-id='product-price'], .price, [itemprop='price']")?.textContent?.trim() ?? null;
-          const link = (item.querySelector("a[href*='/product'], a[href*='/ip/'], h2 a, h3 a") as HTMLAnchorElement)?.href ?? null;
+          const title = item.querySelector("h2, h3, [data-automation-id='product-title'], .product-title, .card__heading, .full-unstyled-link")?.textContent?.trim() ?? null;
+          const price = item.querySelector("[data-automation-id='product-price'], .price, [itemprop='price'], .price-item")?.textContent?.trim() ?? null;
+          const link = (item.querySelector("a[href*='/product'], a[href*='/products/'], a[href*='/ip/'], h2 a, h3 a") as HTMLAnchorElement)?.href ?? null;
           const image = (item.querySelector("img") as HTMLImageElement)?.src ?? null;
           return { title, price, link, image, asin: null, rating: null, isPrime: false };
         }).filter((p) => p.title);
@@ -251,15 +272,17 @@ export async function storeActionRoutes(app: FastifyInstance) {
       browser = session.browser;
       page = session.page;
 
-      // Verify login
-      const loginStatus = await checkLoginStatus(page, body.store);
-      if (!loginStatus.loggedIn) {
-        await closeSession(session.bbSessionId, browser);
-        return reply.status(401).send({
-          success: false,
-          error: "Login expired. User must reauthenticate.",
-          code: "SESSION_EXPIRED",
-        });
+      // Only force login for merchants where cart/checkout commonly requires an account.
+      if (LOGIN_REQUIRED_FOR_CART.has(body.store)) {
+        const loginStatus = await checkLoginStatus(page, body.store);
+        if (!loginStatus.loggedIn) {
+          await closeSession(session.bbSessionId, browser);
+          return reply.status(401).send({
+            success: false,
+            error: "Login expired. User must reauthenticate.",
+            code: "SESSION_EXPIRED",
+          });
+        }
       }
 
       // Wait for page to fully load
@@ -267,8 +290,8 @@ export async function storeActionRoutes(app: FastifyInstance) {
 
       // Extract product info
       const productInfo = await page.evaluate(() => {
-        const title = document.querySelector("#productTitle, h1, [data-automation-id='product-title']")?.textContent?.trim() ?? null;
-        const price = document.querySelector(".a-price .a-offscreen, [itemprop='price'], .price-characteristic")?.textContent?.trim() ?? null;
+        const title = document.querySelector("#productTitle, h1, [data-automation-id='product-title'], .product__title, .product-title")?.textContent?.trim() ?? null;
+        const price = document.querySelector(".a-price .a-offscreen, [itemprop='price'], .price-characteristic, .price, .price-item")?.textContent?.trim() ?? null;
         return { title, price };
       });
 
@@ -309,7 +332,7 @@ export async function storeActionRoutes(app: FastifyInstance) {
 
       const cartUrl = body.store === "amazon"
         ? "https://www.amazon.com/gp/cart/view.html"
-        : `${body.storeUrl}/cart`;
+        : `${normalizeStoreUrl(body.storeUrl)}/cart`;
 
       await closeSession(session.bbSessionId, browser);
 
