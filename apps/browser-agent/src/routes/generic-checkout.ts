@@ -46,6 +46,138 @@ const STAGEHAND_MODEL = process.env.OPENAI_API_KEY
 const SCREENSHOT_DIR = "/tmp/checkout-screenshots";
 if (!fs.existsSync(SCREENSHOT_DIR)) fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
 
+
+type CheckoutShippingAddress = {
+  fullName?: string;
+  name?: string;
+  address?: string;
+  address1?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+  postalCode?: string;
+  phone?: string;
+};
+
+type CheckoutPaymentRef = {
+  provider?: string;
+  method?: string;
+  payment_method_id?: string;
+  wallet_reference?: string;
+  handoff_required?: boolean;
+  brand?: string | null;
+  last4?: string | null;
+};
+
+type CheckoutMandates = {
+  cart_mandate_id?: string | null;
+  cart_mandate_hash?: string | null;
+  payment_mandate_id?: string | null;
+  payment_mandate_hash?: string | null;
+};
+
+function normalizeShipping(body: { shipping?: CheckoutShippingAddress; shippingAddress?: CheckoutShippingAddress }): CheckoutShippingAddress | null {
+  const raw = body.shippingAddress || body.shipping;
+  if (!raw) return null;
+  return {
+    fullName: raw.fullName || raw.name,
+    address: raw.address || raw.address1,
+    city: raw.city,
+    state: raw.state,
+    zip: raw.zip || raw.postalCode,
+    phone: raw.phone,
+  };
+}
+
+function normalizePayment(body: { payment?: CheckoutPaymentRef & { method?: string }; paymentMethod?: CheckoutPaymentRef }): CheckoutPaymentRef | null {
+  const raw = body.paymentMethod || body.payment;
+  if (!raw) return null;
+  const provider = raw.provider || raw.method;
+  return { ...raw, provider };
+}
+
+function handoffResponse(sessionId: string, obstacleType: string, message: string, details: Record<string, unknown> = {}) {
+  return {
+    success: false,
+    error: obstacleType,
+    code: obstacleType,
+    needsHandoff: true,
+    message,
+    sessionId,
+    ...details,
+  };
+}
+
+async function detectCheckoutObstacle(page: any) {
+  try {
+    return await page.evaluate(() => {
+      const body = (document.body?.innerText || '').toLowerCase();
+      const url = window.location.href.toLowerCase();
+      const hasSelector = (selector: string) => Boolean(document.querySelector(selector));
+
+      if (
+        hasSelector('iframe[src*="recaptcha"]') ||
+        hasSelector('iframe[src*="hcaptcha"]') ||
+        hasSelector('[class*="captcha" i]') ||
+        hasSelector('[id*="captcha" i]') ||
+        body.includes('captcha') ||
+        body.includes('security check') ||
+        body.includes('verify you are human')
+      ) {
+        return { blocked: true, code: 'NEEDS_CAPTCHA', message: 'Security challenge or CAPTCHA requires user handoff.' };
+      }
+
+      if (
+        hasSelector('input[type="password"]') ||
+        url.includes('/login') ||
+        url.includes('/signin') ||
+        url.includes('/sign-in') ||
+        body.includes('sign in') ||
+        body.includes('log in')
+      ) {
+        return { blocked: true, code: 'NEEDS_LOGIN', message: 'Merchant login is required.' };
+      }
+
+      if (
+        body.includes('two-factor') ||
+        body.includes('2fa') ||
+        body.includes('multi-factor') ||
+        body.includes('verification code') ||
+        body.includes('one-time code') ||
+        hasSelector('input[autocomplete="one-time-code"]')
+      ) {
+        return { blocked: true, code: 'NEEDS_2FA', message: 'Two-factor authentication is required.' };
+      }
+
+      if (
+        hasSelector('input[name*="cvv" i]') ||
+        hasSelector('input[id*="cvv" i]') ||
+        hasSelector('input[name*="cvc" i]') ||
+        hasSelector('input[id*="cvc" i]') ||
+        body.includes('security code') ||
+        body.includes('cvv') ||
+        body.includes('cvc')
+      ) {
+        return { blocked: true, code: 'NEEDS_CVV', message: 'CVV/security code requires user handoff.' };
+      }
+
+      return { blocked: false };
+    });
+  } catch {
+    return { blocked: false };
+  }
+}
+
+function mandateSummary(mandates?: CheckoutMandates | null) {
+  if (!mandates) return null;
+  return {
+    cart_mandate_id: mandates.cart_mandate_id || null,
+    cart_mandate_hash: mandates.cart_mandate_hash || null,
+    payment_mandate_id: mandates.payment_mandate_id || null,
+    payment_mandate_hash: mandates.payment_mandate_hash || null,
+  };
+}
+
 export async function genericCheckoutRoutes(app: FastifyInstance) {
 
   // ── POST /generic/start — Open session, navigate to product URL ──
@@ -233,20 +365,11 @@ export async function genericCheckoutRoutes(app: FastifyInstance) {
   app.post("/generic/checkout", async (request, reply) => {
     const body = request.body as {
       bbSessionId: string;
-      shipping?: {
-        fullName: string;
-        address: string;
-        city: string;
-        state: string;
-        zip: string;
-        phone?: string;
-      };
-      payment?: {
-        method: string; // "paypal" | "card"
-        cardNumber?: string;
-        expiry?: string;
-        cvv?: string;
-      };
+      shipping?: CheckoutShippingAddress;
+      shippingAddress?: CheckoutShippingAddress;
+      payment?: CheckoutPaymentRef & { method?: string; cardNumber?: string; expiry?: string; cvv?: string };
+      paymentMethod?: CheckoutPaymentRef;
+      mandates?: CheckoutMandates;
       email?: string;
     };
 
@@ -265,8 +388,10 @@ export async function genericCheckoutRoutes(app: FastifyInstance) {
     try {
       const { stagehand } = sess;
       const page = stagehand.context.pages()[0];
+      const shipping = normalizeShipping(body);
+      const paymentRef = normalizePayment(body);
 
-      console.log(`${tag} store=${sess.store}, session=${body.bbSessionId.slice(0, 8)}`);
+      console.log(`${tag} store=${sess.store}, session=${body.bbSessionId.slice(0, 8)}, mandates=${JSON.stringify(mandateSummary(body.mandates))}`);
 
       // Navigate to checkout
       console.log(`${tag} Navigating to checkout...`);
@@ -284,6 +409,11 @@ export async function genericCheckoutRoutes(app: FastifyInstance) {
       }
 
       await page.waitForTimeout(3000);
+
+      const initialObstacle = await detectCheckoutObstacle(page);
+      if (initialObstacle.blocked && initialObstacle.code !== 'NEEDS_LOGIN') {
+        return handoffResponse(body.bbSessionId, initialObstacle.code, initialObstacle.message, { currentUrl: page.url() });
+      }
 
       // Check if we need to sign in (guest checkout option)
       const pageState = await stagehand.extract(
@@ -306,11 +436,7 @@ export async function genericCheckoutRoutes(app: FastifyInstance) {
         await stagehand.act("Click 'Guest Checkout', 'Continue as Guest', or 'Checkout without account' button");
         await page.waitForTimeout(2000);
       } else if (pageState.needsLogin && !pageState.hasGuestOption) {
-        return {
-          success: false,
-          error: "NEEDS_LOGIN",
-          message: "This store requires an account to checkout. Guest checkout is not available.",
-        };
+        return handoffResponse(body.bbSessionId, "NEEDS_LOGIN", "This store requires account login before checkout.", { currentUrl: page.url() });
       }
 
       // Fill email if needed
@@ -323,17 +449,17 @@ export async function genericCheckoutRoutes(app: FastifyInstance) {
       }
 
       // Fill shipping address if provided
-      if (body.shipping) {
-        const s = body.shipping;
+      if (shipping) {
+        const s = shipping;
         console.log(`[CHECKOUT][3-SHIPPING] Filling shipping: ${s.fullName}, ${s.city} ${s.state}`);
 
         const shippingInstructions = [
-          `Type "${s.fullName}" into the full name or first name + last name fields`,
-          `Type "${s.address}" into the street address field`,
-          `Type "${s.city}" into the city field`,
-          `Select or type "${s.state}" for the state field`,
-          `Type "${s.zip}" into the ZIP code or postal code field`,
-        ];
+          s.fullName ? `Type "${s.fullName}" into the full name or first name + last name fields` : null,
+          s.address ? `Type "${s.address}" into the street address field` : null,
+          s.city ? `Type "${s.city}" into the city field` : null,
+          s.state ? `Select or type "${s.state}" for the state field` : null,
+          s.zip ? `Type "${s.zip}" into the ZIP code or postal code field` : null,
+        ].filter(Boolean) as string[];
         if (s.phone) {
           shippingInstructions.push(`Type "${s.phone}" into the phone number field`);
         }
@@ -354,36 +480,22 @@ export async function genericCheckoutRoutes(app: FastifyInstance) {
         } catch { /* might auto-advance */ }
       }
 
-      // Fill payment if provided (card only — PayPal handled separately)
+      const prePaymentObstacle = await detectCheckoutObstacle(page);
+      if (prePaymentObstacle.blocked) {
+        return handoffResponse(body.bbSessionId, prePaymentObstacle.code, prePaymentObstacle.message, { currentUrl: page.url() });
+      }
+
+      if (paymentRef?.handoff_required || paymentRef?.provider === 'manual_handoff') {
+        return handoffResponse(body.bbSessionId, 'NEEDS_PAYMENT_HANDOFF', 'Payment method requires user handoff before final checkout.', { currentUrl: page.url(), mandates: mandateSummary(body.mandates) });
+      }
+
+      // Raw card entry is intentionally refused. Use a tokenized wallet/payment method or handoff.
       if (body.payment?.method === "card" && body.payment.cardNumber) {
-        const tagPay = `[CHECKOUT][4-PAYMENT]`;
-        const p = body.payment;
-        console.log(`${tagPay} Filling card: ****${p.cardNumber?.slice(-4)}`);
-
-        try {
-          await stagehand.act(`Type "${p.cardNumber}" into the credit card number field`);
-          await page.waitForTimeout(500);
-          if (p.expiry) {
-            await stagehand.act(`Type "${p.expiry}" into the expiration date field`);
-            await page.waitForTimeout(500);
-          }
-          if (p.cvv) {
-            await stagehand.act(`Type "${p.cvv}" into the CVV or security code field`);
-            await page.waitForTimeout(500);
-          }
-        } catch (e) {
-          console.log(`${tagPay} Payment fill error: ${(e as Error).message.slice(0, 60)}`);
-        }
-
-        // Click continue after payment
-        try {
-          await stagehand.act("Click 'Continue', 'Review Order', or 'Next' button");
-          await page.waitForTimeout(3000);
-        } catch { /* might auto-advance */ }
+        return handoffResponse(body.bbSessionId, 'RAW_CARD_REFUSED', 'Raw card entry is not allowed. Use a tokenized wallet/payment method or handoff.', { currentUrl: page.url() });
       }
 
       // If PayPal selected, click PayPal button
-      if (body.payment?.method === "paypal") {
+      if (paymentRef?.provider === "paypal") {
         const tagPay = `[CHECKOUT][4-PAYMENT]`;
         console.log(`${tagPay} Selecting PayPal...`);
         try {
@@ -396,7 +508,12 @@ export async function genericCheckoutRoutes(app: FastifyInstance) {
 
       console.log(`${tag} Checkout navigation completed in ${Date.now() - t0}ms`);
 
-      return { success: true, pageState };
+      const finalObstacle = await detectCheckoutObstacle(page);
+      if (finalObstacle.blocked) {
+        return handoffResponse(body.bbSessionId, finalObstacle.code, finalObstacle.message, { currentUrl: page.url() });
+      }
+
+      return { success: true, pageState, mandates: mandateSummary(body.mandates), currentUrl: page.url() };
     } catch (err) {
       const message = err instanceof Error ? err.message : "Checkout navigation failed";
       console.error(`${tag} ERROR — ${message}`);
@@ -469,6 +586,9 @@ export async function genericCheckoutRoutes(app: FastifyInstance) {
     const body = request.body as {
       bbSessionId: string;
       expectedTotal: number; // Price the user confirmed — must match within 10%
+      shippingAddress?: CheckoutShippingAddress;
+      paymentMethod?: CheckoutPaymentRef;
+      mandates?: CheckoutMandates;
     };
 
     if (!body?.bbSessionId || body.expectedTotal == null) {
@@ -487,7 +607,17 @@ export async function genericCheckoutRoutes(app: FastifyInstance) {
       const { stagehand } = sess;
       const page = stagehand.context.pages()[0];
 
-      console.log(`${tag} Placing order, store=${sess.store}, expectedTotal=$${body.expectedTotal}, session=${body.bbSessionId.slice(0, 8)}`);
+      console.log(`${tag} Placing order, store=${sess.store}, expectedTotal=$${body.expectedTotal}, session=${body.bbSessionId.slice(0, 8)}, mandates=${JSON.stringify(mandateSummary(body.mandates))}`);
+
+      const paymentRef = normalizePayment({ paymentMethod: body.paymentMethod });
+      if (paymentRef?.handoff_required || paymentRef?.provider === 'manual_handoff') {
+        return handoffResponse(body.bbSessionId, 'NEEDS_PAYMENT_HANDOFF', 'Payment method requires user handoff before placing the order.', { currentUrl: page.url(), mandates: mandateSummary(body.mandates) });
+      }
+
+      const obstacle = await detectCheckoutObstacle(page);
+      if (obstacle.blocked) {
+        return handoffResponse(body.bbSessionId, obstacle.code, obstacle.message, { currentUrl: page.url(), mandates: mandateSummary(body.mandates) });
+      }
 
       // Extract current total from page to verify
       const priceCheck = await stagehand.extract(
@@ -578,6 +708,8 @@ export async function genericCheckoutRoutes(app: FastifyInstance) {
           data: {
             confirmed: true,
             orderNumber: confirmation.orderNumber,
+            orderId: confirmation.orderNumber,
+            merchant_order_id: confirmation.orderNumber,
             estimatedDelivery: confirmation.estimatedDelivery,
             total: confirmation.total,
             confirmationMessage: confirmation.confirmationMessage,
@@ -589,6 +721,7 @@ export async function genericCheckoutRoutes(app: FastifyInstance) {
               pageTextSnippet,
               screenshotBase64,
               markers,
+              mandates: mandateSummary(body.mandates),
             },
           },
         };
