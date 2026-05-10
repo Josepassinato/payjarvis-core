@@ -36,3 +36,17 @@ export type {
   PaymentOutcomeReceiptParams,
   VerifyEnvelopeResult,
 } from "./ctef.js";
+
+// Concordia agreement bridge — Agreement -> Settlement boundary.
+export {
+  verifyConcordiaAgreement,
+  extractTermsFromEnvelope,
+  extractSourceSession,
+  loadConcordiaOptionsFromEnv,
+} from "./concordia.js";
+export type {
+  ConcordiaSourceRef,
+  ConcordiaAgreementTerms,
+  ConcordiaVerificationOptions,
+  ConcordiaVerificationResult,
+} from "./concordia.js";

@@ -388,33 +388,101 @@ the binding is preserved by these claims:
 ### 10.1. Concordia → BDIT issuance flow
 
 ```
-1. Agent A ↔ Agent B negotiate via Concordia, reaching agreement T
-   with session_id = ses_xyz, transcript_hash = sha256:abc...
+1. Agent A ↔ Agent B negotiate via Concordia, reaching a signed
+   agreement (CTEF envelope, EdDSA-signed by Concordia issuer).
+   Envelope includes:
+     - signature: { alg: "EdDSA", kid, value }
+     - provider:  { did: "did:web:concordia.example", name, kid }
+     - references: [{ kind: "source_session", urn, hash }]
+     - payload:   { max_amount, currency, categories, ... }
 
-2. Authorized party (or PayJarvis as integrated issuer) submits the
-   agreement reference to PayJarvis:
+2. Bot (or its operator) presents the agreement envelope to PayJarvis:
 
-       POST /bdit/from-agreement
+       POST /api/bdit/from-agreement
+       Headers:
+         X-Bot-Api-Key: <bot api key>
+       Body:
+         {
+           "concordia_envelope": <full signed CTEF envelope>,
+           "session_id":         "<optional; defaults to source_session URN tail>"
+         }
+
+3. PayJarvis verifyConcordiaAgreement(envelope) checks:
+     a. envelope.signature.alg === "EdDSA"
+     b. envelope.provider.did ∈ CONCORDIA_TRUSTED_PROVIDER_DIDS
+        (when configured)
+     c. references contains a source_session with urn + hash
+     d. signature verifies against CONCORDIA_JWKS_URL (strict mode)
+        — or shape-only (CONCORDIA_VERIFY_MODE=permissive, dev only)
+     e. payload contains max_amount (number), currency (string),
+        categories (non-empty string array)
+
+4. Mandate is DERIVED from the verified envelope:
+       BDIT.max_amount    ← envelope.payload.max_amount
+       BDIT.categories    ← envelope.payload.categories
+       BDIT.merchant_id   ← envelope.payload.merchant_id ?? "*"
+       BDIT.amount        ← envelope.payload.amount ?? max_amount
+       BDIT.category      ← envelope.payload.category ?? categories[0]
+       BDIT.mandate_source            ← "concordia"
+       BDIT.concordia_session_urn     ← references[*].urn
+       BDIT.concordia_transcript_hash ← references[*].hash
+
+   The caller never supplies these values directly; they flow from
+   the verified envelope. This is the structural enforcement of
+   invariant 9.1 across the Agreement → Settlement boundary.
+
+5. PayJarvis signs and returns a BDIT (Ed25519 if configured, else
+   RS256 — see §12 dual-sign migration):
+
+       Response 200:
        {
-         "concordia_session_urn":     "urn:concordia:session:ses_xyz",
-         "concordia_transcript_hash": "sha256:abc...",
-         "bot_id":                    "bot_executor_42"
+         "token":                    "<JWS token>",
+         "jti":                      "<uuid v4>",
+         "expires_at":               "<ISO8601, +5min from issue>",
+         "mandate_source":           "concordia",
+         "concordia_session_urn":    "urn:concordia:session:ses_xyz",
+         "concordia_transcript_hash":"sha256:abc...",
+         "signature_verified":       true|false
        }
 
-3. PayJarvis verifies the Concordia session (signature, integrity),
-   derives the mandate claims from the agreed terms (max_amount,
-   categories, merchant_id, amount, category) and issues a BDIT
-   carrying mandate_source="concordia" plus the URN + hash.
-
-4. Bot presents the BDIT to the payment rail. The rail verifies the
+6. Bot presents the BDIT to the payment rail. The rail verifies the
    JWS signature against PayJarvis's JWKS and consumes the mandate
    claims to authorize execution.
 ```
 
-The caller of `/bdit/from-agreement` cannot inflate mandate beyond
-what the agreement permits — mandate is **derived**, not free-form
-input. This is the structural enforcement of invariant 9.1 across the
-Agreement → Settlement boundary.
+#### Operator configuration
+
+| Env | Required | Description |
+|---|---|---|
+| `CONCORDIA_JWKS_URL` | Strict mode | URL of Concordia issuer's JWKS endpoint. Required to enable Ed25519 signature verification on inbound agreements. |
+| `CONCORDIA_TRUSTED_PROVIDER_DIDS` | Recommended | Comma-separated allow-list of `provider.did` values accepted as Concordia issuers (e.g., `did:web:concordia.example,did:web:other-issuer.example`). When unset, any DID is accepted (dangerous in prod). |
+| `CONCORDIA_VERIFY_MODE` | No | `strict` (default) or `permissive`. Permissive skips cryptographic verification — for dev/integration when JWKS is not yet exposed. Logs a warning; `signature_verified` returns `false` in the response. Refuses to operate in default `strict` mode unless `CONCORDIA_JWKS_URL` is set. |
+
+#### Error responses
+
+| Status | Cause |
+|---|---|
+| 400 | Missing `concordia_envelope`, malformed envelope, missing `source_session` reference, invalid terms (no `max_amount`/`currency`/`categories`), failed signature verification |
+| 401 | Missing/invalid `X-Bot-Api-Key` |
+| 403 | Bot revoked, paused, or not active |
+| 404 | Bot not found |
+| 503 | BDIT signing key not configured (operator must run `npm run -w @payjarvis/bdit generate-keys` and provision keys) |
+
+#### What is NOT yet enforced (v1.1+)
+
+- **Owner policy composition**: a bot owner may have configured stricter
+  policy than the agreement permits (e.g., a $200 daily cap when
+  agreement allows $2000). v1 mints the BDIT directly from agreement
+  terms; v1.1 will compose with owner policy via DecisionEngine,
+  applying the **intersection** of agreement and owner policy as the
+  effective mandate.
+- **Single-use enforcement on Concordia transcript_hash**: a single
+  agreement could be used to mint multiple BDITs (each binding to the
+  same transcript_hash). v1.1 will track consumed transcripts and
+  reject re-use.
+- **Multi-signer agreements**: agreements signed by both negotiating
+  parties (vs single-issuer). v1 trusts the issuer's signature; v1.1
+  will accept and verify multi-signer envelopes.
 
 ### 10.2. Reputation Attestations (Trust layer)
 
@@ -596,6 +664,7 @@ structural completion of the loop sketched in §10.2.
 | 1.0 | 2026-03-04 | Initial specification |
 | 1.1-draft | 2026-05-10 | Added §9 Architectural invariants (mandate grants authority, reputation informs only). Added §10 Concordia stack mapping (`mandate_source`, `concordia_session_urn`, `concordia_transcript_hash`, `concordia_terms_hash` claims). DecisionEngine refactored into `evaluateMandate()` + `applyReputationRouting()` (demote-only). |
 | 1.2-draft | 2026-05-10 | Added §11 CTEF outcome receipts (Concordia-compatible signed envelopes, EdDSA / Ed25519). New endpoint `POST /api/bdit/receipts`. Added §10.2 cross-reference and §11.6 Verascore consumption note. RS256 → Ed25519 dual-sign migration available via `BDIT_SIGNING_ALG=EdDSA`. |
+| 1.3-draft | 2026-05-10 | Locked §10.1 Concordia → BDIT issuance flow concrete contract. New endpoint `POST /api/bdit/from-agreement` accepts CTEF agreement envelopes from Concordia issuers, derives mandate from verified envelope (caller cannot inflate). New env config `CONCORDIA_JWKS_URL` + `CONCORDIA_TRUSTED_PROVIDER_DIDS` + `CONCORDIA_VERIFY_MODE`. Strict mode requires JWKS for signature verification; permissive mode skips crypto for dev/integration. |
 
 ---
 
