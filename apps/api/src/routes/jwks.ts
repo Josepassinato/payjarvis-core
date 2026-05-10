@@ -1,48 +1,26 @@
 import type { FastifyInstance } from "fastify";
 import { importSPKI, exportJWK } from "jose";
-
-interface KeyEntry {
-  pem: string;
-  kid: string;
-}
-
-function loadKeys(): KeyEntry[] {
-  const keys: KeyEntry[] = [];
-  const env = process.env.BDIT_ENV ?? process.env.NODE_ENV ?? "development";
-
-  // Current active key
-  const currentPem = process.env.PAYJARVIS_PUBLIC_KEY?.replace(/\\n/g, "\n");
-  const currentKid = process.env.PAYJARVIS_KEY_ID ?? `payjarvis-${env}-001`;
-  if (currentPem) {
-    keys.push({ pem: currentPem, kid: currentKid });
-  }
-
-  // Previous key (kept during rotation grace period)
-  const prevPem = process.env.PAYJARVIS_PUBLIC_KEY_PREV?.replace(/\\n/g, "\n");
-  const prevKid = process.env.PAYJARVIS_KEY_ID_PREV;
-  if (prevPem && prevKid) {
-    keys.push({ pem: prevPem, kid: prevKid });
-  }
-
-  return keys;
-}
+import { loadPublicKeys } from "@payjarvis/bdit";
 
 export async function jwksRoutes(app: FastifyInstance) {
   app.get("/.well-known/jwks.json", async (_request, reply) => {
-    const keyEntries = loadKeys();
+    const keyEntries = loadPublicKeys();
 
     if (keyEntries.length === 0) {
       return reply.status(503).send({ error: "No signing keys configured" });
     }
 
+    // Each entry already carries its algorithm — RS256 (legacy) and
+    // EdDSA (Concordia-aligned, default for new issuance) are both
+    // emitted so verifiers can resolve any kid on the wire.
     const jwkKeys = await Promise.all(
       keyEntries.map(async (entry) => {
-        const publicKey = await importSPKI(entry.pem, "RS256");
+        const publicKey = await importSPKI(entry.pem, entry.alg);
         const jwk = await exportJWK(publicKey);
         return {
           ...jwk,
           kid: entry.kid,
-          alg: "RS256",
+          alg: entry.alg,
           use: "sig",
         };
       })

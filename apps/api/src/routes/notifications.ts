@@ -16,10 +16,9 @@ import { emitHandoffEvent, emitBotHandoffEvent } from "./handoffs.js";
 import { randomInt, randomUUID } from "node:crypto";
 
 export async function notificationRoutes(app: FastifyInstance) {
-  const issuer = new BditIssuer(
-    (process.env.PAYJARVIS_PRIVATE_KEY ?? "").replace(/\\n/g, "\n"),
-    process.env.PAYJARVIS_KEY_ID ?? "payjarvis-key-001"
-  );
+  // BditIssuer.fromEnv() picks the active signing alg per BDIT_SIGNING_ALG
+  // (default EdDSA when Ed25519 keys are configured, else RS256).
+  const issuer = BditIssuer.fromEnv();
 
   // Generate Telegram link code
   app.post("/api/notifications/telegram/link", { preHandler: [requireAuth] }, async (request, reply) => {

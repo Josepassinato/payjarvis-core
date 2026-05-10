@@ -15,15 +15,10 @@ import { TRUST_THRESHOLD_BLOCK } from "@payjarvis/types";
 import { dispatchWebhook } from "../services/webhook-dispatcher.js";
 
 export async function paymentRoutes(app: FastifyInstance) {
-  const env = process.env.BDIT_ENV ?? process.env.NODE_ENV ?? "development";
-  const issuerName = env === "production" ? "payjarvis" : `payjarvis-${env}`;
-  const defaultKid = `payjarvis-${env}-001`;
-
-  const issuer = new BditIssuer(
-    (process.env.PAYJARVIS_PRIVATE_KEY ?? "").replace(/\\n/g, "\n"),
-    process.env.PAYJARVIS_KEY_ID ?? defaultKid,
-    issuerName
-  );
+  // BditIssuer.fromEnv() picks the active signing alg per BDIT_SIGNING_ALG
+  // (default EdDSA when Ed25519 keys are configured, else RS256) and
+  // derives the issuer name from BDIT_ENV ?? NODE_ENV.
+  const issuer = BditIssuer.fromEnv();
 
   // Request payment — authenticated by bot API key
   app.post("/api/bots/:botId/request-payment", { preHandler: [requireBotAuth] }, async (request, reply) => {

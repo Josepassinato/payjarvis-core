@@ -92,15 +92,10 @@ async function expireApprovals() {
 }
 
 export async function approvalRoutes(app: FastifyInstance) {
-  const env = process.env.BDIT_ENV ?? process.env.NODE_ENV ?? "development";
-  const issuerName = env === "production" ? "payjarvis" : `payjarvis-${env}`;
-  const defaultKid = `payjarvis-${env}-001`;
-
-  const issuer = new BditIssuer(
-    (process.env.PAYJARVIS_PRIVATE_KEY ?? "").replace(/\\n/g, "\n"),
-    process.env.PAYJARVIS_KEY_ID ?? defaultKid,
-    issuerName
-  );
+  // BditIssuer.fromEnv() picks the active signing alg per BDIT_SIGNING_ALG
+  // (default EdDSA when Ed25519 keys are configured, else RS256) and
+  // derives the issuer name from BDIT_ENV ?? NODE_ENV.
+  const issuer = BditIssuer.fromEnv();
 
   // Start background expiration job — every 60 seconds
   const expirationInterval = setInterval(expireApprovals, 60_000);
