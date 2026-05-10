@@ -26,6 +26,7 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { healthRoutes } from "./routes/health.js";
 import { jwksRoutes } from "./routes/jwks.js";
+import { receiptRoutes } from "./routes/receipts.js";
 import { botRoutes } from "./routes/bots.js";
 import { policyRoutes } from "./routes/policies.js";
 import { paymentRoutes } from "./routes/payments.js";
@@ -215,6 +216,7 @@ app.addHook("onRequest", async (req, reply) => {
 // Register all routes
 await app.register(healthRoutes);
 await app.register(jwksRoutes);
+await app.register(receiptRoutes);
 await app.register(botRoutes);
 await app.register(policyRoutes);
 await app.register(paymentRoutes);

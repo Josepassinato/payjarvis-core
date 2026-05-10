@@ -13,3 +13,26 @@ export type {
   PublicKeyEntry,
   PrivateKeyEntry,
 } from "./keys.js";
+
+// CTEF outcome receipts — Concordia-stack-aligned attestations.
+export {
+  canonicalJson,
+  buildEnvelope,
+  signEnvelope,
+  verifyEnvelope,
+  buildPaymentOutcomeReceipt,
+} from "./ctef.js";
+export type {
+  CtefEnvelope,
+  UnsignedCtefEnvelope,
+  CtefReference,
+  CtefRefreshHint,
+  CtefValidityTemporal,
+  CtefProvider,
+  CtefSubject,
+  CtefSignature,
+  BuildEnvelopeParams,
+  PaymentOutcomePayload,
+  PaymentOutcomeReceiptParams,
+  VerifyEnvelopeResult,
+} from "./ctef.js";

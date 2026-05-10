@@ -422,18 +422,180 @@ Reputation Attestations live in the layer above Agreement and are
 consumed by Concordia (and other Agreement-layer protocols) when
 deciding whether to grant the mandate. Reputation does not cross down
 into Settlement — once a mandate exists, Settlement evaluates it on
-its own terms. Outcome receipts emitted by Settlement (see roadmap
-v1.2: CTEF-compatible receipts) flow back up to update Reputation
-Attestations, closing the loop.
+its own terms. Outcome receipts emitted by Settlement (CTEF-compatible
+receipts, §11) flow back up to update Reputation Attestations, closing
+the loop.
 
 ---
 
-## 11. Changelog
+## 11. CTEF outcome receipts
+
+After Settlement (whether the payment rail succeeded, was denied,
+expired, or got disputed), PayJarvis emits a **CTEF outcome receipt** —
+a cryptographically signed envelope that any consumer (Verascore,
+merchant, auditor) can verify offline. Receipts are the canonical
+artifact that flows from Settlement back up to the Trust layer.
+
+### 11.1. Format
+
+The envelope schema is byte-compatible with the Concordia reference
+implementation (`build_trust_evidence_envelope` in `envelope.py` +
+canonical JSON in `signing.py`). Plain JSON (not CBOR, not JSON-LD).
+Signature: **EdDSA / Ed25519 only** — RSA is rejected at sign time per
+the CTEF spec.
+
+```json
+{
+  "envelope_version": "1.0.0",
+  "envelope_id": "urn:uuid:550e8400-e29b-41d4-a716-446655440000",
+  "issued_at": "2026-05-10T05:48:55.000Z",
+  "expires_at": "2026-05-17T05:48:55.000Z",
+  "refresh_hint": {
+    "strategy": "event_driven",
+    "events": ["payment_settled", "payment_disputed", "mandate_consumed", "mandate_expired"],
+    "max_age_seconds": 604800
+  },
+  "validity_temporal": {
+    "mode": "sequence",
+    "sequence_key": "sess_xyz",
+    "baseline": null,
+    "aliasing_risk": null
+  },
+  "provider": {
+    "did": "did:web:api.payjarvis.com",
+    "category": "transactional",
+    "kid": "payjarvis-ed25519-001",
+    "name": "PayJarvis"
+  },
+  "subject": { "did": "did:payjarvis:bot:bot_abc123" },
+  "category": "transactional",
+  "visibility": "public",
+  "references": [
+    { "kind": "bdit_token",     "urn": "urn:payjarvis:bdit:550e8400-e29b-..." },
+    { "kind": "source_session", "urn": "urn:concordia:session:ses_xyz" },
+    { "kind": "approval",       "urn": "urn:payjarvis:approval:appr_abc" }
+  ],
+  "payload": {
+    "approval_id": "appr_abc",
+    "decision": "settled",
+    "amount": 49.99,
+    "currency": "USD",
+    "merchant_id": "amazon",
+    "category": "shopping",
+    "rail": "stripe",
+    "rail_reference": "pi_3OAB...",
+    "mandate_source": "concordia",
+    "concordia_session_urn": "urn:concordia:session:ses_xyz",
+    "decided_at": "2026-05-10T05:48:54.000Z"
+  },
+  "signature": {
+    "alg": "EdDSA",
+    "kid": "payjarvis-ed25519-001",
+    "value": "<base64url Ed25519 signature over canonical JSON>"
+  }
+}
+```
+
+> **Category note**: `"transactional"` is the Concordia-accepted value.
+> `"spending-authorization"` is the PayJarvis-specific category awaiting
+> spec acceptance; flip via `CTEF_CATEGORY=spending-authorization` once
+> the freeze lifts.
+
+### 11.2. Canonicalization
+
+Signing operates over a canonical JSON serialization:
+
+- Object keys sorted lexicographically (recursive)
+- No whitespace
+- Arrays preserve declaration order (sequence-significant)
+- UTF-8 raw output
+- `NaN`, `Infinity`, `-0` are rejected at canonicalize time
+
+This matches Concordia's `signing.py canonical_json()` and TypeScript
+`stableStringify` byte-for-byte. The reference Node implementation is
+`canonicalJson()` in `@payjarvis/bdit/ctef.ts`.
+
+### 11.3. Issuance endpoint
+
+```
+POST /api/bdit/receipts
+  Headers: X-Bot-Api-Key: <bot_api_key>
+  Body:
+    {
+      "outcome":      <PaymentOutcomePayload>,   // see §11.4
+      "session_id":   "<bdit session_id, used as sequence_key>",
+      "subject_did":  "<optional override; defaults to did:payjarvis:bot:<botId>>",
+      "category":     "<optional; defaults to env CTEF_CATEGORY ?? 'transactional'>",
+      "issued_at":    "<optional ISO date; binds receipt to actual decision time>",
+      "validity_seconds": <optional; default 604800>
+    }
+
+  Returns: 200 application/json
+    <Signed CTEF envelope>
+
+  Errors:
+    400 — missing required fields (outcome, session_id, outcome.approval_id)
+    401 — invalid or missing bot API key
+    503 — Ed25519 signing key not configured (operator must run
+          `npm run -w @payjarvis/bdit generate-keys` and add the
+          PAYJARVIS_*_ED25519 envs)
+```
+
+### 11.4. PaymentOutcomePayload
+
+| Field | Required | Description |
+|---|---|---|
+| `approval_id` | Yes | PayJarvis approval/transaction id |
+| `decision` | Yes | `"approved"` \| `"blocked"` \| `"pending_human"` \| `"settled"` \| `"expired"` \| `"disputed"` |
+| `amount` | Yes | Amount in `currency` units |
+| `currency` | Yes | ISO 4217 |
+| `merchant_id` | Yes | Merchant the bot transacted with |
+| `category` | Yes | Transaction category at decision time |
+| `mandate_source` | No | Mirror of BDIT mandate_source (`"concordia"` \| `"owner"` \| `"direct"`) |
+| `concordia_session_urn` | No | When `mandate_source="concordia"` |
+| `bdit_jti` | No | The BDIT jti this outcome attests to |
+| `rail` | No | Settlement rail (`"stripe"`, `"x402"`, `"celcoin"`, etc.) |
+| `rail_reference` | No | Rail-side identifier (Stripe payment_intent id, etc.) |
+| `decided_at` | No | ISO timestamp of the decision |
+| `reason` | No | Reason string for blocked/expired/disputed |
+
+### 11.5. Verification
+
+Consumers verify the receipt with:
+
+1. Strip `signature` from the envelope.
+2. Apply canonical JSON to the remainder.
+3. Resolve `signature.kid` to a public key via PayJarvis JWKS:
+   `GET /.well-known/jwks.json` → match `kid` → `{kty: "OKP", crv: "Ed25519", x: <base64url>}`
+4. Ed25519-verify the signature against the canonical bytes.
+
+The `@payjarvis/bdit` package exports `verifyEnvelope(env, publicKeyPem)`
+as a reference implementation.
+
+### 11.6. Composition with Verascore / Trust layer
+
+CTEF receipts are designed to be consumed verbatim by Trust-layer
+reputation systems (Verascore et al.). A reputation system that
+follows the convention:
+
+- accepts CTEF envelopes whose `category ∈ {"transactional", "spending-authorization"}`
+- resolves `provider.did` to a known issuer (PayJarvis, others)
+- validates the signature against the issuer's JWKS
+- aggregates `payload.decision == "settled"` events as positive evidence
+
+…will receive a verifiable transaction history per agent without
+trusting any central party beyond the issuer's JWKS. This is the
+structural completion of the loop sketched in §10.2.
+
+---
+
+## 12. Changelog
 
 | Version | Date | Changes |
 |---------|------|---------|
 | 1.0 | 2026-03-04 | Initial specification |
 | 1.1-draft | 2026-05-10 | Added §9 Architectural invariants (mandate grants authority, reputation informs only). Added §10 Concordia stack mapping (`mandate_source`, `concordia_session_urn`, `concordia_transcript_hash`, `concordia_terms_hash` claims). DecisionEngine refactored into `evaluateMandate()` + `applyReputationRouting()` (demote-only). |
+| 1.2-draft | 2026-05-10 | Added §11 CTEF outcome receipts (Concordia-compatible signed envelopes, EdDSA / Ed25519). New endpoint `POST /api/bdit/receipts`. Added §10.2 cross-reference and §11.6 Verascore consumption note. RS256 → Ed25519 dual-sign migration available via `BDIT_SIGNING_ALG=EdDSA`. |
 
 ---
 
