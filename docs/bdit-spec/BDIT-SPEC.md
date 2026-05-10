@@ -295,11 +295,145 @@ Interested? Contact: partners@payjarvis.com
 
 ---
 
-## 9. Changelog
+## 9. Architectural invariants
+
+These are properties that any BDIT issuer or verifier MUST preserve.
+They are non-negotiable design constraints — violations indicate either
+a bug or a deliberate breaking change that requires a major version
+bump and migration plan.
+
+### 9.1. Mandate grants authority, reputation informs only
+
+A BDIT carries two logically separate sets of claims:
+
+| Set | Authority | Examples |
+|-----|-----------|----------|
+| **Mandate** | Authoritative | `categories`, `max_amount`, `merchant_id`, `amount`, `category`, `session_id`, time windows, daily/weekly/monthly limits |
+| **Reputation** | Informational | `trust_score`, `kyc_level`, `agent_trust_score`, `owner_verified`, `transactions_count`, `total_spent` |
+
+**Authoritative rules:**
+
+1. The decision to APPROVE or BLOCK a transaction MUST derive solely
+   from mandate claims plus runtime context (spending totals, current
+   time, merchant data). Reputation MUST NOT be a denial criterion.
+2. Reputation MAY route an APPROVED decision to PENDING_HUMAN review,
+   but MAY NOT downgrade APPROVED to BLOCKED.
+3. Merchants MAY apply additional reputation-based filters via the
+   merchant SDK (`MerchantPolicy.minTrustScore`); this is documented as
+   merchant policy, not BDIT validity.
+
+**Property test (must hold for any conformant verifier):**
+
+> For any BDIT payload `P` with valid mandate claims and runtime
+> context yielding `evaluate(P) = APPROVED`, varying any subset of
+> reputation claims (`trust_score`, `kyc_level`, `agent_trust_score`,
+> `owner_verified`, `transactions_count`, `total_spent`) over their
+> entire valid range MUST NOT produce `evaluate(P') = BLOCKED`.
+
+The reference implementation in `apps/rules-engine` enforces this via
+a two-phase split: `evaluateMandate()` (authoritative) followed by
+`applyReputationRouting()` (demote-only). See
+`apps/rules-engine/test/decision-engine.invariant.test.ts`.
+
+### 9.2. Single-use enforcement
+
+Each `jti` MUST be rejected on second presentation. Stateless verifiers
+MAY rely on the merchant's own replay-cache; PayJarvis-hosted verify
+endpoints maintain a short-lived `jti` set in Redis.
+
+### 9.3. Mandate-merchant binding
+
+`merchant_id` MUST be checked against the resource being purchased.
+Tokens are not transferable between merchants.
+
+### 9.4. Mandate-amount binding
+
+`amount` MUST equal the transaction amount the merchant attempts to
+charge, within precision rounding.
+
+---
+
+## 10. Concordia stack mapping
+
+BDIT composes with the Concordia agreement protocol (spec v0.5.0).
+Concordia operates at the **Agreement** layer; BDIT operates at the
+**Settlement** layer:
+
+```
+Communication  A2A · HTTPS · JSON-RPC
+Trust          Reputation Attestations          ← informs Agreement; not authoritative for Settlement
+Agreement      Concordia                         ← negotiates terms; produces "intent mandate"
+Settlement     [ BDIT → ]  ACP · AP2 · x402 · Stripe · Lightning
+                  ↑
+                  authorization-of-execution: BDIT proves the agent
+                  is authorized to execute within the agreed terms
+                  before the payment rail fires.
+```
+
+Per Concordia spec §10.4: *"The Concordia agreement serves as the
+'intent mandate' in AP2's authorization flow. The agreed terms define
+the scope and limits of what the payment agent is authorized to do."*
+
+BDIT realizes this in concrete form: when issued from a Concordia
+session, the mandate claims are derived from the agreement terms, and
+the binding is preserved by these claims:
+
+| BDIT claim | Purpose |
+|---|---|
+| `mandate_source` | `"concordia"` when sourced from a Concordia agreement |
+| `concordia_session_urn` | `urn:concordia:session:<id>` — references the source session |
+| `concordia_transcript_hash` | `sha256:<hex>` — verifies session integrity (hash binding) |
+| `concordia_terms_hash` | Optional — hash of the derived terms for tamper detection |
+
+### 10.1. Concordia → BDIT issuance flow
+
+```
+1. Agent A ↔ Agent B negotiate via Concordia, reaching agreement T
+   with session_id = ses_xyz, transcript_hash = sha256:abc...
+
+2. Authorized party (or PayJarvis as integrated issuer) submits the
+   agreement reference to PayJarvis:
+
+       POST /bdit/from-agreement
+       {
+         "concordia_session_urn":     "urn:concordia:session:ses_xyz",
+         "concordia_transcript_hash": "sha256:abc...",
+         "bot_id":                    "bot_executor_42"
+       }
+
+3. PayJarvis verifies the Concordia session (signature, integrity),
+   derives the mandate claims from the agreed terms (max_amount,
+   categories, merchant_id, amount, category) and issues a BDIT
+   carrying mandate_source="concordia" plus the URN + hash.
+
+4. Bot presents the BDIT to the payment rail. The rail verifies the
+   JWS signature against PayJarvis's JWKS and consumes the mandate
+   claims to authorize execution.
+```
+
+The caller of `/bdit/from-agreement` cannot inflate mandate beyond
+what the agreement permits — mandate is **derived**, not free-form
+input. This is the structural enforcement of invariant 9.1 across the
+Agreement → Settlement boundary.
+
+### 10.2. Reputation Attestations (Trust layer)
+
+Reputation Attestations live in the layer above Agreement and are
+consumed by Concordia (and other Agreement-layer protocols) when
+deciding whether to grant the mandate. Reputation does not cross down
+into Settlement — once a mandate exists, Settlement evaluates it on
+its own terms. Outcome receipts emitted by Settlement (see roadmap
+v1.2: CTEF-compatible receipts) flow back up to update Reputation
+Attestations, closing the loop.
+
+---
+
+## 11. Changelog
 
 | Version | Date | Changes |
 |---------|------|---------|
 | 1.0 | 2026-03-04 | Initial specification |
+| 1.1-draft | 2026-05-10 | Added §9 Architectural invariants (mandate grants authority, reputation informs only). Added §10 Concordia stack mapping (`mandate_source`, `concordia_session_urn`, `concordia_transcript_hash`, `concordia_terms_hash` claims). DecisionEngine refactored into `evaluateMandate()` + `applyReputationRouting()` (demote-only). |
 
 ---
 

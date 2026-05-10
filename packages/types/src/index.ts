@@ -82,26 +82,155 @@ export interface AgentVerifyResult {
 
 // ─── BDIT Token Payload ───
 
+/**
+ * BDIT — Bot Digital Identity Token, payload (RFC 7519 JWT).
+ *
+ * ─── ARCHITECTURAL INVARIANT ────────────────────────────────────────────
+ *   "Mandate grants authority, reputation informs only."
+ *
+ *   The payload is composed of TWO logically separate sets of claims:
+ *
+ *     1. MandateClaims  — authoritative. Defines what the bot IS allowed
+ *        to do. The rules-engine consults ONLY these to decide
+ *        APPROVED / BLOCKED. They derive from an upstream Agreement
+ *        (Concordia session, or direct owner mandate).
+ *
+ *     2. ReputationClaims — informational. Trust scores, KYC level,
+ *        transaction history. Routing-only signal (e.g., low trust →
+ *        route to human review). The rules-engine MUST NOT use these
+ *        to BLOCK; merchant policy filters MAY apply additional
+ *        merchant-side gating but that is policy, not BDIT validity.
+ *
+ *   Justification: in the Concordia stack v0.5.0 this maps to layers —
+ *     Settlement (BDIT lives here) verifies mandate.
+ *     Trust (Reputation Attestations) is a layer above; it informs the
+ *       Agreement layer's decision to issue a mandate, but does NOT
+ *       cross into Settlement as authority.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ *
+ * The interface below preserves the historical flat shape for backwards
+ * compatibility. New code should extract the logical halves via
+ * `extractMandate()` / `extractReputation()` to enforce the separation
+ * at compile time.
+ */
 export interface BditPayload {
+  // ─── MandateClaims (authoritative) ───
   bot_id: string;
   owner_id: string;
-  trust_score: number;
-  kyc_level: number;
   categories: string[];
   max_amount: number;
   merchant_id: string;
   amount: number;
   category: string;
   session_id: string;
-  jti: string;
-  iat: number;
-  exp: number;
-  // Agent identity fields (new)
+  // Agreement source (where this mandate came from). When mandate_source
+  // is "concordia", concordia_session_urn + concordia_transcript_hash
+  // bind the BDIT to a Concordia agreement (§10.4 of Concordia spec).
+  mandate_source?: MandateSource;
+  concordia_session_urn?: string;       // urn:concordia:session:<id>
+  concordia_transcript_hash?: string;   // sha256:<hex>
+  concordia_terms_hash?: string;        // optional — hash of derived terms
+
+  // ─── ReputationClaims (informational, NEVER authoritative) ───
+  trust_score: number;
+  kyc_level: number;
   agent_id?: string;
   agent_trust_score?: number;    // 0-1000 scale
   owner_verified?: boolean;
   transactions_count?: number;
   total_spent?: number;
+
+  // ─── JWT envelope ───
+  jti: string;
+  iat: number;
+  exp: number;
+}
+
+/**
+ * Where this BDIT's mandate came from.
+ *
+ * - "concordia": derived from a Concordia session (Agreement layer).
+ *                Carries concordia_session_urn + concordia_transcript_hash.
+ * - "owner":     direct owner-defined policy (no upstream Agreement).
+ * - "direct":    legacy / unspecified (pre-invariant tokens).
+ */
+export type MandateSource = "concordia" | "owner" | "direct";
+
+/**
+ * MandateClaims — the authoritative subset of BDIT.
+ *
+ * The rules-engine takes ONLY MandateClaims (plus runtime context like
+ * spending totals and policy) to produce an APPROVED / BLOCKED decision.
+ * Type signature alone prevents accidental authority-by-reputation.
+ */
+export interface MandateClaims {
+  bot_id: string;
+  owner_id: string;
+  categories: string[];
+  max_amount: number;
+  merchant_id: string;
+  amount: number;
+  category: string;
+  session_id: string;
+  mandate_source?: MandateSource;
+  concordia_session_urn?: string;
+  concordia_transcript_hash?: string;
+  concordia_terms_hash?: string;
+}
+
+/**
+ * ReputationClaims — informational-only subset of BDIT.
+ *
+ * Consumers may use these for ROUTING (e.g., low trust → human review)
+ * or DISPLAY but MUST NOT use them to deny an otherwise-valid mandate.
+ */
+export interface ReputationClaims {
+  trust_score: number;
+  kyc_level: number;
+  agent_id?: string;
+  agent_trust_score?: number;
+  owner_verified?: boolean;
+  transactions_count?: number;
+  total_spent?: number;
+}
+
+/**
+ * Extract the mandate (authoritative) subset from a BDIT payload.
+ * Authorization code paths should accept MandateClaims (not BditPayload)
+ * so the type system prevents reading reputation fields by mistake.
+ */
+export function extractMandate(p: BditPayload): MandateClaims {
+  return {
+    bot_id: p.bot_id,
+    owner_id: p.owner_id,
+    categories: p.categories,
+    max_amount: p.max_amount,
+    merchant_id: p.merchant_id,
+    amount: p.amount,
+    category: p.category,
+    session_id: p.session_id,
+    mandate_source: p.mandate_source,
+    concordia_session_urn: p.concordia_session_urn,
+    concordia_transcript_hash: p.concordia_transcript_hash,
+    concordia_terms_hash: p.concordia_terms_hash,
+  };
+}
+
+/**
+ * Extract the reputation (informational) subset from a BDIT payload.
+ * Use only for routing, display, or analytics — never for authorization.
+ */
+export function extractReputation(p: BditPayload): ReputationClaims {
+  return {
+    trust_score: p.trust_score,
+    kyc_level: p.kyc_level,
+    agent_id: p.agent_id,
+    agent_trust_score: p.agent_trust_score,
+    owner_verified: p.owner_verified,
+    transactions_count: p.transactions_count,
+    total_spent: p.total_spent,
+  };
 }
 
 export interface BditVerifyResult {
