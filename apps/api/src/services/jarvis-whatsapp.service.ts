@@ -723,6 +723,14 @@ If in doubt, ALWAYS use [FORMAT:TEXT].
 OTHER CAPABILITIES (dont advertise — let user discover)
 Besides shopping, you can also help with: travel, restaurants, events, home services, documents, health, finance, transport, and more. Use your tools and knowledge. When user asks something outside shopping, help naturally but bring it back to saving money when relevant. NEVER say "I cant do that" — always help using your training knowledge.
 
+ANTI-HALLUCINATION — NEVER FABRICATE TOOL RESULTS (CRITICAL)
+ABSOLUTE RULE: NEVER claim a tool failed or succeeded without actually invoking it.
+- NEVER say things like "Not Found", "número não encontrado", "ligação falhou", "sistema retornou erro", "couldn't reach", "service unavailable", "indisponível no momento" as if reporting a tool result — UNLESS that exact text came from a real tool_result you just received in this turn.
+- If the user asks you to call/search/lookup and you did NOT invoke the tool (because of confirmation pending, missing data, or any reason), say HONESTLY what you need: "Confirma se posso ligar?" / "Qual o nome completo?" / "Em que idioma?" — NEVER fabricate a failure.
+- For phone calls specifically: the make_phone_call tool MUST be invoked. The user only knows "Not Found" or "ligação falhou" when YOU invoked the tool AND got that error in tool_result. Otherwise you're lying to the user.
+- If the user sends a short message that LOOKS like a phone number (e.g. "214 235-7805", "+55 47 99999-9999") AND the recent conversation context contained a call request → that's the user providing the number. Invoke make_phone_call immediately (or ask the ONE remaining missing piece like language) — do NOT respond with a fabricated error.
+- If you previously failed at something and the user is retrying, ACTUALLY retry by invoking the tool — don't quote the prior failure as if it just happened.
+
 FALLBACK RULE — NEVER PROMISE WITHOUT DELIVERING
 ABSOLUTE RULE: If you said you would search/check/find something, you MUST deliver a result.
 
@@ -1287,6 +1295,10 @@ const CORE_TOOL_NAMES = new Set([
   "web_search", "browse", "search_products", "compare_prices", "find_coupons",
   "check_price_history", "manage_price_alerts", "save_user_fact", "manage_reminders",
   "manage_vault", "manage_contacts", "share_jarvis",
+  // Voice tools — keep always available so confirmation/retry turns
+  // ("Confirmo", "Tente novamente") don't lose tool context after a
+  // first turn that did contain a trigger word like "Liga pra X".
+  "make_phone_call", "call_user", "verify_caller_id",
 ]);
 
 const CONDITIONAL_TOOL_TRIGGERS: Record<string, RegExp> = {
@@ -1327,7 +1339,10 @@ function getToolsForContext(userMessage: string): any[] {
   });
 
   const selected = [...coreDeclarations, ...conditionalDeclarations];
-  console.log(`[TOOLS] Loaded ${selected.length}/${allDeclarations.length} tools for context`);
+  const voiceToolsLoaded = selected
+    .map((t: any) => t.name)
+    .filter((n: string) => n === 'make_phone_call' || n === 'call_user' || n === 'verify_caller_id');
+  console.log(`[TOOLS] Loaded ${selected.length}/${allDeclarations.length} tools for context | voice: [${voiceToolsLoaded.join(',') || 'NONE'}] | msg-preview: "${userMessage.slice(0, 80).replace(/\n/g, ' ')}"`);
   return [{ functionDeclarations: selected }];
 }
 
@@ -2003,9 +2018,10 @@ async function _handleToolInner(userId: string, name: string, args: Record<strin
           swapRequests: (args.swapRequests as string) ? JSON.parse(args.swapRequests as string) : undefined,
         };
         const VOICE_SECRET = process.env.INTERNAL_SECRET || "";
+      const VOICE_API_KEY = process.env.SNIFFER_VOICE_API_KEY || process.env.PAYJARVIS_API_KEY || "";
         const res = await fetch(`${PAYJARVIS_URL}/api/shopping/lists/${args.listId}/approve`, {
           method: "POST",
-          headers: { "Content-Type": "application/json", "x-internal-secret": VOICE_SECRET },
+          headers: { "Content-Type": "application/json", "x-internal-secret": VOICE_SECRET, "x-bot-api-key": VOICE_API_KEY },
           body: JSON.stringify(body),
           signal: AbortSignal.timeout(30000),
         });
@@ -4670,6 +4686,397 @@ async function getUserLocation(userId: string): Promise<{ latitude: number; long
 
 // ─── Image Message Entry Point ─────────────────────────
 
+/**
+ * Detecta intent natural de "fazer reel/vídeo/divulgação" e chama o Sniffer Reels API.
+ * Retorna URL do MP4 ou null se não for esse intent.
+ *
+ * Aciona quando:
+ *   - Tem foto + caption menciona "reel/video/divulgação/promoção/anúncio/post"
+ *   - OU caption tem preço (R$ X de R$ Y) — sinal forte de intent comercial
+ */
+async function tryGenerateReel(opts: {
+  caption: string;
+  imageBase64: string;
+  mimeType: string;
+  from: string;
+}): Promise<string | null> {
+  const { caption, imageBase64, mimeType, from } = opts;
+  if (!caption || caption.length < 5) return null;
+  // Normaliza: lowercase + remove acentos pra match resiliente
+  const norm = caption
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "");
+
+  // Substring match (mais permissivo — captura typos e variações morfológicas)
+  const REEL_KEYWORDS = [
+    "reel", "rell", "reels", "rells", "real", // reel + typos comuns
+    "video", "vídeo", "vid",
+    "story", "stories", "storie", "stories",
+    "divulga", "divulgu", "divul", // divulgação, divulgar, divulgue
+    "promo", "promov",
+    "anuncio", "anunci",
+    "posta", "postar", "postag", "post ",
+    "propaganda",
+    "criativo", "criat",
+    "instagram", "ig ", "tiktok", "facebook",
+    "marketing",
+    "campanha",
+    "criar conte", "fazer conte",
+    "fazer um", "faz um", "monta um", "gera um", "gera o",
+    "fazer arte",
+    "feed",
+  ];
+  const hasReelIntent = REEL_KEYWORDS.some((kw) => norm.includes(kw));
+  const hasPriceSignal = /r\$\s*[\d.,]+\s*(de|por|em vez)/i.test(norm) || /\d+\s*%\s*off/i.test(norm);
+
+  console.log(`[Reel-Maker] intent check from=${from} caption="${caption.slice(0, 80)}" intent=${hasReelIntent} price=${hasPriceSignal}`);
+  if (!hasReelIntent && !hasPriceSignal) return null;
+  console.log(`[Reel-Maker] ✓ MATCHED — iniciando geração`);
+
+  try {
+    // Hospeda imagem temporariamente (Reels API precisa de URL pública)
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
+    const crypto = await import("node:crypto");
+    const ext = mimeType.includes("png") ? "png" : mimeType.includes("webp") ? "webp" : "jpg";
+    const fileName = `reel-input-${crypto.randomBytes(8).toString("hex")}.${ext}`;
+    const dir = "/var/cache/sniffer-reels-input";
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, fileName), Buffer.from(imageBase64, "base64"));
+    // Sniffer-api serve via /uploads ou rota dedicada — usamos URL local interna
+    // Como /var/cache/sniffer-reels-input não é servido por nginx, copio pra /root/projetos/sniffer/apps/landing/public/reel-inputs/
+    const publicDir = "/root/projetos/sniffer/apps/landing/public/reel-inputs";
+    await fs.mkdir(publicDir, { recursive: true });
+    await fs.copyFile(path.join(dir, fileName), path.join(publicDir, fileName));
+    const imageUrl = `https://sniffershop.com/reel-inputs/${fileName}`;
+
+    // 🎯 Gemini Vision MULTIMODAL: analisa a foto + caption e gera roteiro completo
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) return null;
+
+    const promptVision = `Você é diretor criativo de Reels comerciais brasileiros (Instagram/TikTok), com background em ANGÚSTIA/CONSUMER INSIGHT. Analise a foto + pedido e gere briefing de campanha 15s focado na DOR REAL do consumidor, não no produto.
+
+PRINCÍPIOS:
+- NUNCA descreva o produto pelas funções ("limpa", "perfuma"). Descreva pela TRANSFORMAÇÃO EMOCIONAL ("ele saber que tá bem antes de chegar perto").
+- Identifique a INSEGURANÇA REAL do público-alvo. Pra produtos íntimos masculinos (higiene íntima, perfume corporal, performance, suplementação): a dor é CONFIANÇA NO ENCONTRO, presença sexual, naturalidade ao se aproximar de alguém que importa. Aborde de forma SUBLIMINAR e elegante — nada explícito, nada grotesco.
+- Tom permitido: comédia inteligente leve (pra desarmar tabu), confidência adulta, sussurro confiante. Estilo: Heineken brasileira, Trojan, Old Spice ironia, Nubank irreverente.
+- CRINGE-FREE: nada de "cheirinho gostoso", "bem perfumado", "se sentir bem". Use linguagem adulta sem ser vulgar.
+- Pra produtos NÃO-íntimos (eletrônicos, food, fashion): mantém propaganda BR moderna padrão (Boticário/Nubank/Natura).
+
+ANÁLISE OBRIGATÓRIA:
+1. Identifique produto (categoria, função, público-alvo, contexto de uso real)
+2. Defina a DOR/INSIGHT do público (ex: produto íntimo masc → "saber que tá no jogo antes do beijo, sem dar 2 passos pra trás")
+3. Cenário comercial alinhado à dor (banheiro mármore antes do encontro, espelho focado, mão pegando produto na pia)
+4. Roteiro 12-15s PT-BR coloquial: gancho que CHAMA O DESCONFORTO, ressignificação via produto, CTA confiante. Pode usar comédia leve pra desarmar.
+
+Pedido do usuário: "${caption.slice(0, 600)}"
+
+EXEMPLOS DE TOM (pra produto íntimo masc — NÃO copiar literal, inspirar-se):
+- "Existe um momento que decide tudo. E não é a roupa que você escolheu. É o que ela não vai sentir, mas vai notar. [Produto] — porque confiança começa antes da porta abrir."
+- "A pior parte do encontro? Aquele 1% de dúvida na hora do se aproximar. [Produto] cuida desse 1% — você cuida dos outros 99."
+- "Tem dois tipos de homem: o que se preocupa com o que ela vai pensar, e o que já resolveu. Sabe qual é a diferença? [Produto]. Sem drama."
+
+Responda APENAS JSON válido (sem markdown, sem comentários):
+{
+  "productName": "string curto (max 60 chars)",
+  "productCategory": "string (ex: cosmetic, electronic, fashion, food, home, beauty, hygiene, accessory)",
+  "productPurpose": "string (1 frase do que faz)",
+  "scene": "string (descrição cenário ideal pra background)",
+  "narrativeScript": "string (roteiro de 12-15s em PT-BR, fluido pra narração — sem [pausa] etc, só o texto natural)",
+  "hookText": "string curto (max 30 chars, frase de impacto pro topo do reel)",
+  "benefitText": "string (max 60 chars, benefício chave)",
+  "ctaText": "string (max 25 chars, ex: 'Quero o meu agora')",
+  "ctaUrl": "string (sniffershop.com se não informado)",
+  "brandColor": "hex (escolha uma cor que combine com o produto e gere conversão)",
+  "originalPrice": "number ou null (em reais)",
+  "salePrice": "number ou null (em reais)",
+  "discountLabel": "string opcional ex '30% OFF'",
+  "currency": "BRL"
+}`;
+
+    const visionResp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{
+            role: "user",
+            parts: [
+              { text: promptVision },
+              { inline_data: { mime_type: mimeType, data: imageBase64 } },
+            ],
+          }],
+          generationConfig: {
+            temperature: 0.55,
+            responseMimeType: "application/json",
+            thinkingConfig: { thinkingBudget: 0 },
+          },
+        }),
+      }
+    );
+    if (!visionResp.ok) {
+      console.error(`[Reel-Maker] Gemini Vision falhou: ${visionResp.status}`);
+      return null;
+    }
+    const visionData: any = await visionResp.json();
+    const jsonText = visionData?.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+    let brief: any;
+    try { brief = JSON.parse(jsonText); } catch (e) {
+      console.error("[Reel-Maker] JSON parse falhou:", jsonText.slice(0, 200));
+      return null;
+    }
+    console.log(`[Reel-Maker] Brief: ${brief.productName} | ${brief.productCategory} | script="${(brief.narrativeScript || '').slice(0, 80)}..."`);
+
+    // 🎙️ ElevenLabs TTS — gera narração
+    let voiceoverPublicUrl: string | undefined;
+    let voiceoverDurationFrames: number | undefined;
+    if (process.env.ELEVENLABS_API_KEY && brief.narrativeScript) {
+      try {
+        const voiceId = process.env.REELS_VOICE_ID || "JBFqnCBsd6RMkjVDRZzb"; // George — fluente PT-BR
+        const ttsResp = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "xi-api-key": process.env.ELEVENLABS_API_KEY!,
+          },
+          body: JSON.stringify({
+            text: String(brief.narrativeScript).slice(0, 1000),
+            model_id: "eleven_multilingual_v2",
+            voice_settings: { stability: 0.45, similarity_boost: 0.7, style: 0.4, use_speaker_boost: true },
+          }),
+          signal: AbortSignal.timeout(60000),
+        });
+        if (ttsResp.ok) {
+          const audioBuf = Buffer.from(await ttsResp.arrayBuffer());
+          const audioName = `reel-audio-${crypto.randomBytes(8).toString("hex")}.mp3`;
+          const audioPubDir = "/root/projetos/sniffer/apps/landing/public/reel-audio";
+          await fs.mkdir(audioPubDir, { recursive: true });
+          await fs.writeFile(path.join(audioPubDir, audioName), audioBuf);
+          voiceoverPublicUrl = `https://sniffershop.com/reel-audio/${audioName}`;
+
+          // Estima duração: ~150 caracteres por minuto de fala (PT-BR), 30fps
+          // Mais preciso: usa ffprobe se disponível, senão estima por palavras
+          try {
+            const { execSync } = await import("node:child_process");
+            const out = execSync(`ffprobe -v error -show_entries format=duration -of csv=p=0 ${JSON.stringify(path.join(audioPubDir, audioName))}`, { encoding: "utf8" });
+            const seconds = parseFloat(out.trim());
+            if (isFinite(seconds) && seconds > 0) {
+              voiceoverDurationFrames = Math.ceil(seconds * 30) + 30; // +1s padding
+              console.log(`[Reel-Maker] audio: ${seconds.toFixed(2)}s → ${voiceoverDurationFrames} frames`);
+            }
+          } catch {
+            // Fallback: estima por palavras (~3 palavras/seg)
+            const words = String(brief.narrativeScript).split(/\s+/).length;
+            const seconds = Math.max(8, Math.min(25, words / 3));
+            voiceoverDurationFrames = Math.ceil(seconds * 30) + 30;
+          }
+        } else {
+          console.error(`[Reel-Maker] ElevenLabs falhou: ${ttsResp.status}`);
+        }
+      } catch (ttsErr) {
+        console.error("[Reel-Maker] TTS error:", (ttsErr as Error).message);
+      }
+    }
+
+    const props: any = {
+      productName: brief.productName || "Produto",
+      productImage: imageUrl,
+      originalPrice: Number(brief.originalPrice) || Number(brief.salePrice) * 1.3 || 999,
+      salePrice: Number(brief.salePrice) || Number(brief.originalPrice) || 799,
+      currency: brief.currency === "USD" ? "USD" : "BRL",
+      discountLabel: brief.discountLabel || undefined,
+      ctaText: brief.ctaText || "Garantir oferta",
+      ctaUrl: brief.ctaUrl || "https://sniffershop.com",
+      brandColor: /^#[0-9a-fA-F]{6}$/.test(brief.brandColor || "") ? brief.brandColor : "#00C9A7",
+    };
+    if (voiceoverPublicUrl) props.voiceoverUrl = voiceoverPublicUrl;
+    if (voiceoverDurationFrames) props.voiceoverDurationFrames = voiceoverDurationFrames;
+
+    // Chama Sniffer Reels API
+    const renderResp = await fetch("https://sniffershop.com/api/reels/render", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ format: "reel", props }),
+      signal: AbortSignal.timeout(180000),
+    });
+    if (!renderResp.ok) {
+      console.error(`[Reel-Maker] Render falhou: ${renderResp.status}`);
+      return null;
+    }
+    const renderData: any = await renderResp.json();
+    return renderData.url || null;
+  } catch (err) {
+    console.error("[Reel-Maker] failed:", (err as Error).message);
+    return null;
+  }
+}
+
+// ─── Cinematic Video Pipeline (kie.ai Runway, callback-based) ─────────────────
+// Disparada APENAS quando o usuário pede explicitamente um vídeo cinematográfico
+// (não no fluxo padrão de foto-reel). Submete pra Runway via kie.ai com
+// callBackUrl pra POST /webhook/runway-callback que mixa áudio+vídeo e envia.
+async function tryGenerateCinematicVideo(opts: {
+  caption: string;
+  imageBase64: string;
+  mimeType: string;
+  from: string;
+}): Promise<{ taskId: string } | null> {
+  const { caption, imageBase64, mimeType, from } = opts;
+  const KIE_KEY = process.env.KIE_API_KEY;
+  const GEMINI_KEY = process.env.GEMINI_API_KEY;
+  const ELEVEN_KEY = process.env.ELEVENLABS_API_KEY;
+  if (!KIE_KEY || !GEMINI_KEY) {
+    console.error("[Cine-Video] KIE_API_KEY ou GEMINI_API_KEY ausente");
+    return null;
+  }
+
+  try {
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
+    const crypto = await import("node:crypto");
+
+    // 1) Hospeda imagem
+    const ext = mimeType.includes("png") ? "png" : mimeType.includes("webp") ? "webp" : "jpg";
+    const inputName = `cine-input-${crypto.randomBytes(8).toString("hex")}.${ext}`;
+    const publicDir = "/root/projetos/sniffer/apps/landing/public/reel-inputs";
+    await fs.mkdir(publicDir, { recursive: true });
+    await fs.writeFile(path.join(publicDir, inputName), Buffer.from(imageBase64, "base64"));
+    const imageUrl = `https://sniffershop.com/reel-inputs/${inputName}`;
+
+    // 2) Gemini Vision — gera cinematic prompt + roteiro narrativo PT-BR
+    const promptVision = `Você é diretor de comercial cinematográfico brasileiro (Heineken, Boticário, Trojan, Old Spice). Analise foto + pedido e gere briefing de VÍDEO cinematográfico de 8 segundos.
+
+PRINCÍPIOS:
+- O vídeo é IMAGE-TO-VIDEO (Runway Gen-3): a foto é o frame de partida, geramos movimento
+- Cena curta (8s), comercial premium, mood iluminado, com PESSOA REAL em ação (não só produto estático)
+- Pra produtos íntimos masculinos: viés CONFIANÇA/ENCONTRO/SUTILEZA ADULTA — homem elegante, banheiro mármore, espelho, mão pegando o produto antes de sair pra um encontro. Nada explícito, nada grotesco.
+- Pra outros produtos: use o mood comercial brasileiro premium adequado
+- O prompt do Runway deve ser EM INGLÊS, descrevendo CÂMERA + ATOR + AMBIENTE + AÇÃO + ILUMINAÇÃO
+
+Pedido do usuário: "${caption.slice(0, 600)}"
+
+Responda APENAS JSON válido:
+{
+  "productName": "string max 60",
+  "runwayPrompt": "string em INGLÊS, prompt detalhado pra Runway: 'Cinematic shot of [actor] [action] in [environment], [lighting], [camera movement], commercial-grade, 4k'",
+  "narrativeScript": "string PT-BR, 6-8 segundos de narração natural, fluida pra TTS",
+  "ctaText": "string max 25"
+}`;
+
+    const visionResp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{
+            role: "user",
+            parts: [
+              { text: promptVision },
+              { inline_data: { mime_type: mimeType, data: imageBase64 } },
+            ],
+          }],
+          generationConfig: { temperature: 0.6, responseMimeType: "application/json", thinkingConfig: { thinkingBudget: 0 } },
+        }),
+      }
+    );
+    if (!visionResp.ok) {
+      console.error(`[Cine-Video] Gemini falhou: ${visionResp.status}`);
+      return null;
+    }
+    const visionData: any = await visionResp.json();
+    const briefText = visionData?.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+    let brief: any;
+    try { brief = JSON.parse(briefText); } catch {
+      console.error("[Cine-Video] JSON parse falhou:", briefText.slice(0, 200));
+      return null;
+    }
+    console.log(`[Cine-Video] Brief: ${brief.productName} | runwayPrompt="${(brief.runwayPrompt || "").slice(0, 80)}..."`);
+
+    // 3) ElevenLabs TTS UPFRONT (paralelo com geração de vídeo)
+    let voiceoverUrl: string | undefined;
+    if (ELEVEN_KEY && brief.narrativeScript) {
+      try {
+        const voiceId = process.env.REELS_VOICE_ID || "JBFqnCBsd6RMkjVDRZzb";
+        const ttsResp = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "xi-api-key": ELEVEN_KEY },
+          body: JSON.stringify({
+            text: String(brief.narrativeScript).slice(0, 1000),
+            model_id: "eleven_multilingual_v2",
+            voice_settings: { stability: 0.45, similarity_boost: 0.7, style: 0.45, use_speaker_boost: true },
+          }),
+          signal: AbortSignal.timeout(60000),
+        });
+        if (ttsResp.ok) {
+          const audioBuf = Buffer.from(await ttsResp.arrayBuffer());
+          const audioName = `cine-audio-${crypto.randomBytes(8).toString("hex")}.mp3`;
+          const audioPubDir = "/root/projetos/sniffer/apps/landing/public/reel-audio";
+          await fs.mkdir(audioPubDir, { recursive: true });
+          await fs.writeFile(path.join(audioPubDir, audioName), audioBuf);
+          voiceoverUrl = `https://sniffershop.com/reel-audio/${audioName}`;
+        }
+      } catch (ttsErr) {
+        console.error("[Cine-Video] TTS error:", (ttsErr as Error).message);
+      }
+    }
+
+    // 4) Submete pra Runway via kie.ai com callback
+    const callbackUrl = (process.env.PAYJARVIS_PUBLIC_URL || "https://www.payjarvis.com") + "/webhook/runway-callback";
+    const runwayBody = {
+      prompt: brief.runwayPrompt || "Cinematic commercial shot, premium lighting, 4k",
+      imageUrls: [imageUrl],
+      duration: 8,
+      quality: "720p",
+      aspectRatio: "9:16",
+      callBackUrl: callbackUrl,
+    };
+    const runwayResp = await fetch("https://api.kie.ai/api/v1/runway/generate", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${KIE_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(runwayBody),
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!runwayResp.ok) {
+      console.error(`[Cine-Video] Runway submit falhou: ${runwayResp.status} ${await runwayResp.text().catch(() => "")}`);
+      return null;
+    }
+    const runwayData: any = await runwayResp.json();
+    const taskId = runwayData?.data?.taskId || runwayData?.taskId;
+    if (!taskId) {
+      console.error("[Cine-Video] Runway não retornou taskId:", JSON.stringify(runwayData).slice(0, 200));
+      return null;
+    }
+
+    // 5) Salva estado pra callback recuperar
+    const stateDir = "/var/cache/sniffer-reels/runway-tasks";
+    await fs.mkdir(stateDir, { recursive: true });
+    await fs.writeFile(
+      path.join(stateDir, `${taskId}.json`),
+      JSON.stringify({
+        taskId,
+        from,
+        productName: brief.productName,
+        narrativeScript: brief.narrativeScript,
+        ctaText: brief.ctaText,
+        voiceoverUrl,
+        imageUrl,
+        createdAt: new Date().toISOString(),
+      }, null, 2)
+    );
+    console.log(`[Cine-Video] ✓ Submitted taskId=${taskId} for ${from}`);
+    return { taskId };
+  } catch (err) {
+    console.error("[Cine-Video] failed:", (err as Error).message);
+    return null;
+  }
+}
+
 export async function processWhatsAppImageMessage(
   from: string,
   imageBase64: string,
@@ -4678,6 +5085,100 @@ export async function processWhatsAppImageMessage(
 ): Promise<string> {
   const userId = from;
   console.log(`[WhatsApp Image] ${userId}: caption="${(caption || "").substring(0, 80)}" imageSize=${imageBase64.length}`);
+
+  // INTENT EXPLÍCITO: Cinematic Video (kie.ai Runway) — só dispara se usuário pediu VÍDEO REAL
+  if (process.env.REELS_ENABLED !== "false" && process.env.KIE_API_KEY) {
+    const normCine = (caption || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "");
+    // Frases específicas que sinalizam pedido de vídeo cinematográfico (não foto-reel)
+    const CINE_KW = [
+      "video cinematogr", "cinematogr", "cinematic",
+      "cena real", "cenario real", "ambiente real", "ambientacao real",
+      "video real", "filme real", "filmagem", "live action",
+      "homem elegante", "mulher elegante", "ator", "atriz", "modelo real",
+      "pessoa real", "pessoa segurando", "alguem segurando",
+      "comercial de tv", "propaganda de tv",
+      "runway", "veo3", "veo 3", "kling", "seedance",
+      "gerar video", "criar video", "faz video", "fazer video",
+    ];
+    const cineMatched = CINE_KW.some((kw) => normCine.includes(kw));
+    if (cineMatched) {
+      console.log(`[Cine-Video] ✓ Intent EXPLÍCITO detectado — disparando Runway`);
+      setImmediate(async () => {
+        try {
+          const result = await tryGenerateCinematicVideo({ caption, imageBase64, mimeType, from });
+          const { sendWhatsAppMessage } = await import("./twilio-whatsapp.service.js");
+          if (!result) {
+            await sendWhatsAppMessage(from, "⚠ Não consegui iniciar o vídeo cinematográfico agora. Tenta de novo?");
+          }
+          // Sucesso: callback /webhook/runway-callback envia o vídeo final
+        } catch (err) {
+          console.error(`[Cine-Video] BG error for ${from}:`, (err as Error).message);
+          try {
+            const { sendWhatsAppMessage } = await import("./twilio-whatsapp.service.js");
+            await sendWhatsAppMessage(from, `⚠ Erro gerando vídeo: ${(err as Error).message.slice(0, 100)}`);
+          } catch {}
+        }
+      });
+      return "🎥 Recebi! Gerando vídeo cinematográfico (Runway via kie.ai) — leva ~3-5 min. Mando aqui assim que ficar pronto.";
+    }
+  }
+
+  // INTENT NATURAL: Reel-Maker — pre-check sem render (rápido, <1s)
+  if (process.env.REELS_ENABLED !== "false") {
+    const norm = (caption || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "");
+    const REEL_KW = [
+      "reel", "rell", "reels", "rells", "real",
+      "video", "vid",
+      "story", "stories", "storie",
+      "divulga", "divulgu", "divul",
+      "promo", "promov",
+      "anuncio", "anunci",
+      "posta", "postar", "postag", "post ",
+      "propaganda",
+      "criativo", "criat",
+      "instagram", "ig ", "tiktok", "facebook",
+      "marketing", "campanha",
+      "criar conte", "fazer conte", "fazer um", "faz um", "monta um", "gera um", "gera o",
+      "fazer arte", "feed",
+    ];
+    const matched = REEL_KW.some((kw) => norm.includes(kw))
+      || /r\$\s*[\d.,]+\s*(de|por|em vez)/i.test(norm)
+      || /\d+\s*%\s*off/i.test(norm);
+    if (matched) {
+      console.log(`[Reel-Maker] ✓ Intent detected — disparando render assíncrono`);
+      // Render em background — Twilio webhook tem timeout ~15s, render demora ~2min
+      setImmediate(async () => {
+        try {
+          const reelUrl = await tryGenerateReel({ caption, imageBase64, mimeType, from });
+          const { sendWhatsAppMessage } = await import("./twilio-whatsapp.service.js");
+          if (reelUrl) {
+            console.log(`[Reel-Maker] BG done for ${from}: ${reelUrl}`);
+            await sendWhatsAppMessage(
+              from,
+              `🎬 Reel pronto!\n\n${reelUrl}\n\nBaixa o MP4 e posta no Instagram/TikTok. Se quiser ajustar (cor, preço, CTA), me manda outra mensagem.`
+            );
+          } else {
+            console.error(`[Reel-Maker] BG render returned null for ${from}`);
+            await sendWhatsAppMessage(from, "⚠ Não consegui gerar o reel agora. Pode tentar de novo daqui a pouco?");
+          }
+        } catch (err) {
+          console.error(`[Reel-Maker] BG error for ${from}:`, (err as Error).message);
+          try {
+            const { sendWhatsAppMessage } = await import("./twilio-whatsapp.service.js");
+            await sendWhatsAppMessage(from, `⚠ Erro gerando reel: ${(err as Error).message.slice(0, 100)}`);
+          } catch {}
+        }
+      });
+      // Resposta imediata p/ Twilio (sem timeout)
+      return "🎬 Recebi! Gerando seu reel agora — em ~2 minutos mando aqui o vídeo. ✨";
+    }
+  }
 
   // Resolve user
   let resolvedUserId: string | null = null;
